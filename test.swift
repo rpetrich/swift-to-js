@@ -20,6 +20,13 @@ public func negate(a: Int) -> Int {
     return -a
 }
 
+public func factorial(number: Int) -> (Int) {
+    if (number <= 1) {
+        return 1
+    }
+    return number * factorial(number - 1)
+}
+
 public func hello_world() -> String {
     return "Hello World!"
 }
