@@ -112,13 +112,20 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						if (!structType) {
 							throw "No type for " + structName;
 						}
-						declaration += "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg)).join(", ") + " }";
+						if (instruction.arguments.length == 1 && structType[0] == "_value") {
+							declaration += mangleLocal(instruction.arguments[0]);
+						} else {
+							declaration += "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg)).join(", ") + " }";
+						}
 						break;
 					case "tuple":
 						declaration += "[ " + instruction.arguments.map(mangleLocal).join(", ") + " ]";
 						break;
 					case "struct_extract":
-						declaration += mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldName]);
+						declaration += mangleLocal(instruction.sourceLocalName);
+						if (instruction.fieldName != "_value") {
+							declaration += JSON.stringify([instruction.fieldName]);
+						}
 						break;
 					case "tuple_extract":
 						declaration += mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldIndex | 0]);
@@ -152,7 +159,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						declaration += box(mangleLocal(instruction.sourceLocalName), 0);
 						break;
 					case "struct_element_addr":
-						declaration += box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
+						if (instruction.fieldName == "_value") {
+							declaration += box("[" + mangleLocal(instruction.sourceLocalName) + "]", 0);
+						} else {
+							declaration += box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
+						}
 						break;
 					case "global_addr":
 						declaration += box(instruction.globalName, 0);
