@@ -139,7 +139,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						declaration += mangleLocal(instruction.sourceLocalName) + "(" + instruction.arguments.map(mangleLocal).join(", ") + ")";
 						break;
 					case "alloc_stack":
-						declaration += box("[]", 0);
+						if ("sourceLocalName" in instruction) {
+							declaration += box("[" + mangleLocal(instruction.sourceLocalName) + "]", 0);
+						} else {
+							declaration += box("[]", 0);
+						}
 						break;
 					case "alloc_box":
 						declaration += "[]";

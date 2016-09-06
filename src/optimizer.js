@@ -13,6 +13,27 @@ function findBasicBlock(blocks, descriptor) {
 	throw "Neither a reference nor an inline block!";
 }
 
+function fuseStackAllocationsWithStores(basicBlock) {
+	for (var i = 1; i < basicBlock.instructions.length; i++) {
+		var instruction = basicBlock.instructions[i];
+		if (instruction.type == "store") {
+			for (var j = 0; j < i; j++) {
+				var previousInstruction = basicBlock.instructions[j];
+				if ((previousInstruction.type == "assignment") &&
+					(previousInstruction.instruction == "alloc_stack") &&
+					(instruction.destinationLocalName == previousInstruction.destinationLocalName)
+				) {
+					basicBlock.instructions[i] = j;
+					previousInstruction.sourceLocalName = instruction.sourceLocalName;
+					basicBlock.instructions.splice(i, 1);
+				} else if (previousInstruction.readLocals.indexOf(previousInstruction.destinationLocalName) != -1) {
+					break;
+				}
+			}
+		}
+	}
+}
+
 var blockReferencesForInstructions = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
@@ -74,6 +95,7 @@ function pruneDeadBlocks(basicBlocks) {
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
+		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		analyzeBlockReferences(declaration.basicBlocks);
 		inlineBlocks(declaration.basicBlocks);
 		pruneDeadBlocks(declaration.basicBlocks);

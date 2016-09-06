@@ -113,6 +113,7 @@ function parseInstruction(line) {
 			type: "assignment",
 			destinationLocalName: match[1],
 			instruction: match[2],
+			readLocals: [],
 		};
 		var args = match[3];
 		switch (assignment.instruction) {
@@ -128,12 +129,14 @@ function parseInstruction(line) {
 				assignment.caseName = enumMatch[2];
 				if (enumMatch[3]) {
 					assignment.sourceLocalName = enumMatch[3].match(/^,\s+\%(\w+)\s+:$/)[1];
+					assignment.readLocals = [assignment.sourceLocalName];
 				}
 				break;
 			case "struct":
 				var structMatch = args.match(/^\$(.*?)\s+\((.*)\)/);
 				assignment.structName = basicNameForStruct(structMatch[1]);
 				assignment.arguments = splitNoParens(structMatch[2]).map(arg => arg.match(/^%(\d+)/)[1]);
+				assignment.readLocals = assignment.arguments.slice();
 				break;
 			case "tuple":
 				var match = args.match(/^\((.*)\)/);
@@ -142,21 +145,20 @@ function parseInstruction(line) {
 				} else {
 					assignment.arguments = [];
 				}
+				assignment.readLocals = assignment.arguments.slice();
 				break;
 			case "struct_extract":
-				var structMatch = args.match(/^%(\d+)\s*:\s*.*\.(.*)$/);
-				assignment.sourceLocalName = structMatch[1];
-				assignment.fieldName = structMatch[2];
-				break;
 			case "tuple_extract":
-				var tupleMatch = args.match(/^%(\d+)\s*:.*,\s*(\d+)$/);
-				assignment.sourceLocalName = tupleMatch[1];
-				assignment.fieldIndex = tupleMatch[2];
+				var match = args.match(/^%(\d+)\s*:\s*.*\.(.*)$/);
+				assignment.sourceLocalName = match[1];
+				assignment.fieldName = match[2];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "builtin":
 				var builtinMatch = args.match(/^\"(\w+)\"(<\w+>)?\((.*)\)\s*:/);
 				assignment.builtinName = builtinMatch[1];
 				assignment.arguments = splitNoParens(builtinMatch[3]).map(arg => arg.match(/^%(\d+)/)[1]);
+				assignment.readLocals = assignment.arguments;
 				break;
 			case "function_ref":
 				var functionMatch = args.match(/^@(\w+)\s*:/);
@@ -166,6 +168,8 @@ function parseInstruction(line) {
 				var applyMatch = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:/);
 				assignment.sourceLocalName = applyMatch[2];
 				assignment.arguments = splitNoParens(applyMatch[4]).map(arg => arg.match(/^%(\d+)(#\d+)?$/)[1]);
+				assignment.readLocals = assignment.arguments.slice();
+				assignment.readLocals.push(assignment.sourceLocalName);
 				break;
 			case "alloc_stack":
 				break;
@@ -174,12 +178,14 @@ function parseInstruction(line) {
 			case "project_box":
 				var boxMatch = args.match(/^%(\w+)\s+:/);
 				assignment.sourceLocalName = boxMatch[1];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "struct_element_addr":
 				var structMatch = args.match(/^%(\w+)\s+:\s+.*?#(\w+)\.(\w+)$/);
 				assignment.sourceLocalName = structMatch[1];
 				assignment.structName = structMatch[2];
 				assignment.fieldName = structMatch[3];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "global_addr":
 				var match = args.match(/^@(\w+)\s*:/);
@@ -188,10 +194,12 @@ function parseInstruction(line) {
 			case "load":
 				var loadMatch = args.match(/^%(\w+)(#\d+)?\s+:/);
 				assignment.sourceLocalName = loadMatch[1];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "unchecked_enum_data":
 				var enumMatch = args.match(/^%(\w+)\s+:/);
 				assignment.sourceLocalName = enumMatch[1];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "unchecked_addr_cast":
 			case "unchecked_ref_cast":
@@ -201,12 +209,14 @@ function parseInstruction(line) {
 			case "raw_pointer_to_ref":
 				var match = args.match(/^%(\w+)\s+:/);
 				assignment.sourceLocalName = match[1];
+				assignment.readLocals = [assignment.sourceLocalName];
 				break;
 			case "index_raw_pointer":
 			case "index_addr":
 				var match = args.match(/^%(\w+)\s+:.*?,\s+%(\w+)\s+:/)
 				assignment.sourceLocalName = match[1];
 				assignment.offsetLocalName = match[2];
+				assignment.readLocals = [assignment.offsetLocalName, assignment.sourceLocalName];
 				break;
 			default:
 				assignment.unparsedArguments = args;
@@ -219,14 +229,17 @@ function parseInstruction(line) {
 		return {
 			type: "return",
 			localName: match[1],
+			readLocals: [match[1]]
 		};
 	}
 	match = line.match(/^br\s+(\w+)\((.*)\)/) || line.match(/^br\s+(\w+)/);
 	if (match) {
+		var args = match[2] ? splitNoParens(match[2]).map(arg => arg.match(/^%(\d+)/)[1]) : []
 		return {
 			type: "branch",
 			block: { reference: match[1] },
-			arguments: match[2] ? splitNoParens(match[2]).map(arg => arg.match(/^%(\d+)/)[1]) : [],
+			arguments: args,
+			readLocals: args.slice(),
 		};
 	}
 	match = line.match(/^cond_br\s+\%(\w+),\s*(\w+),\s(\w+)/);
@@ -236,6 +249,7 @@ function parseInstruction(line) {
 			localName: match[1],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
+			readLocals: match[1],
 		};
 	}
 	match = line.match(/^store\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:/);
@@ -244,30 +258,35 @@ function parseInstruction(line) {
 			type: "store",
 			sourceLocalName: match[1],
 			destinationLocalName: match[2],
+			readLocals: [match[1], match[2]],
 		};
 	}
 	match = line.match(/^switch_enum\s+\%(\w+)\s+:\s+.*?,\s+(case .*)/);
 	if (match) {
+		var cases = splitNoParens(match[2]).map(arg => {
+			var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
+			return {
+				"case": match[1],
+				"basicBlock": { reference: match[2] }
+			};
+		})
 		return {
 			type: "switch_enum",
 			localName: match[1],
-			cases: splitNoParens(match[2]).map(arg => {
-				var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
-				return {
-					"case": match[1],
-					"basicBlock": { reference: match[2] }
-				};
-			})
+			cases: cases,
+			readLocals: cases.map(c => c.case),
 		};
 	}
 	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
 	if (match) {
+		var args = splitNoParens(match[3]).map(arg => arg.match(/^%(\d+)$/)[1]);
 		return {
 			type: "try_apply",
 			localName: match[1],
-			arguments: splitNoParens(match[3]).map(arg => arg.match(/^%(\d+)$/)[1]),
+			arguments: args,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
+			readLocals: args.slice(),
 		};
 	}
 	match = line.match(/^throw\s+%(\w+)\s*:/);
@@ -275,6 +294,7 @@ function parseInstruction(line) {
 		return {
 			type: "throw",
 			name: match[1],
+			readLocals: [],
 		};
 	}
 	throw "Unknown instruction: " + line;
