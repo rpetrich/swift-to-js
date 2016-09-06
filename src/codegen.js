@@ -57,7 +57,7 @@ CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
 		throw "Unable to find block with name: " + targetBlock.reference;
 	}
 	if (descriptor.inline) {
-		this.buffer.write("// " + descriptor.name);
+		this.buffer.write("// " + descriptor.inline.name);
 		this.writeBasicBlock(descriptor.inline, siblingBlocks);
 	} else {
 		throw "Neither a reference to a basic block nor inline!";
@@ -71,7 +71,7 @@ function findBasicBlock(blocks, descriptor) {
 				return blocks[i];
 			}
 		}
-		throw "Unable to find basic block: " + reference;
+		throw "Unable to find basic block: " + descriptor.reference;
 	}
 	if (descriptor.inline) {
 		return descriptor.inline;
@@ -304,11 +304,13 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 			this.buffer.write("var state = 0;");
 		} else {
 			this.buffer.write("var state;");
+			this.buffer.write("// " + basicBlocks[0].name);
 			this.writeBasicBlock(basicBlocks[0], basicBlocks);
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
 			this.buffer.write("for (;;) {")
 			this.buffer.indent(1);
+			this.buffer.write("// " + basicBlocks[1].name);
 			this.writeBasicBlock(basicBlocks[1], basicBlocks);
 			this.buffer.indent(-1);
 		} else {
