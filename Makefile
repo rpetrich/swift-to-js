@@ -1,13 +1,13 @@
 all: test.min.js
 
 clean:
-	rm -f *.sil.swift
+	rm -f *.sil
 	rm -f *.js
 
-%.sil.swift: %.swift
+%.sil: %.swift
 	xcrun -sdk iphonesimulator swiftc -emit-sil -gnone -Ounchecked -parse-as-library --target=i386-apple-ios7.0 -module-name="$*" "$<" -o "$@"
 
-%.js: %.sil.swift src/*.js
+%.js: %.sil src/*.js
 	node src/swift-to-js.js "$@" < "$<"
 
 %.min.js: %.js

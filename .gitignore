@@ -1,4 +1,4 @@
 closure-compiler.jar
 test.js
 *.min.js
-*.sil.swift
+*.sil
