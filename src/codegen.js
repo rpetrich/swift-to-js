@@ -209,6 +209,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				}
 				this.writeBranchToBlock(instruction.block, siblingBlocks);
 				break;
+			case "branch_single":
+				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
+				this.buffer.write("var " + mangleLocal(targetBlock.arguments[0]) + " = " + value + ";");
+				this.writeBranchToBlock(instruction.block, siblingBlocks);
+				break;
 			case "conditional_branch":
 				this.buffer.write("if (" + value + ") {");
 				this.buffer.indent(1);

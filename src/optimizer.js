@@ -13,6 +13,16 @@ function findBasicBlock(blocks, descriptor) {
 	throw "Neither a reference nor an inline block!";
 }
 
+function simplifyBranchInstructions(basicBlock) {
+	basicBlock.instructions.forEach(i => {
+		if (i.type == "branch" && i.arguments.length == 1) {
+			i.type = "branch_single";
+			i.sourceLocalName = i.arguments[0];
+			delete i.arguments;
+		}
+	})
+}
+
 function fuseStackAllocationsWithStores(basicBlock) {
 	for (var i = 1; i < basicBlock.instructions.length; i++) {
 		var instruction = basicBlock.instructions[i];
@@ -34,20 +44,32 @@ function fuseStackAllocationsWithStores(basicBlock) {
 	}
 }
 
+var fuseableWithAssignment = ["return", "throw", "store", "branch_single"];
+
 function fuseAssignmentsWithExits(basicBlock) {
-	if (basicBlock.instructions.length > 2) {
-		var penultimateInstruction = basicBlock.instructions[basicBlock.instructions.length - 2];
-		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length - 1];
-		if (penultimateInstruction.type == "assignment") {
-			if (["return", "throw"].indexOf(lastInstruction.type) != -1) {
-				if (lastInstruction.sourceLocalName == penultimateInstruction.destinationLocalName) {
-					// Fuse the two instructions
-					for (var key in penultimateInstruction) {
-						if (key != "type" && key != "destinationLocalName") {
-							lastInstruction[key] = penultimateInstruction[key];
+	for (var i = 0; i < basicBlock.instructions.length - 1; i++) {
+		var instruction = basicBlock.instructions[i];
+		if (instruction.type == "assignment") {
+			var nextInstruction = basicBlock.instructions[i + 1];
+			if (fuseableWithAssignment.indexOf(nextInstruction.type) != -1) {
+				if (nextInstruction.sourceLocalName == instruction.destinationLocalName) {
+					// Search for following instructions that read the assignment
+					var allowed = true;
+					for (var j = i + 2; j < basicBlock.instructions.length; j++) {
+						if (basicBlock.instructions.readLocals.indexOf(instruction.destinationLocalName) != -1) {
+							allowed = false;
+							break;
 						}
 					}
-					basicBlock.instructions.splice(basicBlock.instructions.length - 2, 1);
+					if (allowed) {
+						// Fuse the two instructions
+						for (var key in instruction) {
+							if (key != "type" && key != "destinationLocalName") {
+								nextInstruction[key] = instruction[key];
+							}
+						}
+						basicBlock.instructions.splice(i, 1);
+					}
 				}
 			}
 		}
@@ -56,6 +78,7 @@ function fuseAssignmentsWithExits(basicBlock) {
 
 var blockReferencesForInstructions = {
 	"branch": ins => [ins.block],
+	"branch_single": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
@@ -118,6 +141,7 @@ function pruneDeadBlocks(basicBlocks) {
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
+		declaration.basicBlocks.forEach(simplifyBranchInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
 		analyzeBlockReferences(declaration.basicBlocks);
