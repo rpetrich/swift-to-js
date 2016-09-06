@@ -127,7 +127,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						var builtinName = instruction.builtinName;
 						declaration += builtinName + "(" + instruction.arguments.map(mangleLocal).join(", ") + ")";
 						if (!this.writeBuiltIn(builtinName)) {
-							throw "No builtin available for " + builtinName + " (expects " + args.length + " arguments)";
+							throw "No builtin available for " + builtinName + " (expects " + instruction.arguments.length + " arguments)";
 						}
 						break;
 					case "function_ref":
