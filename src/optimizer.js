@@ -58,10 +58,6 @@ function analyzeBlockReferences(basicBlocks) {
 	});
 }
 
-function hasReferenceTo(basicBlock, basicBlocks, potentialReferenceBlock) {
-	return basicBlock == potentialReferenceBlock || basicBlock.referencesTo.some(ref => findBasicBlock(basicBlocks, { reference: ref }) == potentialReferenceBlock);
-}
-
 function inlineBlocks(basicBlocks) {
 	for (var i = 0; i < basicBlocks.length; i++) {
 		var basicBlock = basicBlocks[i];
@@ -70,7 +66,7 @@ function inlineBlocks(basicBlocks) {
 		if (blockReferences) {
 			blockReferences(lastInstruction).forEach(descriptor => {
 				var destBlock = findBasicBlock(basicBlocks, descriptor);
-				if (!hasReferenceTo(destBlock, basicBlocks, basicBlock)) {
+				if (basicBlocks.indexOf(destBlock) > i) {
 					// Inline the block
 					var index = destBlock.referencesFrom.indexOf(basicBlock.name);
 					if (index != -1) {
