@@ -45,6 +45,7 @@ Parser.prototype.parseSil = function(line) {
 	var name = line.split(/:/)[0].split(/\s+/).filter(part => /^@/.test(part))[0].substring(1);
 	var declaration = {
 		name: name,
+		type: "function",
 		basicBlocks: [],
 	};
 	if (!/\b(hidden|shared_external)\b/.test(line)) {
@@ -180,6 +181,10 @@ function parseInstruction(line) {
 				assignment.structName = structMatch[2];
 				assignment.fieldName = structMatch[3];
 				break;
+			case "global_addr":
+				var match = args.match(/^@(\w+)\s*:/);
+				assignment.globalName = match[1];
+				break;
 			case "load":
 				var loadMatch = args.match(/^%(\w+)\s+:/);
 				assignment.sourceLocalName = loadMatch[1];
@@ -189,13 +194,16 @@ function parseInstruction(line) {
 				assignment.sourceLocalName = enumMatch[1];
 				break;
 			case "unchecked_addr_cast":
+			case "unchecked_ref_cast":
 			case "pointer_to_address":
+			case "address_to_pointer":
 			case "ref_to_raw_pointer":
 			case "raw_pointer_to_ref":
 				var match = args.match(/^%(\w+)\s+:/);
 				assignment.sourceLocalName = match[1];
 				break;
 			case "index_raw_pointer":
+			case "index_addr":
 				var match = args.match(/^%(\w+)\s+:.*?,\s+%(\w+)\s+:/)
 				assignment.sourceLocalName = match[1];
 				assignment.offsetLocalName = match[2];
@@ -272,6 +280,14 @@ function parseInstruction(line) {
 	throw "Unknown instruction: " + line;
 }
 
+Parser.prototype.parseSilGlobal = function (line) {
+	var declaration = {
+		name: line.match(/\@(\w+)/)[1],
+		type: "global",
+	};
+	this.declarations.push(declaration);
+}
+
 Parser.prototype.addLine = function(originalLine) {
 	line = originalLine.replace(/\s*\/\/.*/, "");
 	if (line.length != 0) {
@@ -287,6 +303,9 @@ Parser.prototype.addLine = function(originalLine) {
 					break;
 				case "sil":
 					this.parseSil(line);
+					break;
+				case "sil_global":
+					this.parseSilGlobal(line);
 					break;
 				default:
 					if (/^\w+(\(.*\))?:$/.test(line)) {

@@ -73,9 +73,11 @@ function pruneDeadBlocks(basicBlocks) {
 }
 
 function optimize(declaration) {
-	analyzeBlockReferences(declaration.basicBlocks);
-	inlineBlocks(declaration.basicBlocks);
-	pruneDeadBlocks(declaration.basicBlocks);
+	if (declaration.type == "function") {
+		analyzeBlockReferences(declaration.basicBlocks);
+		inlineBlocks(declaration.basicBlocks);
+		pruneDeadBlocks(declaration.basicBlocks);
+	}
 }
 
 module.exports = {

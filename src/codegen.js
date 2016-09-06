@@ -24,7 +24,9 @@ IndentedBuffer.prototype.write = function (line, extra) {
 
 var mangleLocal = local => "_" + local;
 var box = (struct, quotedFieldName) => "{ \"ref\": " + struct + ", \"field\": " + quotedFieldName + " }";
-var unbox = (struct) => struct + "[\"ref\"][" + struct + "[\"field\"]]";
+var unboxRef = struct => struct + "[\"ref\"]";
+var unboxField = struct => struct + "[\"field\"]";
+var unbox = struct => unboxRef(struct) + "[" + unboxField(struct) + "]";
 var caseNameForEnum = fullEnumName => fullEnumName.match(/^\w+\.(\w+)\!/)[1];
 
 function CodeGen(parser) {
@@ -148,6 +150,9 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 					case "struct_element_addr":
 						declaration += box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
 						break;
+					case "global_addr":
+						declaration += box(instruction.globalName, 0);
+						break;
 					case "load":
 						declaration += unbox(mangleLocal(instruction.sourceLocalName));
 						break;
@@ -155,14 +160,19 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						declaration += mangleLocal(instruction.sourceLocalName) + "[1]";
 						break;
 					case "unchecked_addr_cast":
+					case "unchecked_ref_cast":
 					case "pointer_to_address":
+					case "address_to_pointer":
 					case "ref_to_raw_pointer":
 					case "raw_pointer_to_ref":
 						declaration += mangleLocal(instruction.sourceLocalName);
 						break;
 					case "index_raw_pointer":
-						declaration += mangleLocal(instruction.sourceLocalName);
-						declaration += "; if (" + mangleLocal(instruction.offsetLocalName) + ") throw \"Pointer arithmetic disallowed!\"";
+						//declaration += mangleLocal(instruction.sourceLocalName);
+						//declaration += "; if (" + mangleLocal(instruction.offsetLocalName) + ") throw \"Pointer arithmetic disallowed!\"";
+						//break;
+					case "index_addr":
+						declaration += box(unboxRef(mangleLocal(instruction.sourceLocalName)), unboxField(mangleLocal(instruction.sourceLocalName)) + " + " + mangleLocal(instruction.offsetLocalName));
 						break;
 					default:
 						declaration += "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
@@ -241,6 +251,21 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 }
 
 CodeGen.prototype.consume = function(declaration) {
+	switch (declaration.type) {
+		case "function":
+			this.consumeFunction(declaration);
+			break;
+		case "global":
+			this.consumeGlobal(declaration);
+			break;
+	}
+}
+
+CodeGen.prototype.consumeGlobal = function(declaration) {
+	this.buffer.write("var " + declaration.name + " = []");
+}
+
+CodeGen.prototype.consumeFunction = function(declaration) {
 	var basicBlocks = declaration.basicBlocks;
 	if (basicBlocks.length == 0) {
 		// No basic blocks, some kind of weird declaration we don't support yet
