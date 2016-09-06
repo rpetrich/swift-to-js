@@ -12,6 +12,7 @@ var Parser = require("./parser.js");
 var parser = new Parser();
 
 var CodeGen = require("./codegen.js");
+var Optimizer = require("./optimizer.js");
 
 var rl = readline.createInterface({
 	input: process.stdin,
@@ -25,7 +26,11 @@ rl.on("line", function(line){
 
 rl.on("close", function() {
 	var codegen = new CodeGen();
-	codegen.consume(parser.declarations);
+	parser.declarations.forEach(declaration => {
+		Optimizer.optimize(declaration);
+		codegen.consume(declaration);
+	});
 	var out = fs.openSync(process.argv[2], "w");
 	codegen.buffer.lines.forEach(line => fs.write(out, line + "\n"));
+	//console.log(JSON.stringify(parser.declarations, null, 4));
 });

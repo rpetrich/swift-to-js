@@ -34,7 +34,7 @@ function basicNameForStruct(structName) {
 }
 
 function Parser() {
-	this.declarations = {};
+	this.declarations = [];
 	this.currentDeclaration = undefined;
 	this.currentBasicBlock = undefined;
 	// Lookback, to steal some unmangled name information that swiftc sticks in a comment
@@ -60,7 +60,7 @@ Parser.prototype.parseSil = function(line) {
 		this.currentDeclaration = declaration;
 		this.currentBasicBlock = undefined;
 	}
-	this.declarations[name] = declaration;
+	this.declarations.push(declaration);
 }
 
 Parser.prototype.parseBasicBlock = function(line) {
@@ -75,8 +75,6 @@ Parser.prototype.parseBasicBlock = function(line) {
 		name: line.match(/^\w+\b/)[0],
 		arguments: args || [],
 		instructions: [],
-		references: [],
-		backReferences: [],
 	}
 	this.currentDeclaration.basicBlocks.push(this.currentBasicBlock);
 }
@@ -219,7 +217,7 @@ function parseInstruction(line) {
 	if (match) {
 		return {
 			type: "branch",
-			blockName: match[1],
+			block: { reference: match[1] },
 			arguments: match[2] ? splitNoParens(match[2]).map(arg => arg.match(/^%(\d+)/)[1]) : [],
 		};
 	}
@@ -228,8 +226,8 @@ function parseInstruction(line) {
 		return {
 			type: "conditional_branch",
 			localName: match[1],
-			trueBlockName: match[2],
-			falseBlockName: match[3],
+			trueBlock: { reference: match[2] },
+			falseBlock: { reference: match[3] },
 		};
 	}
 	match = line.match(/^store\s+\%(\w+)\s+to\s+\%(\w+)\s+:/);
@@ -249,7 +247,7 @@ function parseInstruction(line) {
 				var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
 				return {
 					"case": match[1],
-					"basicBlock": match[2]
+					"basicBlock": { reference: match[2] }
 				};
 			})
 		};
@@ -260,8 +258,8 @@ function parseInstruction(line) {
 			type: "try_apply",
 			localName: match[1],
 			arguments: splitNoParens(match[2]).map(arg => arg.match(/^%(\d+)$/)[1]),
-			normalBlockName: match[3],
-			errorBlockName: match[4],
+			normalBlock: { reference: match[3] },
+			errorBlock: { reference: match[4] },
 		};
 	}
 	match = line.match(/^throw\s+%(\w+)\s*:/);

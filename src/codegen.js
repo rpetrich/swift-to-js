@@ -44,23 +44,37 @@ CodeGen.prototype.writeBuiltIn = function (name) {
 	return true;
 }
 
-CodeGen.prototype.writeBranchToBlock = function (targetBlock, siblingBlocks) {
-	var index = siblingBlocks.indexOf(targetBlock);
-	if (targetBlock.backReferences.length > 1) {
-		this.buffer.write("state = " + index + ";");
+CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
+	if (descriptor.reference) {
+		for (var i = 0; i < siblingBlocks.length; i++) {
+			if (siblingBlocks[i].name == descriptor.reference) {
+				this.buffer.write("state = " + i + ";");
+				return;
+			}
+		}
+		throw "Unable to find block with name: " + targetBlock.reference;
+	}
+	if (descriptor.inline) {
+		this.buffer.write("// " + descriptor.name);
+		this.writeBasicBlock(descriptor.inline, siblingBlocks);
 	} else {
-		this.buffer.write("// " + targetBlock.name);
-		this.writeBasicBlock(targetBlock, siblingBlocks);
+		throw "Neither a reference to a basic block nor inline!";
 	}
 }
 
-function findBasicBlock(blocks, name) {
-	for (var i = 0; i < blocks.length; i++) {
-		if (blocks[i].name == name) {
-			return blocks[i];
+function findBasicBlock(blocks, descriptor) {
+	if (descriptor.reference) {
+		for (var i = 0; i < blocks.length; i++) {
+			if (blocks[i].name == descriptor.reference) {
+				return blocks[i];
+			}
 		}
+		throw "Unable to find basic block: " + reference;
 	}
-	throw "Unable to find basic block: " + name;
+	if (descriptor.inline) {
+		return descriptor.inline;
+	}
+	throw "Neither a reference nor an inline block!";
 }
 
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
@@ -161,20 +175,20 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				break;
 			case "branch":
 				var args = instruction.arguments;
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.blockName);
+				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
 				for (var k = 0; k < args.length; k++) {
 					this.buffer.write("var " + mangleLocal(targetBlock.arguments[k]) + " = " + mangleLocal(args[k]) + ";");
 				}
-				this.writeBranchToBlock(targetBlock, siblingBlocks);
+				this.writeBranchToBlock(instruction.block, siblingBlocks);
 				break;
 			case "conditional_branch":
 				this.buffer.write("if (" + mangleLocal(instruction.localName) + ") {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(findBasicBlock(siblingBlocks, instruction.trueBlockName), siblingBlocks);
+				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("} else {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(findBasicBlock(siblingBlocks, instruction.falseBlockName), siblingBlocks);
+				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -196,23 +210,23 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 					if (targetBlock.arguments.length > 0) {
 						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0]) + " = " + mangleLocal(instruction.localName) + "[1];");
 					}
-					this.writeBranchToBlock(targetBlock, siblingBlocks);
+					this.writeBranchToBlock(args[k].basicBlock, siblingBlocks);
 					this.buffer.indent(-1);
 				}
 				this.buffer.write("}");
 				break;
 			case "try_apply":
 				this.buffer.write("try {");
-				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlockName);
+				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
 				this.buffer.indent(1);
 				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0]) + " = " + mangleLocal(instruction.localName) + "(" + instruction.arguments.map(mangleLocal).join(", ") + ");");
-				this.writeBranchToBlock(findBasicBlock(siblingBlocks, instruction.normalBlockName), siblingBlocks);
+				this.writeBranchToBlock(instruction.normalBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("} catch (e) {");
-				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlockName);
+				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
 				this.buffer.indent(1);
 				this.buffer.write("var " + mangleLocal(errorBasicBlock.arguments[0]) + " = e;");
-				this.writeBranchToBlock(findBasicBlock(siblingBlocks, instruction.errorBlockName), siblingBlocks);
+				this.writeBranchToBlock(instruction.errorBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -226,77 +240,41 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 	}
 }
 
-function analyzeBlockReferences(basicBlocks) {
-	for (var i = 0; i < basicBlocks.length; i++) {
-		var basicBlock = basicBlocks[i];
-		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
-		switch (lastInstruction.type) {
-			case "branch":
-				basicBlock.references.push(lastInstruction.blockName);
-				findBasicBlock(basicBlocks, lastInstruction.blockName).backReferences.push(basicBlock.name);
-				break;
-			case "conditional_branch":
-				basicBlock.references.push(lastInstruction.trueBlockName);
-				findBasicBlock(basicBlocks, lastInstruction.trueBlockName).backReferences.push(basicBlock.name);
-				basicBlock.references.push(lastInstruction.falseBlockName);
-				findBasicBlock(basicBlocks, lastInstruction.falseBlockName).backReferences.push(basicBlock.name);
-				break;
-			case "try_apply":
-				basicBlock.references.push(lastInstruction.normalBlockName);
-				findBasicBlock(basicBlocks, lastInstruction.normalBlockName).backReferences.push(basicBlock.name);
-				basicBlock.references.push(lastInstruction.errorBlockName);
-				findBasicBlock(basicBlocks, lastInstruction.errorBlockName).backReferences.push(basicBlock.name);
-				break;
-			case "switch_enum":
-				lastInstruction.cases.forEach(switchCase => {
-					basicBlock.references.push(switchCase.basicBlock);
-					findBasicBlock(basicBlocks, switchCase.basicBlock).backReferences.push(basicBlock.name);
-				});
-				break;
-		}
+CodeGen.prototype.consume = function(declaration) {
+	var basicBlocks = declaration.basicBlocks;
+	if (basicBlocks.length == 0) {
+		// No basic blocks, some kind of weird declaration we don't support yet
+		return;
 	}
-}
-
-CodeGen.prototype.consume = function(declarations) {
-	var buffer = this.buffer;
-	for (var name in declarations) {
-		var basicBlocks = declarations[name].basicBlocks;
-		if (basicBlocks.length == 0) {
-			// No basic blocks, some kind of weird declaration we don't support yet
-			continue;
-		}
-		buffer.write("function " + name + "(" + basicBlocks[0].arguments.map(mangleLocal).join(", ") + ") {");
-		buffer.indent(1);
-		analyzeBlockReferences(basicBlocks);
-		if (basicBlocks.length == 1) {
-			this.writeBasicBlock(basicBlocks[0], basicBlocks);
+	this.buffer.write("function " + declaration.name + "(" + basicBlocks[0].arguments.map(mangleLocal).join(", ") + ") {");
+	this.buffer.indent(1);
+	if (basicBlocks.length == 1) {
+		this.writeBasicBlock(basicBlocks[0], basicBlocks);
+	} else {
+		var firstBlockHasBackreferences = basicBlocks[0].referencesFrom.length > 0;
+		if (firstBlockHasBackreferences) {
+			this.buffer.write("var state = 0;");
 		} else {
-			buffer.write("var state = 0;");
-			var firstBlockHasBackreferences = basicBlocks[0].backReferences.length > 0;
-			if (!firstBlockHasBackreferences) {
-				this.writeBasicBlock(basicBlocks[0], basicBlocks);
-			}
-			buffer.write("for (;;) switch(state) {")
-			for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
-				var basicBlock = basicBlocks[i];
-				if (basicBlock.backReferences.length > 1 || i == 0) {
-					buffer.write("case " + i + ": // " + basicBlock.name);
-					buffer.indent(1);
-					this.writeBasicBlock(basicBlocks[i], basicBlocks);
-					buffer.write("break;");
-					buffer.indent(-1);
-				}
-			}
-			buffer.write("}");
+			this.buffer.write("var state;");
+			this.writeBasicBlock(basicBlocks[0], basicBlocks);
 		}
-		buffer.indent(-1);
-		buffer.write("}");
-		var beautifulName = declarations[name].beautifulName;
-		if (beautifulName) {
-			buffer.write("window[\"" + beautifulName + "\"] = " + name + ";");
+		this.buffer.write("for (;;) switch(state) {")
+		for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
+			var basicBlock = basicBlocks[i];
+			this.buffer.write("case " + i + ": // " + basicBlock.name);
+			this.buffer.indent(1);
+			this.writeBasicBlock(basicBlocks[i], basicBlocks);
+			this.buffer.write("break;");
+			this.buffer.indent(-1);
 		}
+		this.buffer.write("}");
 	}
-	//console.log(JSON.stringify(declarations, null, 4));
+	this.buffer.indent(-1);
+	this.buffer.write("}");
+	var beautifulName = declaration.beautifulName;
+	if (beautifulName) {
+		this.buffer.write("window[\"" + beautifulName + "\"] = " + declaration.name + ";");
+	}
 }
 
 module.exports = CodeGen;
