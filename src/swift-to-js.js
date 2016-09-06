@@ -1,13 +1,6 @@
 var readline = require("readline");
 var fs = require("fs");
 
-// Basic Standard Library
-var stdlib = require("./stdlib.js");
-var types = stdlib.types;
-var enums = stdlib.enums;
-var builtins = stdlib.builtins;
-var usedBuiltins = {};
-
 var Parser = require("./parser.js");
 var parser = new Parser();
 
