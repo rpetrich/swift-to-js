@@ -34,6 +34,26 @@ function fuseStackAllocationsWithStores(basicBlock) {
 	}
 }
 
+function fuseAssignmentsWithExits(basicBlock) {
+	if (basicBlock.instructions.length > 2) {
+		var penultimateInstruction = basicBlock.instructions[basicBlock.instructions.length - 2];
+		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length - 1];
+		if (penultimateInstruction.type == "assignment") {
+			if (["return", "throw"].indexOf(lastInstruction.type) != -1) {
+				if (lastInstruction.sourceLocalName == penultimateInstruction.destinationLocalName) {
+					// Fuse the two instructions
+					for (var key in penultimateInstruction) {
+						if (key != "type" && key != "destinationLocalName") {
+							lastInstruction[key] = penultimateInstruction[key];
+						}
+					}
+					basicBlock.instructions.splice(basicBlock.instructions.length - 2, 1);
+				}
+			}
+		}
+	}
+}
+
 var blockReferencesForInstructions = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
@@ -99,6 +119,7 @@ function pruneDeadBlocks(basicBlocks) {
 function optimize(declaration) {
 	if (declaration.type == "function") {
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
+		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
 		analyzeBlockReferences(declaration.basicBlocks);
 		inlineBlocks(declaration.basicBlocks);
 		pruneDeadBlocks(declaration.basicBlocks);

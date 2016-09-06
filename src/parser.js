@@ -228,7 +228,7 @@ function parseInstruction(line) {
 	if (match) {
 		return {
 			type: "return",
-			localName: match[1],
+			sourceLocalName: match[1],
 			readLocals: [match[1]]
 		};
 	}
@@ -246,7 +246,7 @@ function parseInstruction(line) {
 	if (match) {
 		return {
 			type: "conditional_branch",
-			localName: match[1],
+			sourceLocalName: match[1],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
 			readLocals: match[1],
@@ -272,7 +272,7 @@ function parseInstruction(line) {
 		})
 		return {
 			type: "switch_enum",
-			localName: match[1],
+			sourceLocalName: match[1],
 			cases: cases,
 			readLocals: cases.map(c => c.case),
 		};
@@ -282,7 +282,7 @@ function parseInstruction(line) {
 		var args = splitNoParens(match[3]).map(arg => arg.match(/^%(\d+)$/)[1]);
 		return {
 			type: "try_apply",
-			localName: match[1],
+			sourceLocalName: match[1],
 			arguments: args,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
