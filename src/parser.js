@@ -163,9 +163,9 @@ function parseInstruction(line) {
 				assignment.functionName = functionMatch[1];
 				break;
 			case "apply":
-				var applyMatch = args.match(/^(\[nothrow\]\s+)?%(\d+)\((.*)\)\s*:/);
+				var applyMatch = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:/);
 				assignment.sourceLocalName = applyMatch[2];
-				assignment.arguments = splitNoParens(applyMatch[3]).map(arg => arg.match(/^%(\d+)$/)[1]);
+				assignment.arguments = splitNoParens(applyMatch[4]).map(arg => arg.match(/^%(\d+)(#\d+)?$/)[1]);
 				break;
 			case "alloc_stack":
 				break;
@@ -186,7 +186,7 @@ function parseInstruction(line) {
 				assignment.globalName = match[1];
 				break;
 			case "load":
-				var loadMatch = args.match(/^%(\w+)\s+:/);
+				var loadMatch = args.match(/^%(\w+)(#\d+)?\s+:/);
 				assignment.sourceLocalName = loadMatch[1];
 				break;
 			case "unchecked_enum_data":
@@ -238,7 +238,7 @@ function parseInstruction(line) {
 			falseBlock: { reference: match[3] },
 		};
 	}
-	match = line.match(/^store\s+\%(\w+)\s+to\s+\%(\w+)\s+:/);
+	match = line.match(/^store\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
 		return {
 			type: "store",
@@ -260,14 +260,14 @@ function parseInstruction(line) {
 			})
 		};
 	}
-	match = line.match(/^try_apply\s+%(\w+)\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
+	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
 	if (match) {
 		return {
 			type: "try_apply",
 			localName: match[1],
-			arguments: splitNoParens(match[2]).map(arg => arg.match(/^%(\d+)$/)[1]),
-			normalBlock: { reference: match[3] },
-			errorBlock: { reference: match[4] },
+			arguments: splitNoParens(match[3]).map(arg => arg.match(/^%(\d+)$/)[1]),
+			normalBlock: { reference: match[4] },
+			errorBlock: { reference: match[5] },
 		};
 	}
 	match = line.match(/^throw\s+%(\w+)\s*:/);
