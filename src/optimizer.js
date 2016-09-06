@@ -66,14 +66,21 @@ function inlineBlocks(basicBlocks) {
 		if (blockReferences) {
 			blockReferences(lastInstruction).forEach(descriptor => {
 				var destBlock = findBasicBlock(basicBlocks, descriptor);
-				if (basicBlocks.indexOf(destBlock) > i) {
-					// Inline the block
-					var index = destBlock.referencesFrom.indexOf(basicBlock.name);
-					if (index != -1) {
-						destBlock.referencesFrom.splice(index, 1);
+				var destBlockIndex = basicBlocks.indexOf(destBlock);
+				if (destBlockIndex > i) {
+					var hasBackwardsReference = destBlock.referencesFrom.some(ref => {
+						var fromBlock = findBasicBlock(basicBlocks, { reference: ref });
+						return basicBlocks.indexOf(fromBlock) > destBlockIndex;
+					});
+					if (!hasBackwardsReference) {
+						// Inline the block
+						var index = destBlock.referencesFrom.indexOf(basicBlock.name);
+						if (index != -1) {
+							destBlock.referencesFrom.splice(index, 1);
+						}
+						descriptor.inline = destBlock;
+						delete descriptor.reference;
 					}
-					descriptor.inline = destBlock;
-					delete descriptor.reference;
 				}
 			});
 		}
