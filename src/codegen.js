@@ -287,14 +287,21 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 			this.buffer.write("var state;");
 			this.writeBasicBlock(basicBlocks[0], basicBlocks);
 		}
-		this.buffer.write("for (;;) switch(state) {")
-		for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
-			var basicBlock = basicBlocks[i];
-			this.buffer.write("case " + i + ": // " + basicBlock.name);
+		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
+			this.buffer.write("for (;;) {")
 			this.buffer.indent(1);
-			this.writeBasicBlock(basicBlocks[i], basicBlocks);
-			this.buffer.write("break;");
+			this.writeBasicBlock(basicBlocks[1], basicBlocks);
 			this.buffer.indent(-1);
+		} else {
+			this.buffer.write("for (;;) switch(state) {")
+			for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
+				var basicBlock = basicBlocks[i];
+				this.buffer.write("case " + i + ": // " + basicBlock.name);
+				this.buffer.indent(1);
+				this.writeBasicBlock(basicBlocks[i], basicBlocks);
+				this.buffer.write("break;");
+				this.buffer.indent(-1);
+			}
 		}
 		this.buffer.write("}");
 	}
