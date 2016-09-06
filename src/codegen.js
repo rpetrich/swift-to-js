@@ -122,7 +122,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "struct_extract":
 				value = mangleLocal(instruction.sourceLocalName);
 				if (instruction.fieldName != "_value") {
-					value = JSON.stringify([instruction.fieldName]);
+					value += JSON.stringify([instruction.fieldName]);
 				}
 				break;
 			case "tuple_extract":
