@@ -18,6 +18,11 @@ module.exports = {
 		"UnsafeBufferPointer": ["_position", "_end"],
 		"_HeapBuffer": [],
 		"_StringBuffer": ["_storage"],
+		"_SwiftArrayBodyStorage": ["count", "_capacityAndFlags"],
+		"_ArrayBody": ["_storage"],
+		"_BridgeStorage": [],
+		"_ArrayBuffer": [],
+		"Array": [],
 	},
 	"enums": {
 		"Optional": ["None", "Some"]
@@ -82,5 +87,11 @@ module.exports = {
 		// Functions
 		"swift_bufferAllocate": "(bufferType, size, alignMask) { return {} }",
 		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { dest = source }",
+		// Int
+		"_TZFsoi1pFTSiSi_Si": "(left, right) { return (left + right) | 0 }",
+		// Generic numeric types
+		"_TZFsop1suRxs16SignedNumberTyperFxx": "(outNumber, inNumber) { outNumber[\"ref\"][outNumber[\"field\"]] = -inNumber[\"ref\"][inNumber[\"field\"]] }",
+		// Error handling
+		"willThrow": "(error) { throw error }",
 	}
 };
