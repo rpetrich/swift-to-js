@@ -139,13 +139,27 @@ function analyzeBlockReferences(basicBlocks) {
 	});
 }
 
+function newLocalName(declaration, basicBlock) {
+	var i = 0;
+	while (declaration.localNames.indexOf(i) != -1) {
+		i++;
+	}
+	declaration.localNames.push(i);
+	basicBlock.localNames.push(i);
+	return i;
+}
+
+function serializedClone(object) {
+	return JSON.parse(JSON.stringify(object));
+}
+
 function inlineBlocks(basicBlocks) {
 	for (var i = 0; i < basicBlocks.length; i++) {
 		var basicBlock = basicBlocks[i];
 		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
 		var blockReferences = blockReferencesForInstructions[lastInstruction.operation];
 		if (blockReferences) {
-			blockReferences(lastInstruction).forEach(descriptor => {
+			var references = blockReferences(lastInstruction).forEach(descriptor => {
 				var destBlock = findBasicBlock(basicBlocks, descriptor);
 				var destBlockIndex = basicBlocks.indexOf(destBlock);
 				if (destBlockIndex > i) {
@@ -159,8 +173,21 @@ function inlineBlocks(basicBlocks) {
 						if (index != -1) {
 							destBlock.referencesFrom.splice(index, 1);
 						}
-						descriptor.inline = destBlock;
-						delete descriptor.reference;
+						if (lastInstruction.operation == "branch") {
+							basicBlock.instructions.splice(basicBlock.instructions.length - 1);
+							lastInstruction.inputs.forEach((input, index) => {
+								basicBlock.instructions.push({
+									operation: "assignment",
+									destinationLocalName: destBlock.arguments[index],
+									instruction: lastInstruction.input || "register",
+									inputs: [ input ],
+								});
+							});
+							serializedClone(destBlock.instructions).forEach(instruction => basicBlock.instructions.push(instruction));
+						} else {
+							descriptor.inline = destBlock;
+							delete descriptor.reference;
+						}
 					}
 				}
 			});
@@ -180,10 +207,10 @@ function pruneDeadBlocks(basicBlocks) {
 function optimize(declaration) {
 	if (declaration.type == "function") {
 		analyzeBlockReferences(declaration.basicBlocks);
+		inlineBlocks(declaration.basicBlocks);
 		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignments);
-		inlineBlocks(declaration.basicBlocks);
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
 }
