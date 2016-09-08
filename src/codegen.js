@@ -86,6 +86,8 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 		if ("instruction" in instruction) {
 			this.buffer.write("// " + instruction.type + " from " + instruction.instruction);
 			switch (instruction.instruction) {
+			case "register":
+				break;
 			case "integer_literal":
 				value = instruction.value;
 				break;
@@ -110,20 +112,13 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				if (!structType) {
 					throw "No type for " + structName;
 				}
-				if (instruction.arguments.length == 1 && structType[0] == "_value") {
-					value = mangleLocal(instruction.arguments[0]);
-				} else {
-					value = "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg)).join(", ") + " }";
-				}
+				value = "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg)).join(", ") + " }";
 				break;
 			case "tuple":
 				value = "[ " + instruction.arguments.map(mangleLocal).join(", ") + " ]";
 				break;
 			case "struct_extract":
-				value = mangleLocal(instruction.sourceLocalName);
-				if (instruction.fieldName != "_value") {
-					value += JSON.stringify([instruction.fieldName]);
-				}
+				value = mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldName]);
 				break;
 			case "tuple_extract":
 				value = mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldIndex | 0]);
@@ -157,11 +152,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				value = box(mangleLocal(instruction.sourceLocalName), 0);
 				break;
 			case "struct_element_addr":
-				if (instruction.fieldName == "_value") {
-					value = box("[" + mangleLocal(instruction.sourceLocalName) + "]", 0);
-				} else {
-					value = box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
-				}
+				value = box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
 				break;
 			case "global_addr":
 				value = box(instruction.globalName, 0);

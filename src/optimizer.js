@@ -1,3 +1,6 @@
+var stdlib = require("./stdlib.js");
+var types = stdlib.types;
+
 function findBasicBlock(blocks, descriptor) {
 	if (descriptor.reference) {
 		for (var i = 0; i < blocks.length; i++) {
@@ -11,6 +14,32 @@ function findBasicBlock(blocks, descriptor) {
 		return descriptor.inline;
 	}
 	throw "Neither a reference nor an inline block!";
+}
+
+function unwrapSimpleStructInstructions(basicBlock) {
+	basicBlock.instructions.forEach(i => {
+		switch (i.instruction) {
+			case "struct":
+				var structType = types[i.structName];
+				if (structType && (i.arguments.length == 1) && structType[0] == "_value") {
+					i.instruction = "register";
+					i.sourceLocalName = i.arguments[0];
+					delete i.arguments;
+				}
+				break;
+			case "struct_extract":
+				if (i.fieldName == "_value") {
+					i.instruction = "register";
+					delete i.fieldName;
+				}
+				break;
+			case "struct_element_addr":
+				if (i.fieldName == "_value") {
+					throw "Field has been optimized away: _value";
+				}
+				break;
+		}
+	})
 }
 
 function simplifyBranchInstructions(basicBlock) {
@@ -141,6 +170,7 @@ function pruneDeadBlocks(basicBlocks) {
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
+		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
 		declaration.basicBlocks.forEach(simplifyBranchInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
