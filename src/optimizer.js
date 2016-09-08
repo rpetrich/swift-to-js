@@ -21,9 +21,8 @@ function unwrapSimpleStructInstructions(basicBlock) {
 		switch (i.instruction) {
 			case "struct":
 				var structType = types[i.type];
-				if (structType && (i.arguments.length == 1) && structType[0] == "_value") {
+				if (structType && (i.inputs.length == 1) && structType[0] == "_value") {
 					i.instruction = "register";
-					i.sourceLocalName = i.arguments[0].sourceLocalName;
 					delete i.arguments;
 				}
 				break;
@@ -42,30 +41,24 @@ function unwrapSimpleStructInstructions(basicBlock) {
 	})
 }
 
-function simplifyBranchInstructions(basicBlock) {
-	basicBlock.instructions.forEach(i => {
-		if (i.operation == "branch" && i.arguments.length == 1) {
-			i.operation = "branch_single";
-			i.sourceLocalName = i.arguments[0];
-			delete i.arguments;
-		}
-	})
+function hasLocalAsInput(instruction, localName) {
+	return instruction.inputs.has(input => input.localName == localName);
 }
 
 function fuseStackAllocationsWithStores(basicBlock) {
 	for (var i = 1; i < basicBlock.instructions.length; i++) {
 		var instruction = basicBlock.instructions[i];
 		if (instruction.operation == "store") {
+			var storeDestination = instruction.inputs[1].localName;
 			for (var j = 0; j < i; j++) {
 				var previousInstruction = basicBlock.instructions[j];
 				if ((previousInstruction.operation == "assignment") &&
 					(previousInstruction.instruction == "alloc_stack") &&
-					(instruction.destinationLocalName == previousInstruction.destinationLocalName)
+					(previousInstruction.destinationLocalName == storeDestination)
 				) {
-					basicBlock.instructions[i] = j;
-					previousInstruction.sourceLocalName = instruction.sourceLocalName;
+					previousInstruction.inputs = [instruction.inputs[0]];
 					basicBlock.instructions.splice(i, 1);
-				} else if (previousInstruction.readLocals.indexOf(previousInstruction.destinationLocalName) != -1) {
+				} else if (hasLocalAsInput(previousInstruction, storeDestination)) {
 					break;
 				}
 			}
@@ -85,7 +78,7 @@ function fuseAssignmentsWithExits(basicBlock) {
 					// Search for following instructions that read the assignment
 					var allowed = true;
 					for (var j = i + 2; j < basicBlock.instructions.length; j++) {
-						if (basicBlock.instructions.readLocals.indexOf(instruction.destinationLocalName) != -1) {
+						if (hasLocalAsInput(basicBlock.instructions[i], instruction.destinationLocalName)) {
 							allowed = false;
 							break;
 						}
@@ -172,7 +165,6 @@ function optimize(declaration) {
 	if (declaration.type == "function") {
 		analyzeBlockReferences(declaration.basicBlocks);
 		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
-		declaration.basicBlocks.forEach(simplifyBranchInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
 		inlineBlocks(declaration.basicBlocks);

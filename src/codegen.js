@@ -82,7 +82,9 @@ function findBasicBlock(blocks, descriptor) {
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 	for (var j = 0; j < basicBlock.instructions.length; j++) {
 		var instruction = basicBlock.instructions[j];
-		var value = mangleLocal(instruction.sourceLocalName);
+		if (instruction.inputs && instruction.inputs.length) {
+			var value = mangleLocal(instruction.inputs[0].localName);
+		}
 		if ("instruction" in instruction) {
 			this.buffer.write("// " + instruction.operation + " from " + instruction.instruction);
 			switch (instruction.instruction) {
@@ -100,8 +102,8 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;
 				}
-				if ("sourceLocalName" in instruction) {
-					value = "[" + enumLayout.indexOf(instruction.caseName) + ", " + mangleLocal(instruction.sourceLocalName) + "]";
+				if (instruction.inputs.length) {
+					value = "[" + enumLayout.indexOf(instruction.caseName) + ", " + mangleLocal(instruction.inputs[0].localName) + "]";
 				} else {
 					value = "[" + enumLayout.indexOf(instruction.caseName) + "]";
 				}
@@ -112,22 +114,22 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				if (!structType) {
 					throw "No type for " + structName;
 				}
-				value = "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg.sourceLocalName)).join(", ") + " }";
+				value = "{ " + instruction.inputs.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg.localName)).join(", ") + " }";
 				break;
 			case "tuple":
-				value = "[ " + instruction.arguments.map(arg => mangleLocal(arg.sourceLocalName)).join(", ") + " ]";
+				value = "[ " + instruction.inputs.map(arg => mangleLocal(arg.localName)).join(", ") + " ]";
 				break;
 			case "struct_extract":
-				value = mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldName]);
+				value = mangleLocal(instruction.inputs[0].localName) + JSON.stringify([instruction.fieldName]);
 				break;
 			case "tuple_extract":
-				value = mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldIndex | 0]);
+				value = mangleLocal(instruction.inputs[0].localName) + JSON.stringify([instruction.fieldIndex | 0]);
 				break;
 			case "builtin":
 				var builtinName = instruction.builtinName;
-				value = builtinName + "(" + instruction.arguments.map(arg => mangleLocal(arg.sourceLocalName)).join(", ") + ")";
+				value = builtinName + "(" + instruction.inputs.map(arg => mangleLocal(arg.localName)).join(", ") + ")";
 				if (!this.writeBuiltIn(builtinName)) {
-					throw "No builtin available for " + builtinName + " (expects " + instruction.arguments.length + " arguments)";
+					throw "No builtin available for " + builtinName + " (expects " + (instruction.inputs.length - 1) + " arguments)";
 				}
 				break;
 			case "function_ref":
@@ -136,11 +138,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.writeBuiltIn(functionName);
 				break;
 			case "apply":
-				value = mangleLocal(instruction.sourceLocalName) + "(" + instruction.arguments.map(mangleLocal).join(", ") + ")";
+				value = mangleLocal(instruction.inputs[0].localName) + "(" + instruction.inputs.slice(1).map(input => mangleLocal(input.localName)).join(", ") + ")";
 				break;
 			case "alloc_stack":
-				if ("sourceLocalName" in instruction) {
-					value = box("[" + mangleLocal(instruction.sourceLocalName) + "]", 0);
+				if (instruction.inputs.length) {
+					value = box("[" + mangleLocal(instruction.inputs[0].localName) + "]", 0);
 				} else {
 					value = box("[]", 0);
 				}
@@ -149,19 +151,19 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				value = "[]";
 				break;
 			case "project_box":
-				value = box(mangleLocal(instruction.sourceLocalName), 0);
+				value = box(mangleLocal(instruction.inputs[0].localName), 0);
 				break;
 			case "struct_element_addr":
-				value = box(mangleLocal(instruction.sourceLocalName), "\"" + instruction.fieldName + "\"");
+				value = box(mangleLocal(instruction.inputs[0].localName), "\"" + instruction.fieldName + "\"");
 				break;
 			case "global_addr":
 				value = box(instruction.globalName, 0);
 				break;
 			case "load":
-				value = unbox(mangleLocal(instruction.sourceLocalName));
+				value = unbox(mangleLocal(instruction.inputs[0].localName));
 				break;
 			case "unchecked_enum_data":
-				value = mangleLocal(instruction.sourceLocalName) + "[1]";
+				value = mangleLocal(instruction.inputs[0].localName) + "[1]";
 				break;
 			case "unchecked_addr_cast":
 			case "unchecked_ref_cast":
@@ -169,14 +171,14 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "address_to_pointer":
 			case "ref_to_raw_pointer":
 			case "raw_pointer_to_ref":
-				value = mangleLocal(instruction.sourceLocalName);
+				value = mangleLocal(instruction.inputs[0].localName);
 				break;
 			case "index_raw_pointer":
-				//value = mangleLocal(instruction.sourceLocalName);
+				//value = mangleLocal(instruction.localName);
 				//value = "; if (" + mangleLocal(instruction.offsetLocalName) + ") throw \"Pointer arithmetic disallowed!\"";
 				//break;
 			case "index_addr":
-				value = box(unboxRef(mangleLocal(instruction.sourceLocalName)), unboxField(mangleLocal(instruction.sourceLocalName)) + " + " + mangleLocal(instruction.offsetLocalName));
+				value = box(unboxRef(mangleLocal(instruction.inputs[0].localName)), unboxField(mangleLocal(instruction.inputs[0].localName)) + " + " + mangleLocal(instruction.offsetLocalName));
 				break;
 			default:
 				throw "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
@@ -186,6 +188,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 		} else {
 			this.buffer.write("// " + instruction.operation);			
 		}
+		this.buffer.write("// " + JSON.stringify(instruction));
 		switch (instruction.operation) {
 			case "assignment":
 				this.buffer.write("var " + mangleLocal(instruction.destinationLocalName) + " = " + value + ";");
@@ -194,16 +197,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write("return " + value + ";");
 				break;
 			case "branch":
-				var args = instruction.arguments;
 				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-				for (var k = 0; k < args.length; k++) {
-					this.buffer.write("var " + mangleLocal(targetBlock.arguments[k]) + " = " + mangleLocal(args[k]) + ";");
-				}
-				this.writeBranchToBlock(instruction.block, siblingBlocks);
-				break;
-			case "branch_single":
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-				this.buffer.write("var " + mangleLocal(targetBlock.arguments[0]) + " = " + value + ";");
+				console.log(instruction);
+				instruction.inputs.forEach((input, index) => {
+					this.buffer.write("var " + mangleLocal(targetBlock.arguments[index]) + " = " + mangleLocal(input.localName) + ";");
+				});
 				this.writeBranchToBlock(instruction.block, siblingBlocks);
 				break;
 			case "conditional_branch":
