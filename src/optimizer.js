@@ -42,7 +42,7 @@ function unwrapSimpleStructInstructions(basicBlock) {
 }
 
 function hasLocalAsInput(instruction, localName) {
-	return instruction.inputs.has(input => input.localName == localName);
+	return instruction.inputs.some(input => input.localName == localName);
 }
 
 function fuseStackAllocationsWithStores(basicBlock) {
@@ -66,32 +66,45 @@ function fuseStackAllocationsWithStores(basicBlock) {
 	}
 }
 
-var fuseableWithAssignment = ["return", "throw", "store", "branch_single"];
+var fuseableWithAssignment = instruction => {
+	switch (instruction.operation) {
+		case "assignment":
+			return instruction.instruction == "register";
+		case "return":
+		case "throw":
+		case "store":
+			return true;
+		case "branch":
+			return instruction.inputs.length == 1;
+		default:
+			return false;
+	}
+};
 
-function fuseAssignmentsWithExits(basicBlock) {
+var instructionsWithoutSideEffects = ["integer_literal", "string_literal", "enum", "struct", "tuple", "struct_extract", "tuple_extract", "function_ref", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "global_addr", "load", "unchecked_enum_data", "unchecked_addr_cast", "unchecked_ref_cast", "pointer_to_address", "address_to_pointer", "ref_to_raw_pointer", "raw_pointer_to_ref", "index_raw_pointer", "index_addr"];
+var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
+
+function fuseAssignments(basicBlock) {
 	for (var i = 0; i < basicBlock.instructions.length - 1; i++) {
 		var instruction = basicBlock.instructions[i];
 		if (instruction.operation == "assignment") {
-			var nextInstruction = basicBlock.instructions[i + 1];
-			if (fuseableWithAssignment.indexOf(nextInstruction.operation) != -1) {
-				if (nextInstruction.sourceLocalName == instruction.destinationLocalName) {
-					// Search for following instructions that read the assignment
-					var allowed = true;
-					for (var j = i + 2; j < basicBlock.instructions.length; j++) {
-						if (hasLocalAsInput(basicBlock.instructions[i], instruction.destinationLocalName)) {
-							allowed = false;
-							break;
+			fuse_search:
+			for (var k = i + 1; k < basicBlock.instructions.length; k++) {
+				var proposedInstruction = basicBlock.instructions[k];
+				if (fuseableWithAssignment(proposedInstruction) && proposedInstruction.inputs.length == 1 && proposedInstruction.inputs[0].localName == instruction.destinationLocalName) {
+					for (var l = k + 1; l < basicBlock.instructions.length; l++) {
+						if (hasLocalAsInput(basicBlock.instructions[l], instruction.destinationLocalName)) {
+							break fuse_search;
 						}
 					}
-					if (allowed) {
-						// Fuse the two instructions
-						for (var key in instruction) {
-							if (key != "operation" && key != "destinationLocalName") {
-								nextInstruction[key] = instruction[key];
-							}
+					for (var key in instruction) {
+						if (key != "operation" && key != "destinationLocalName") {
+							proposedInstruction[key] = instruction[key];
 						}
-						basicBlock.instructions.splice(i, 1);
 					}
+					basicBlock.instructions.splice(i, 1);
+				} else if (instructionHasSideEffects(proposedInstruction)) {
+					break fuse_search;
 				}
 			}
 		}
@@ -166,7 +179,7 @@ function optimize(declaration) {
 		analyzeBlockReferences(declaration.basicBlocks);
 		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
-		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
+		declaration.basicBlocks.forEach(fuseAssignments);
 		inlineBlocks(declaration.basicBlocks);
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
