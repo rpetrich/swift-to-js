@@ -117,7 +117,6 @@ function fuseAssignments(basicBlock) {
 
 var blockReferencesForInstructions = {
 	"branch": ins => [ins.block],
-	"branch_single": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
