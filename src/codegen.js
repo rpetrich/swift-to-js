@@ -84,7 +84,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 		var instruction = basicBlock.instructions[j];
 		var value = mangleLocal(instruction.sourceLocalName);
 		if ("instruction" in instruction) {
-			this.buffer.write("// " + instruction.type + " from " + instruction.instruction);
+			this.buffer.write("// " + instruction.operation + " from " + instruction.instruction);
 			switch (instruction.instruction) {
 			case "register":
 				break;
@@ -95,7 +95,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				value = instruction.value;
 				break;
 			case "enum":
-				var enumName = instruction.enumName;
+				var enumName = instruction.type;
 				var enumLayout = enums[enumName];
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;
@@ -107,15 +107,15 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				}
 				break;
 			case "struct":
-				var structName = instruction.structName;
+				var structName = instruction.type;
 				var structType = types[structName];
 				if (!structType) {
 					throw "No type for " + structName;
 				}
-				value = "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg)).join(", ") + " }";
+				value = "{ " + instruction.arguments.map((arg, index) => "\"" + structType[index] + "\": " + mangleLocal(arg.sourceLocalName)).join(", ") + " }";
 				break;
 			case "tuple":
-				value = "[ " + instruction.arguments.map(mangleLocal).join(", ") + " ]";
+				value = "[ " + instruction.arguments.map(arg => mangleLocal(arg.sourceLocalName)).join(", ") + " ]";
 				break;
 			case "struct_extract":
 				value = mangleLocal(instruction.sourceLocalName) + JSON.stringify([instruction.fieldName]);
@@ -125,7 +125,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				break;
 			case "builtin":
 				var builtinName = instruction.builtinName;
-				value = builtinName + "(" + instruction.arguments.map(mangleLocal).join(", ") + ")";
+				value = builtinName + "(" + instruction.arguments.map(arg => mangleLocal(arg.sourceLocalName)).join(", ") + ")";
 				if (!this.writeBuiltIn(builtinName)) {
 					throw "No builtin available for " + builtinName + " (expects " + instruction.arguments.length + " arguments)";
 				}
@@ -179,13 +179,14 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				value = box(unboxRef(mangleLocal(instruction.sourceLocalName)), unboxField(mangleLocal(instruction.sourceLocalName)) + " + " + mangleLocal(instruction.offsetLocalName));
 				break;
 			default:
-				value = "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
-				break;
+				throw "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
+				//value = "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
+				//break;
 			}
 		} else {
-			this.buffer.write("// " + instruction.type);			
+			this.buffer.write("// " + instruction.operation);			
 		}
-		switch (instruction.type) {
+		switch (instruction.operation) {
 			case "assignment":
 				this.buffer.write("var " + mangleLocal(instruction.destinationLocalName) + " = " + value + ";");
 				break;
@@ -258,7 +259,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write("throw \"Should be unreachable!\";");
 				break;
 			default:
-				this.buffer.write("// Unhandled instruction type: " + instruction.type + ": " + JSON.stringify(instruction));
+				this.buffer.write("// Unhandled instruction type: " + instruction.operation + ": " + JSON.stringify(instruction));
 				break;
 		}
 	}

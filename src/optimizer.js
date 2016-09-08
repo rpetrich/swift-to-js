@@ -20,10 +20,10 @@ function unwrapSimpleStructInstructions(basicBlock) {
 	basicBlock.instructions.forEach(i => {
 		switch (i.instruction) {
 			case "struct":
-				var structType = types[i.structName];
+				var structType = types[i.type];
 				if (structType && (i.arguments.length == 1) && structType[0] == "_value") {
 					i.instruction = "register";
-					i.sourceLocalName = i.arguments[0];
+					i.sourceLocalName = i.arguments[0].sourceLocalName;
 					delete i.arguments;
 				}
 				break;
@@ -44,8 +44,8 @@ function unwrapSimpleStructInstructions(basicBlock) {
 
 function simplifyBranchInstructions(basicBlock) {
 	basicBlock.instructions.forEach(i => {
-		if (i.type == "branch" && i.arguments.length == 1) {
-			i.type = "branch_single";
+		if (i.operation == "branch" && i.arguments.length == 1) {
+			i.operation = "branch_single";
 			i.sourceLocalName = i.arguments[0];
 			delete i.arguments;
 		}
@@ -55,10 +55,10 @@ function simplifyBranchInstructions(basicBlock) {
 function fuseStackAllocationsWithStores(basicBlock) {
 	for (var i = 1; i < basicBlock.instructions.length; i++) {
 		var instruction = basicBlock.instructions[i];
-		if (instruction.type == "store") {
+		if (instruction.operation == "store") {
 			for (var j = 0; j < i; j++) {
 				var previousInstruction = basicBlock.instructions[j];
-				if ((previousInstruction.type == "assignment") &&
+				if ((previousInstruction.operation == "assignment") &&
 					(previousInstruction.instruction == "alloc_stack") &&
 					(instruction.destinationLocalName == previousInstruction.destinationLocalName)
 				) {
@@ -78,9 +78,9 @@ var fuseableWithAssignment = ["return", "throw", "store", "branch_single"];
 function fuseAssignmentsWithExits(basicBlock) {
 	for (var i = 0; i < basicBlock.instructions.length - 1; i++) {
 		var instruction = basicBlock.instructions[i];
-		if (instruction.type == "assignment") {
+		if (instruction.operation == "assignment") {
 			var nextInstruction = basicBlock.instructions[i + 1];
-			if (fuseableWithAssignment.indexOf(nextInstruction.type) != -1) {
+			if (fuseableWithAssignment.indexOf(nextInstruction.operation) != -1) {
 				if (nextInstruction.sourceLocalName == instruction.destinationLocalName) {
 					// Search for following instructions that read the assignment
 					var allowed = true;
@@ -93,7 +93,7 @@ function fuseAssignmentsWithExits(basicBlock) {
 					if (allowed) {
 						// Fuse the two instructions
 						for (var key in instruction) {
-							if (key != "type" && key != "destinationLocalName") {
+							if (key != "operation" && key != "destinationLocalName") {
 								nextInstruction[key] = instruction[key];
 							}
 						}
@@ -120,7 +120,7 @@ function analyzeBlockReferences(basicBlocks) {
 	});
 	basicBlocks.forEach(basicBlock => {
 		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
-		var blockReferences = blockReferencesForInstructions[lastInstruction.type];
+		var blockReferences = blockReferencesForInstructions[lastInstruction.operation];
 		if (blockReferences) {
 			blockReferences(lastInstruction).forEach(descriptor => {
 				basicBlock.referencesTo.push(descriptor.reference);
@@ -134,7 +134,7 @@ function inlineBlocks(basicBlocks) {
 	for (var i = 0; i < basicBlocks.length; i++) {
 		var basicBlock = basicBlocks[i];
 		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
-		var blockReferences = blockReferencesForInstructions[lastInstruction.type];
+		var blockReferences = blockReferencesForInstructions[lastInstruction.operation];
 		if (blockReferences) {
 			blockReferences(lastInstruction).forEach(descriptor => {
 				var destBlock = findBasicBlock(basicBlocks, descriptor);
@@ -170,11 +170,11 @@ function pruneDeadBlocks(basicBlocks) {
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
+		analyzeBlockReferences(declaration.basicBlocks);
 		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
 		declaration.basicBlocks.forEach(simplifyBranchInstructions);
 		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignmentsWithExits);
-		analyzeBlockReferences(declaration.basicBlocks);
 		inlineBlocks(declaration.basicBlocks);
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
