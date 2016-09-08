@@ -85,16 +85,17 @@ var instructionsWithoutSideEffects = ["integer_literal", "string_literal", "enum
 var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
 
 function fuseAssignments(basicBlock) {
-	for (var i = 0; i < basicBlock.instructions.length - 1; i++) {
+	fuse_search:
+	for (var i = 0; i < basicBlock.instructions.length - 1; ) {
 		var instruction = basicBlock.instructions[i];
 		if (instruction.operation == "assignment") {
-			fuse_search:
+			proposed_search:
 			for (var k = i + 1; k < basicBlock.instructions.length; k++) {
 				var proposedInstruction = basicBlock.instructions[k];
 				if (fuseableWithAssignment(proposedInstruction) && proposedInstruction.inputs.length == 1 && proposedInstruction.inputs[0].localName == instruction.destinationLocalName) {
 					for (var l = k + 1; l < basicBlock.instructions.length; l++) {
 						if (hasLocalAsInput(basicBlock.instructions[l], instruction.destinationLocalName)) {
-							break fuse_search;
+							break proposed_search;
 						}
 					}
 					for (var key in instruction) {
@@ -103,11 +104,14 @@ function fuseAssignments(basicBlock) {
 						}
 					}
 					basicBlock.instructions.splice(i, 1);
-				} else if (instructionHasSideEffects(proposedInstruction)) {
-					break fuse_search;
+					continue fuse_search;
+				}
+				if (instructionHasSideEffects(proposedInstruction)) {
+					break;
 				}
 			}
 		}
+		i++;
 	}
 }
 
