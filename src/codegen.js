@@ -58,7 +58,7 @@ CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
 				return;
 			}
 		}
-		throw "Unable to find block with name: " + targetBlock.reference;
+		throw "Unable to find block with name: " + descriptor.reference;
 	}
 	if (descriptor.inline) {
 		this.buffer.write("// " + descriptor.inline.name);
