@@ -189,6 +189,9 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "index_addr":
 				value = box(unboxRef(mangleLocal(instruction.inputs[0].localName)), unboxField(mangleLocal(instruction.inputs[0].localName)) + " + " + mangleLocal(instruction.offsetLocalName));
 				break;
+			case "thin_to_thick_function":
+			case "convert_function":
+				break;
 			default:
 				throw "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
 				//value = "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";

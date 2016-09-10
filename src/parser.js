@@ -284,6 +284,13 @@ Parser.prototype.parseInstruction = function (line) {
 					type: match[2],
 				}];
 				break;
+			case "thin_to_thick_function":
+			case "convert_function":
+				var match = args.match(/^%(\d+)\s:/);
+				assignment.inputs = [{
+					localName: match[1],
+				}];
+				break;
 			case "index_raw_pointer":
 			case "index_addr":
 				assignment.inputs = splitNoParens(args).map(arg => {
