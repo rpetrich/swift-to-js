@@ -128,7 +128,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				value = mangleLocal(instruction.inputs[0].localName) + JSON.stringify([instruction.fieldName]);
 				break;
 			case "tuple_extract":
-				value = mangleLocal(instruction.inputs[0].localName) + JSON.stringify([instruction.fieldIndex | 0]);
+				value = mangleLocal(instruction.inputs[0].localName) + JSON.stringify([instruction.fieldName | 0]);
 				break;
 			case "builtin":
 				var builtinName = instruction.builtinName;
