@@ -185,8 +185,15 @@ Parser.prototype.parseInstruction = function (line) {
 				}
 				break;
 			case "struct_extract":
-			case "tuple_extract":
 				var match = args.match(/^%(\d+)\s*:\s*\$(.*)\.(.*)$/);
+				assignment.inputs = [{
+					localName: match[1],
+					type: match[2]
+				}]
+				assignment.fieldName = match[3];
+				break;
+			case "tuple_extract":
+				var match = args.match(/^%(\d+)\s*:\s*\$(.*),\s+(\d+)$/);
 				assignment.inputs = [{
 					localName: match[1],
 					type: match[2]
