@@ -154,10 +154,17 @@ function parseInstruction(line) {
 				if (match && match[2]) {
 					assignment.inputs = splitNoParens(match[2]).map(arg => {
 						var match = arg.match(/^%(\d+)\s*:\s*\$(.*)$/);
-						return {
-							localName: match[1],
-							type: match[2],
-						};
+						if (match) {
+							return {
+								localName: match[1],
+								type: match[2],
+							};
+						} else {
+							match = arg.match(/^%(\d+)$/);
+							return {
+								localName: match[1],
+							};
+						}
 					});
 				} else {
 					assignment.inputs = [];

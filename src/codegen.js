@@ -229,13 +229,18 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "switch_enum":
 				this.buffer.write("switch (" + value + ") {")
 				var args = instruction.cases;
-				var enumName = basicNameForStruct(args[0].case);
+				var enumName = args[0].case;
 				var enumLayout = enums[enumName];
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;
 				}
 				for (var k = 0; k < args.length; k++) {
-					this.buffer.write("case " + enumLayout.indexOf(caseNameForEnum(args[k].case)) + ":");
+					var caseName = caseNameForEnum(args[k].case);
+					if (caseName) {
+						this.buffer.write("case " + enumLayout.indexOf(caseName) + ":");
+					} else {
+						this.buffer.write("default:");
+					}
 					this.buffer.indent(1);
 					var targetBlock = findBasicBlock(siblingBlocks, args[k].basicBlock);
 					if (targetBlock.arguments.length > 0) {
