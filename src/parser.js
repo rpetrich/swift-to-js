@@ -47,6 +47,7 @@ Parser.prototype.parseSil = function(line) {
 		name: name,
 		type: "function",
 		basicBlocks: [],
+		localNames: [],
 	};
 	if (!/\b(hidden|shared_external)\b/.test(line)) {
 		var beautifulMatch = this.lookbackLine.match(/^\/\/ \w+\.(\w+)/);
@@ -64,6 +65,16 @@ Parser.prototype.parseSil = function(line) {
 	this.declarations.push(declaration);
 }
 
+Parser.prototype.addLocalName = function (name) {
+	if (this.currentDeclaration.localNames.indexOf(name) == -1) {
+		this.currentDeclaration.localNames.push(name);
+	}
+	if (this.currentBasicBlock.localNames.indexOf(name) == -1) {
+		this.currentBasicBlock.localNames.push(name);
+	}
+	return name;
+}
+
 Parser.prototype.parseBasicBlock = function(line) {
 	if (!this.currentDeclaration) {
 		throw "Found a basic block declaration outside of function declaration!";
@@ -76,11 +87,13 @@ Parser.prototype.parseBasicBlock = function(line) {
 		name: line.match(/^\w+\b/)[0],
 		arguments: args || [],
 		instructions: [],
+		localNames: [],
 	}
 	this.currentDeclaration.basicBlocks.push(this.currentBasicBlock);
+	this.currentBasicBlock.arguments.forEach(arg => this.addLocalName(arg));
 }
 
-function parseInstruction(line) {
+Parser.prototype.parseInstruction = function (line) {
 	if (/^debug_value\s/.test(line)) {
 		return;
 	}
@@ -111,7 +124,7 @@ function parseInstruction(line) {
 	if (match) {
 		var assignment = {
 			operation: "assignment",
-			destinationLocalName: match[1],
+			destinationLocalName: this.addLocalName(match[1]),
 			instruction: match[2],
 			inputs: [],
 		};
@@ -434,7 +447,7 @@ Parser.prototype.addLine = function(originalLine) {
 			}
 		} else if (/^  /.test(line)) {
 			if (this.currentBasicBlock) {
-				var instruction = parseInstruction(line.trim());
+				var instruction = this.parseInstruction(line.trim());
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);
 				}
