@@ -118,6 +118,7 @@ function parseInstruction(line) {
 		var args = match[3];
 		switch (assignment.instruction) {
 			case "integer_literal":
+			case "float_literal":
 				var match = args.match(/^\$(.*),\s+(.*)?$/);
 				assignment.type = match[1];
 				assignment.value = match[2];

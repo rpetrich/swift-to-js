@@ -95,6 +95,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "register":
 				break;
 			case "integer_literal":
+			case "float_literal":
 				value = instruction.value;
 				break;
 			case "string_literal":
