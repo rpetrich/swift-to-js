@@ -52,7 +52,7 @@ function fuseStackAllocationsWithStores(basicBlock) {
 			var storeDestination = instruction.inputs[1].localName;
 			for (var j = 0; j < i; j++) {
 				var previousInstruction = basicBlock.instructions[j];
-				if ((previousInstruction.operation == "assignment") &&
+				if ((previousInstruction.operation == "assign") &&
 					(previousInstruction.instruction == "alloc_stack") &&
 					(previousInstruction.destinationLocalName == storeDestination)
 				) {

@@ -228,6 +228,9 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "store":
 				this.buffer.write(unbox(mangleLocal(instruction.inputs[1].localName)) + " = " + value + ";");
 				break;
+			case "copy_addr":
+				this.buffer.write(unbox(mangleLocal(instruction.inputs[1].localName)) + " = " + value + ";");
+				break;
 			case "switch_enum":
 				this.buffer.write("switch (" + value + ") {")
 				var args = instruction.cases;
@@ -246,7 +249,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 					this.buffer.indent(1);
 					var targetBlock = findBasicBlock(siblingBlocks, args[k].basicBlock);
 					if (targetBlock.arguments.length > 0) {
-						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0]) + " = " + value + "[1];");
+						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0].localName) + " = " + value + "[1];");
 					}
 					this.writeBranchToBlock(args[k].basicBlock, siblingBlocks);
 					this.buffer.indent(-1);
@@ -257,13 +260,13 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write("try {");
 				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
 				this.buffer.indent(1);
-				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0]) + " = " + value + "(" + instruction.inputs.map(mangleLocal).join(", ") + ");");
+				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0].localName) + " = " + value + "(" + instruction.inputs.slice(1).map(arg => mangleLocal(arg.localName)).join(", ") + ");");
 				this.writeBranchToBlock(instruction.normalBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("} catch (e) {");
 				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
 				this.buffer.indent(1);
-				this.buffer.write("var " + mangleLocal(errorBasicBlock.arguments[0]) + " = e;");
+				this.buffer.write("var " + mangleLocal(errorBasicBlock.arguments[0].localName) + " = e;");
 				this.writeBranchToBlock(instruction.errorBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("}");
@@ -306,7 +309,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
-	this.buffer.write("function " + declaration.name + "(" + basicBlocks[0].arguments.map(mangleLocal).join(", ") + ") {");
+	this.buffer.write("function " + declaration.name + "(" + basicBlocks[0].arguments.map(arg => mangleLocal(arg.localName)).join(", ") + ") {");
 	this.buffer.indent(1);
 	if (basicBlocks.length == 1) {
 		this.writeBasicBlock(basicBlocks[0], basicBlocks);

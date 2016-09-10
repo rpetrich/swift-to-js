@@ -52,7 +52,7 @@ module.exports = {
 		"truncOrBitCast_Word_Int32": "(value) { return value }",
 		"zext_Int8_Int32": "(value) { return value }",
 		"zext_Int16_Int32": "(value) { return value }",
-		"s_to_u_checked_conversion_Int32": "(value) { return value }",
+		"s_to_u_checked_conversion_Int32": "(value) { return [value, false] }",
 		// Int64
 		"zext_Int32_Int64": "(value) { return value }",
 		// Int16
