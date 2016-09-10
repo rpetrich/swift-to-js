@@ -409,7 +409,6 @@ Parser.prototype.parseInstruction = function (line) {
 		return {
 			operation: "try_apply",
 			inputs: parameters,
-			arguments: args,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
 		};
