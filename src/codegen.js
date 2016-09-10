@@ -192,7 +192,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "convert_function":
 				break;
 			default:
-				throw "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
+				throw "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.unparsedArguments + " */";
 				//value = "undefined /* unknown instruction " + instruction.instruction + ": " + instruction.arguments + " */";
 				//break;
 			}
