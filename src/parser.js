@@ -375,10 +375,17 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		var cases = splitNoParens(match[2]).map(arg => {
 			var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
-			return {
-				"case": match[1],
-				"basicBlock": { reference: match[2] }
-			};
+			if (match) {
+				return {
+					"case": match[1],
+					"basicBlock": { reference: match[2] }
+				};
+			} else {
+				match = arg.match(/^default\s+(.*)/);
+				return {
+					"basicBlock": { reference: match[1] }
+				};
+			}
 		})
 		return {
 			operation: "switch_enum",
