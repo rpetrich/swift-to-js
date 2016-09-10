@@ -323,6 +323,15 @@ function parseInstruction(line) {
 			falseBlock: { reference: match[3] },
 		};
 	}
+	match = line.match(/^cond_fail\s+\%(\w+)\s+:/);
+	if (match) {
+		return {
+			operation: "conditional_fail",
+			inputs: [{
+				localName: match[1],
+			}]
+		};
+	}
 	match = line.match(/^store\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
 		return {

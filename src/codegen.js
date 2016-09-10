@@ -266,6 +266,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
+			case "conditional_fail":
+				this.buffer.write("if (" + value + ") {");
+				this.buffer.write("throw \"Assertion failed!\"", 1);
+				this.buffer.write("}");
+				break;
 			case "unreachable":
 				this.buffer.write("throw \"Should be unreachable!\";");
 				break;
