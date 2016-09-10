@@ -201,6 +201,20 @@ function parseInstruction(line) {
 				});
 				assignment.inputs = parameters;
 				break;
+			case "partial_apply":
+				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:/);
+				var parameters = splitNoParens(match[4]).map(arg => {
+					var match = arg.match(/^%(\d+)(#\d+)?$(.*)/)
+					return {
+						localName: match[1],
+						type: match[3]
+					};
+				});
+				parameters.unshift({
+					localName: match[2]
+				});
+				assignment.inputs = parameters;
+				break;
 			case "alloc_stack":
 				break;
 			case "alloc_box":

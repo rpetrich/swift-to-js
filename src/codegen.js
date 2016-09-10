@@ -145,6 +145,10 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "apply":
 				value = mangleLocal(instruction.inputs[0].localName) + "(" + instruction.inputs.slice(1).map(input => mangleLocal(input.localName)).join(", ") + ")";
 				break;
+			case "partial_apply":
+				console.log(instruction)
+				value = mangleLocal(instruction.inputs[0].localName) + ".bind(this, " + instruction.inputs.slice(1).map(input => mangleLocal(input.localName)).join(", ") + ")";
+				break;
 			case "alloc_stack":
 				if (instruction.inputs.length) {
 					value = box("[" + mangleLocal(instruction.inputs[0].localName) + "]", 0);
