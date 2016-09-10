@@ -71,7 +71,9 @@ var fuseableWithAssignment = instruction => {
 		case "assignment":
 			return instruction.instruction == "register";
 		case "return":
+			return true;
 		case "throw":
+			return true;
 		case "store":
 			return true;
 		case "branch":
