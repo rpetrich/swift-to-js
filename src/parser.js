@@ -117,7 +117,8 @@ Parser.prototype.parseInstruction = function (line) {
 	}
 	if (line == "unreachable") {
 		return {
-			operation: "unreachable"
+			operation: "unreachable",
+			inputs: []
 		};
 	}
 	var match = line.match(/^\%(\w+)\s*=\s*(\w+)\s*(.*)/);
