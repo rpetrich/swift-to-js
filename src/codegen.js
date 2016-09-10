@@ -156,13 +156,13 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				}
 				break;
 			case "alloc_box":
-				value = "[]";
+				value = box("[{}]", 0);
 				break;
 			case "project_box":
 				value = box(mangleLocal(instruction.inputs[0].localName), 0);
 				break;
 			case "struct_element_addr":
-				value = box(mangleLocal(instruction.inputs[0].localName), "\"" + instruction.fieldName + "\"");
+				value = box(unbox(mangleLocal(instruction.inputs[0].localName)), "\"" + instruction.fieldName + "\"");
 				break;
 			case "global_addr":
 				value = box(instruction.globalName, 0);
