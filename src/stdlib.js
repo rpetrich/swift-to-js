@@ -102,5 +102,6 @@ module.exports = {
 		"_TZFsop1suRxs16SignedNumberTyperFxx": "(outNumber, inNumber) { outNumber[\"ref\"][outNumber[\"field\"]] = -inNumber[\"ref\"][inNumber[\"field\"]] }",
 		// Error handling
 		"willThrow": "(error) { throw error }",
+		"trap": "() { throw \"Runtime error!\" }",
 	}
 };
