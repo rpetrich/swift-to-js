@@ -209,8 +209,8 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				break;
 			case "branch":
 				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-				instruction.inputs.forEach((input, index) => {
-					this.buffer.write("var " + mangleLocal(targetBlock.arguments[index]) + " = " + mangleLocal(input.localName) + ";");
+				targetBlock.arguments.forEach((arg, index) => {
+					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + ((index == 0) ? value : mangleLocal(instruction.inputs[index].localName)) + ";");
 				});
 				this.writeBranchToBlock(instruction.block, siblingBlocks);
 				break;
