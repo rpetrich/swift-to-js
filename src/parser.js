@@ -154,7 +154,7 @@ Parser.prototype.parseInstruction = function (line) {
 				break;
 			case "struct":
 				var match = args.match(/^\$(.*?)\s+\((.*)\)/);
-				assignment.type = match[1];
+				assignment.type = basicNameForStruct(match[1]);
 				assignment.inputs = splitNoParens(match[2]).map(arg => {
 					var match = arg.match(/^%(\d+)\s*:\s*\$.*?\s*$/);
 					return {
