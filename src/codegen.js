@@ -255,7 +255,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write("try {");
 				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
 				this.buffer.indent(1);
-				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0]) + " = " + value + "(" + instruction.arguments.map(mangleLocal).join(", ") + ");");
+				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0]) + " = " + value + "(" + instruction.inputs.map(mangleLocal).join(", ") + ");");
 				this.writeBranchToBlock(instruction.normalBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("} catch (e) {");
