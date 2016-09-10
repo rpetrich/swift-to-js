@@ -86,7 +86,7 @@ Parser.prototype.parseBasicBlock = function(line) {
 	var argMatch = line.match(/\((.*)\)/);
 	if (argMatch) {
 		var args = splitNoParens(argMatch[1]).map(arg => {
-			var match = arg.match(/^%(\d+)\s+:\s+(.*)/)
+			var match = arg.match(/^%(\d+)\s+:\s+\$(.*)/)
 			return {
 				localName: match[1],
 				type: match[2],
@@ -209,7 +209,7 @@ Parser.prototype.parseInstruction = function (line) {
 				assignment.type = "(" + assignment.inputs.map(i => i.type).join(", ") + ")";
 				break;
 			case "struct_extract":
-				var match = args.match(/^%(\d+)\s*:\s*\$(.*)\.(.*)$/);
+				var match = args.match(/^%(\d+)\s*:\s*\$(.*),\s*.*#.*\.(.*)$/);
 				assignment.inputs = [{
 					localName: match[1],
 					type: match[2]
