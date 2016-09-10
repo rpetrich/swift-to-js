@@ -224,7 +224,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write("}");
 				break;
 			case "store":
-				this.buffer.write(unbox(mangleLocal(instruction.destinationLocalName)) + " = " + value + ";");
+				this.buffer.write(unbox(mangleLocal(instruction.inputs[1].localName)) + " = " + value + ";");
 				break;
 			case "switch_enum":
 				this.buffer.write("switch (" + value + ") {")
