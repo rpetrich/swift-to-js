@@ -41,7 +41,11 @@ CodeGen.prototype.writeBuiltIn = function (name) {
 			return false;
 		}
 		this.usedBuiltins[name] = true;
-		this.buffer.lines.unshift("function " + name + builtin);
+		if (/^\(/.test(builtin)) {
+			this.buffer.lines.unshift("function " + name + builtin);
+		} else {
+			this.buffer.lines.unshift("var " + name + " = " + builtin + ";");
+		}
 	}
 	return true;
 }

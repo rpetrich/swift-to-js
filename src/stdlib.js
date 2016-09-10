@@ -8,6 +8,8 @@ module.exports = {
 		"Int32": ["_value"],
 		"Bool": ["_value"],
 		"UTF16": ["_value"],
+		"Float": ["_value"],
+		"Double": ["_value"],
 		"UnicodeScalar": ["_value"],
 		"COpaquePointer": ["_value"],
 		"_GraphemeClusterBreakPropertyRawValue": ["rawValue"],
@@ -68,6 +70,12 @@ module.exports = {
 		"cmp_ne_Int8": "(left, right) { return left != right }",
 		"and_Int8": "(left, right) { return left & right }",
 		"or_Int8": "(left, right) { return left | right }",
+		// Float64
+		"fcmp_oeq_FPIEEE64": "(left, right) { return left == right }",
+		"fadd_FPIEEE64": "(left, right) { return left - right }",
+		"fsub_FPIEEE64": "(left, right) { return left - right }",
+		"fmul_FPIEEE64": "(left, right) { return left * right }",
+		"sqrt": "Math.sqrt",
 		// Pointers (unsound!)
 		"inttoptr_Int8": "(value) { return value }",
 		"cmp_eq_RawPointer": "(left, right) { return left == right }",
@@ -80,6 +88,7 @@ module.exports = {
 		"_swift_stdlib_malloc_size": "(buffer) { return 0 }",
 		// Booleans
 		"xor_Int1": "(left, right) { return left ^ right }",
+		"or_Int1": "(left, right) { return left | right }",
 		"int_expect_Int1": "(value, expected) { return value }",
 		// Words,
 		"sub_Word": "(left, right) { return (left - right) | 0 }",
