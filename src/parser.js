@@ -158,12 +158,7 @@ Parser.prototype.parseInstruction = function (line) {
 				input.type = match[1];
 				input.value = match[2];
 				if (input.type == "Builtin.Int1") {
-					if (input.value == 1) {
-						input.value = true;
-					}
-					if (input.value == 0) {
-						input.value = false;
-					}
+					input.value = input.value != 0;
 				}
 				break;
 			case "float_literal":
