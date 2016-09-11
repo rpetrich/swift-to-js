@@ -311,7 +311,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	if (basicBlocks.length == 1) {
 		this.writeBasicBlock(basicBlocks[0], basicBlocks);
 	} else {
-		var firstBlockHasBackreferences = !basicBlocks[0].hasNoBackreferences;
+		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
 		if (firstBlockHasBackreferences) {
 			this.buffer.write("var state = 0;");
 		} else {
@@ -320,11 +320,17 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 			this.writeBasicBlock(basicBlocks[0], basicBlocks);
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
-			this.buffer.write("for (;;) {")
-			this.buffer.indent(1);
-			this.buffer.write("// " + basicBlocks[1].name);
-			this.writeBasicBlock(basicBlocks[1], basicBlocks);
-			this.buffer.indent(-1);
+			if (basicBlocks[0].hasBackReferences) {
+				this.buffer.write("for (;;) {")
+				this.buffer.indent(1);
+				this.buffer.write("// " + basicBlocks[1].name);
+				this.writeBasicBlock(basicBlocks[1], basicBlocks);
+				this.buffer.indent(-1);
+				this.buffer.write("}");
+			} else {
+				this.buffer.write("// " + basicBlocks[1].name);
+				this.writeBasicBlock(basicBlocks[1], basicBlocks);
+			}
 		} else {
 			this.buffer.write("for (;;) switch(state) {")
 			for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
@@ -334,9 +340,9 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 				this.writeBasicBlock(basicBlocks[i], basicBlocks);
 				this.buffer.write("break;");
 				this.buffer.indent(-1);
+				this.buffer.write("}");
 			}
 		}
-		this.buffer.write("}");
 	}
 	this.buffer.indent(-1);
 	this.buffer.write("}");

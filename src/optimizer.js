@@ -183,7 +183,7 @@ function inlineBlocks(basicBlocks) {
 				return;
 			}
 			var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) > sourceBlockIndex);
-			if (hasBackwardsReference) {
+			if (hasBackwardsReference && deepBlockReferencesForInstructions(sourceBlock.instructions, basicBlocks) != 0) {
 				return;
 			}
 			sourceBlock = serializedClone(sourceBlock);
@@ -221,9 +221,9 @@ function pruneDeadBlocks(basicBlocks) {
 			basicBlocks.splice(i, 1);
 		}
 	}
-	if (basicBlocks.length != 0 && blocksThatReferenceBlock(basicBlocks[0], basicBlocks).length == 0) {
-		basicBlocks[0].hasNoBackreferences = true;
-	}
+	basicBlocks.forEach((block, i) => {
+		block.hasBackReferences = blocksThatReferenceBlock(block, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) >= i);
+	});
 }
 
 function optimize(declaration) {
