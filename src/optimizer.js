@@ -8,68 +8,46 @@ function findBasicBlock(blocks, descriptor) {
 				return blocks[i];
 			}
 		}
-		throw "Unable to find basic block: " + descriptor.reference;
+		throw new Error("Unable to find basic block: " + descriptor.reference);
 	}
 	if (descriptor.inline) {
 		return descriptor.inline;
 	}
-	throw "Neither a reference nor an inline block!";
+	throw new Error("Neither a reference nor an inline block!");
 }
 
 function unwrapSimpleStructInstructions(basicBlock) {
-	basicBlock.instructions.forEach(i => {
-		switch (i.instruction) {
-			case "struct":
-				var structType = types[i.type];
-				if (structType && (i.inputs.length == 1) && structType[0] == "_value") {
-					i.instruction = "register";
-					delete i.arguments;
-				}
-				break;
-			case "struct_extract":
-				if (i.fieldName == "_value") {
-					i.instruction = "register";
-					delete i.fieldName;
-				}
-				break;
-			case "struct_element_addr":
-				if (i.fieldName == "_value") {
-					throw "Field has been optimized away: _value";
-				}
-				break;
-		}
+	basicBlock.instructions.forEach(instruction => {
+		instruction.inputs.forEach(input => {
+			switch (input.interpretation) {
+				case "struct":
+					var structType = types[input.type];
+					if (structType && (structType.length == 1) && structType[0] == "_value") {
+						input.interpretation = "contents";
+					}
+					break;
+				case "struct_extract":
+					if (input.fieldName == "_value") {
+						input.interpretation = "contents";
+						delete input.fieldName;
+					}
+					break;
+				case "struct_element_addr":
+					if (input.fieldName == "_value") {
+						throw "Field has been optimized away: _value";
+					}
+					break;
+			}
+		});
 	})
 }
 
-function hasLocalAsInput(instruction, localName) {
-	return instruction.inputs.some(input => input.localName == localName);
-}
-
-function fuseStackAllocationsWithStores(basicBlock) {
-	for (var i = 1; i < basicBlock.instructions.length; i++) {
-		var instruction = basicBlock.instructions[i];
-		if (instruction.operation == "store") {
-			var storeDestination = instruction.inputs[1].localName;
-			for (var j = 0; j < i; j++) {
-				var previousInstruction = basicBlock.instructions[j];
-				if ((previousInstruction.operation == "assign") &&
-					(previousInstruction.instruction == "alloc_stack") &&
-					(previousInstruction.destinationLocalName == storeDestination)
-				) {
-					previousInstruction.inputs = [instruction.inputs[0]];
-					basicBlock.instructions.splice(i, 1);
-				} else if (hasLocalAsInput(previousInstruction, storeDestination)) {
-					break;
-				}
-			}
-		}
-	}
-}
+var countOfUsesOfLocal = (instruction, localName) => instruction.inputs.reduce((count, input) => count + input.localNames.filter(usedName => usedName == localName).length, 0);
 
 var fuseableWithAssignment = instruction => {
 	switch (instruction.operation) {
 		case "assignment":
-			return instruction.instruction == "register";
+			return true;
 		case "return":
 			return true;
 		case "throw":
@@ -77,36 +55,46 @@ var fuseableWithAssignment = instruction => {
 		case "store":
 			return true;
 		case "branch":
-			return instruction.inputs.length == 1;
+			return true;
 		default:
 			return false;
 	}
 };
 
-var instructionsWithoutSideEffects = ["integer_literal", "string_literal", "enum", "struct", "tuple", "struct_extract", "tuple_extract", "function_ref", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "global_addr", "load", "unchecked_enum_data", "unchecked_addr_cast", "unchecked_ref_cast", "pointer_to_address", "address_to_pointer", "ref_to_raw_pointer", "raw_pointer_to_ref", "index_raw_pointer", "index_addr"];
+var instructionsWithoutSideEffects = ["assignment", "builtin"];
 var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
 
 function fuseAssignments(basicBlock) {
 	fuse_search:
 	for (var i = 0; i < basicBlock.instructions.length - 1; ) {
 		var instruction = basicBlock.instructions[i];
-		if (instruction.operation == "assignment") {
+		if (instruction.operation == "assignment" && instruction.inputs.length == 1) {
 			proposed_search:
 			for (var k = i + 1; k < basicBlock.instructions.length; k++) {
 				var proposedInstruction = basicBlock.instructions[k];
-				if (fuseableWithAssignment(proposedInstruction) && proposedInstruction.inputs.length == 1 && proposedInstruction.inputs[0].localName == instruction.destinationLocalName) {
+				if (fuseableWithAssignment(proposedInstruction) && countOfUsesOfLocal(proposedInstruction, instruction.destinationLocalName) == 1) {
 					for (var l = k + 1; l < basicBlock.instructions.length; l++) {
-						if (hasLocalAsInput(basicBlock.instructions[l], instruction.destinationLocalName)) {
+						if (countOfUsesOfLocal(basicBlock.instructions[l], instruction.destinationLocalName) != 0) {
 							break proposed_search;
 						}
 					}
-					for (var key in instruction) {
-						if (key != "operation" && key != "destinationLocalName") {
-							proposedInstruction[key] = instruction[key];
+					var success = false;
+					proposedInstruction.inputs = proposedInstruction.inputs.map(input => {
+						if (input.localNames[0] == instruction.destinationLocalName) {
+							switch (input.interpretation) {
+								case "load":
+								case "function_ref":
+								case "contents":
+									success = true;
+									return instruction.inputs[0];
+							}
 						}
+						return input;
+					})
+					if (success) {
+						basicBlock.instructions.splice(i, 1);
+						continue fuse_search;
 					}
-					basicBlock.instructions.splice(i, 1);
-					continue fuse_search;
 				}
 				if (instructionHasSideEffects(proposedInstruction)) {
 					break;
@@ -117,29 +105,12 @@ function fuseAssignments(basicBlock) {
 	}
 }
 
-var blockReferencesForInstructions = {
+var blockReferencesForInstructionTypes = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
 };
-
-function analyzeBlockReferences(basicBlocks) {
-	basicBlocks.forEach(basicBlock => {
-		basicBlock.referencesFrom = [];
-		basicBlock.referencesTo = [];
-	});
-	basicBlocks.forEach(basicBlock => {
-		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
-		var blockReferences = blockReferencesForInstructions[lastInstruction.operation];
-		if (blockReferences) {
-			blockReferences(lastInstruction).forEach(descriptor => {
-				basicBlock.referencesTo.push(descriptor.reference);
-				findBasicBlock(basicBlocks, descriptor).referencesFrom.push(basicBlock.name);
-			})
-		}
-	});
-}
 
 function newLocalName(declaration, basicBlock) {
 	var i = 0;
@@ -155,63 +126,110 @@ function serializedClone(object) {
 	return JSON.parse(JSON.stringify(object));
 }
 
-function inlineBlocks(basicBlocks) {
-	for (var i = 0; i < basicBlocks.length; i++) {
-		var basicBlock = basicBlocks[i];
-		var lastInstruction = basicBlock.instructions[basicBlock.instructions.length-1];
-		var blockReferences = blockReferencesForInstructions[lastInstruction.operation];
-		if (blockReferences) {
-			var references = blockReferences(lastInstruction).forEach(descriptor => {
-				var destBlock = findBasicBlock(basicBlocks, descriptor);
-				var destBlockIndex = basicBlocks.indexOf(destBlock);
-				if (destBlockIndex > i) {
-					var hasBackwardsReference = destBlock.referencesFrom.some(ref => {
-						var fromBlock = findBasicBlock(basicBlocks, { reference: ref });
-						return basicBlocks.indexOf(fromBlock) > destBlockIndex;
-					});
-					if (!hasBackwardsReference) {
-						// Inline the block
-						var index = destBlock.referencesFrom.indexOf(basicBlock.name);
-						if (index != -1) {
-							destBlock.referencesFrom.splice(index, 1);
-						}
-						if (lastInstruction.operation == "branch") {
-							basicBlock.instructions.splice(basicBlock.instructions.length - 1);
-							lastInstruction.inputs.forEach((input, index) => {
-								basicBlock.instructions.push({
-									operation: "assignment",
-									destinationLocalName: destBlock.arguments[index],
-									instruction: lastInstruction.input || "register",
-									inputs: [ input ],
-								});
-							});
-							serializedClone(destBlock.instructions).forEach(instruction => basicBlock.instructions.push(instruction));
-						} else {
-							descriptor.inline = destBlock;
-							delete descriptor.reference;
-						}
-					}
-				}
+function blockReferencesForInstructions(instructions) {
+	var instruction = instructions[instructions.length - 1];
+	var blockReferences = blockReferencesForInstructionTypes[instruction.operation];
+	return blockReferences ? blockReferences(instruction) : [];
+}
+
+function deepBlockReferencesForInstructions(instructions)
+{
+	var result = [];
+	blockReferencesForInstructions(instructions).forEach(descriptor => {
+		if (descriptor.inline) {
+			result = result.concat(result, deepBlockReferencesForInstructions(descriptor.inline.instructions));
+		} else if (descriptor.reference) {
+			result.push({
+				instructionList: instructions,
+				toBlockName: descriptor.reference,
+				descriptor: descriptor,
 			});
 		}
+	})
+	return result;
+}
+
+function recursiveReferencesFromBlock(basicBlock, basicBlocks)
+{
+	var result = deepBlockReferencesForInstructions(basicBlock.instructions);
+	for (var i = 0; i < result.length; i++) {
+		deepBlockReferencesForInstructions(findBasicBlock(basicBlocks, result[i].descriptor).instructions).forEach(newRef => {
+			if (!result.some(existingRef => existingRef.toBlockName == newRef.toBlockName)) {
+				result.push(newRef);
+			}
+		});
+	}
+	return result;
+}
+
+function blocksThatReferenceBlock(basicBlock, basicBlocks)
+{
+	return basicBlocks.filter(otherBlock => (otherBlock !== basicBlock) && recursiveReferencesFromBlock(otherBlock, basicBlocks).some(ref => ref.toBlockName == basicBlock.name));
+}
+
+function inlineBlocks(basicBlocks) {
+	var work = basicBlocks.map((block, index) => {
+		return {
+			instructions: block.instructions,
+			blockIndex: index,
+		}
+	});
+	for (var i = 0; i < work.length; i++) {
+		deepBlockReferencesForInstructions(work[i].instructions).forEach(reference => {
+			var sourceBlockName = reference.toBlockName;
+			var sourceBlock = findBasicBlock(basicBlocks, { reference: sourceBlockName });
+			var sourceBlockIndex = basicBlocks.indexOf(sourceBlock);
+			if (sourceBlockIndex <= work[i].blockIndex) {
+				return;
+			}
+			var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) > sourceBlockIndex);
+			if (hasBackwardsReference) {
+				return;
+			}
+			sourceBlock = serializedClone(sourceBlock);
+			var instruction = reference.instructionList[reference.instructionList.length-1];
+			var instructions
+			if (instruction.operation == "branch") {
+				instructions = reference.instructionList
+					.slice(0, reference.instructionList.length - 1)
+					.concat(instruction.inputs.map((input, index) => {
+						return {
+							operation: "assignment",
+							destinationLocalName: sourceBlock.arguments[index].localName,
+							inputs: [ input ],
+						}
+					}))
+					.concat(sourceBlock.instructions);
+				reference.instructionList = instructions;
+			} else {
+				reference.descriptor.inline = sourceBlock;
+				delete reference.descriptor.reference;
+				instructions = instructions;
+			}
+			work.push({
+				instructions: reference.instructionList,
+				blockIndex: work[i].blockIndex,
+			});
+		});
 	}
 }
 
 function pruneDeadBlocks(basicBlocks) {
 	// Always leave the first block alone, it's the entry point
 	for (var i = 1; i < basicBlocks.length; i++) {
-		while (basicBlocks[i] && basicBlocks[i].referencesFrom.length == 0) {
+		while (i < basicBlocks.length && blocksThatReferenceBlock(basicBlocks[i], basicBlocks).length == 0) {
 			basicBlocks.splice(i, 1);
 		}
-	}	
+	}
+	if (basicBlocks.length != 0 && blocksThatReferenceBlock(basicBlocks[0], basicBlocks).length == 0) {
+		basicBlocks[0].hasNoBackreferences = true;
+	}
 }
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
-		analyzeBlockReferences(declaration.basicBlocks);
 		inlineBlocks(declaration.basicBlocks);
 		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
-		declaration.basicBlocks.forEach(fuseStackAllocationsWithStores);
 		declaration.basicBlocks.forEach(fuseAssignments);
 		pruneDeadBlocks(declaration.basicBlocks);
 	}

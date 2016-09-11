@@ -65,15 +65,15 @@ Parser.prototype.parseSil = function(line) {
 	this.declarations.push(declaration);
 }
 
-Parser.prototype.addLocalName = function (name, type) {
+Parser.prototype.addLocalName = function (name, type, source) {
 	if (type === undefined) {
-		throw "No type for %" + name;
+		throw new Error("No type for %" + name + " in " + JSON.stringify(source));
 	}
 	var oldType = this.currentDeclaration.localNames[name];
 	if (oldType === undefined) {
 		this.currentDeclaration.localNames[name] = type;
 	} else if (oldType != type) {
-		throw "Tried to replace type \"" + oldType + "\" with \"" + type + "\" for local %" + name;
+		throw new Error("Tried to replace type \"" + oldType + "\" with \"" + type + "\" for local %" + name + " in " + JSON.stringify(source));
 	}
 	this.currentBasicBlock.localNames[name] = type;
 	return name;
@@ -100,7 +100,15 @@ Parser.prototype.parseBasicBlock = function(line) {
 		localNames: {},
 	}
 	this.currentDeclaration.basicBlocks.push(this.currentBasicBlock);
-	this.currentBasicBlock.arguments.forEach(arg => this.addLocalName(arg.localName, arg.type));
+	this.currentBasicBlock.arguments.forEach(arg => this.addLocalName(arg.localName, arg.type, arg));
+}
+
+function simpleLocalContents(name, type) {
+	return {
+		interpretation: "contents",
+		localNames: [name],
+		type: type
+	};
 }
 
 Parser.prototype.parseInstruction = function (line) {
@@ -119,6 +127,9 @@ Parser.prototype.parseInstruction = function (line) {
 	if (/^dealloc_stack\s+/.test(line)) {
 		return;
 	}
+	if (/^dealloc_ref\s+/.test(line)) {
+		return;
+	}
 	if (/^strong_retain\s+/.test(line)) {
 		return;
 	}
@@ -133,53 +144,53 @@ Parser.prototype.parseInstruction = function (line) {
 	}
 	var match = line.match(/^\%(\w+)\s*=\s*(\w+)\s*(.*)/);
 	if (match) {
-		var assignment = {
-			operation: "assignment",
-			destinationLocalName: match[1],
-			instruction: match[2],
-			inputs: [],
-		};
+		var destinationLocalName = match[1];
+		var interpretation = match[2];
 		var args = match[3];
-		switch (assignment.instruction) {
+		var input = {
+			interpretation: interpretation,
+			localNames: [],
+			line: line,
+		};
+		switch (interpretation) {
 			case "integer_literal":
 				var match = args.match(/^\$(.*),\s+(.*)?$/);
-				assignment.type = match[1];
-				assignment.value = match[2];
-				if (assignment.type == "Builtin.Int1") {
-					if (assignment.value == 1) {
-						assignment.value = true;
+				input.type = match[1];
+				input.value = match[2];
+				if (input.type == "Builtin.Int1") {
+					if (input.value == 1) {
+						input.value = true;
 					}
-					if (assignment.value == 0) {
-						assignment.value = false;
+					if (input.value == 0) {
+						input.value = false;
 					}
 				}
 				break;
 			case "float_literal":
 				var match = args.match(/^\$(.*),\s+(.*)?$/);
-				assignment.type = match[1];
-				assignment.value = match[2];
+				input.type = match[1];
+				input.value = match[2];
 				break;
 			case "string_literal":
-				assignment.value = args.match(/\".*\"/)[0];
-				assignment.type = "Builtin.RawPointer";
+				input.value = args.match(/\".*\"/)[0];
+				input.type = "Builtin.RawPointer";
 				break;
 			case "enum":
 				var match = args.match(/^\$(.*),\s+.*?\.(\w+)\!.*(,\s+\%\w+\s+:)?/);
-				assignment.type = basicNameForStruct(match[1]);
-				assignment.caseName = match[2];
+				input.type = basicNameForStruct(match[1]);
+				input.caseName = match[2];
 				if (match[3]) {
 					match = match[3].match(/^,\s+\%(\w+)\s+:$(.*)$/);
-					assignment.inputs = [{
-						localName: match[1],
-						type: match[2]
-					}];
+					input.localNames = [match[1]];
+					input.type = match[2];
 				}
 				break;
 			case "struct":
 				var match = args.match(/^\$(.*?)\s+\((.*)\)/);
-				assignment.type = basicNameForStruct(match[1]);
-				assignment.inputs = splitNoParens(match[2]).map(arg => {
+				input.type = basicNameForStruct(match[1]);
+				input.localNames = splitNoParens(match[2]).map(arg => {
 					var match = arg.match(/^%(\d+)\s*:\s*\$.*?\s*$/);
+					return match[1];
 					return {
 						localName: match[1],
 						type: match[2]
@@ -188,8 +199,9 @@ Parser.prototype.parseInstruction = function (line) {
 				break;
 			case "tuple":
 				var match = args.match(/^(\$\(.*?\)\s+)?\((.*)\)/);
+				var descriptors = []
 				if (match && match[2]) {
-					assignment.inputs = splitNoParens(match[2]).map(arg => {
+					descriptors = splitNoParens(match[2]).map(arg => {
 						var match = arg.match(/^%(\d+)\s*:\s*\$(.*)$/);
 						if (match) {
 							return {
@@ -203,191 +215,243 @@ Parser.prototype.parseInstruction = function (line) {
 							};
 						}
 					});
-				} else {
-					assignment.inputs = [];
 				}
-				assignment.type = "(" + assignment.inputs.map(i => i.type).join(", ") + ")";
+				input.localNames = descriptors.map(i => i.localName);
+				input.type = "(" + descriptors.map(i => i.type).join(", ") + ")";
 				break;
 			case "struct_extract":
 				var match = args.match(/^%(\d+)\s*:\s*\$(.*),\s*.*#.*\.(.*)$/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[2]
-				}]
-				assignment.fieldName = match[3];
-				assignment.type = match[2];
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.fieldName = match[3];
 				break;
 			case "tuple_extract":
 				var match = args.match(/^%(\d+)\s*:\s*\$\((.*)\),\s+(\d+)$/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: "(" + match[2] + ")"
-				}]
-				assignment.fieldName = match[3] | 0;
-				assignment.type = splitNoParens(match[2])[assignment.fieldName];
+				input.localNames = [match[1]];
+				input.fieldName = match[3] | 0;
+				input.type = splitNoParens(match[2])[input.fieldName];
 				break;
 			case "builtin":
 				var match = args.match(/^\"(\w+)\"(<\w+>)?\((.*)\)\s*:\s*\$(.*)/);
-				assignment.builtinName = match[1];
-				assignment.inputs = splitNoParens(match[3]).map(arg => {
+				input.localNames = splitNoParens(match[3]).map(arg => {
 					var match = arg.match(/^%(\d+)\s*:\s*\$(.*)$/)
+					return match[1];
 					return {
 						localName: match[1],
 						type: match[2]
 					};
 				});
-				assignment.type = match[4];
+				input.builtinName = match[1];
+				input.type = match[4];
 				break;
 			case "function_ref":
 				var match = args.match(/^@(\w+)\s*:\s*\$(.*)/);
-				assignment.functionName = match[1];
-				assignment.type = match[2]
+				input.functionName = match[1];
+				input.type = match[2]
 				break;
 			case "apply":
 				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:(.*)?\s+\-\>\s+(.*)/);
 				var parameters = splitNoParens(match[4]).map(arg => {
 					var match = arg.match(/^%(\d+)(#\d+)?$(.*)/)
-					return {
-						localName: match[1],
-						type: match[3]
-					};
+					return match[1];
+					// return {
+					// 	localName: match[1],
+					// 	type: match[3]
+					// };
 				});
-				parameters.unshift({
-					localName: match[2]
-				});
-				assignment.inputs = parameters;
-				assignment.type = match[6];
+				// parameters.unshift({
+				// 	localName: match[2]
+				// });
+				parameters.unshift(match[2]);
+				input.localNames = parameters;
+				input.type = match[6];
 				break;
 			case "partial_apply":
 				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:/);
 				var parameters = splitNoParens(match[4]).map(arg => {
 					var match = arg.match(/^%(\d+)(#\d+)?$(.*)/)
-					return {
-						localName: match[1],
-						type: match[3]
-					};
+					return match[1]
+					// return {
+					// 	localName: match[1],
+					// 	type: match[3]
+					// };
 				});
-				parameters.unshift({
-					localName: match[2]
-				});
-				assignment.inputs = parameters;
+				// parameters.unshift({
+				// 	localName: match[2]
+				// });
+				parameters.unshift(match[2]);
+				input.localNames = parameters;
+				input.type = "TODO";
 				break;
 			case "alloc_stack":
 				var match = args.match(/^\$(.*)/);
-				assignment.type = match[1];
+				input.type = match[1];
 				break;
 			case "alloc_box":
 				var match = args.match(/^\$(.*)?,/);
-				assignment.type = match[1];
+				input.type = match[1];
+				break;
+			case "alloc_ref":
+				var match = args.match(/^\$(.*)/)
+				input.type = match[1];
 				break;
 			case "project_box":
 				var match = args.match(/^%(\w+)\s+:/);
-				assignment.inputs = [{
-					localName: match[1]
-				}];
+				// assignment.inputs = [{
+				// 	localName: match[1]
+				// }];
+				input.localNames = [match[1]];
 				break;
 			case "struct_element_addr":
 				var match = args.match(/^%(\w+)(\#\d+)?\s+:\s+.*?#(\w+)\.(\w+)$/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[3]
-				}];
-				assignment.fieldName = match[4];
-				assignment.type = "&addr"; // TODO: Find out the type
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[3]
+				// }];
+				input.localNames = [match[1]];
+				input.fieldName = match[4];
+				input.type = "TODO";
+				break;
+			case "ref_element_addr":
+				var match = args.match(/%(\d+)\s+:.*#.*\.(.*)/)
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// }];
+				input.localNames = [match[1]];
+				input.fieldName = match[2];
+				input.type = "TODO";
 				break;
 			case "global_addr":
 				var match = args.match(/^@(\w+)\s*:\s*(.*)/);
-				assignment.globalName = match[1];
-				assignment.type = match[2];
+				input.globalName = match[1];
+				input.type = match[2];
 				break;
 			case "load":
 				var match = args.match(/^%(\w+)(#\d+)?\s+:\s*\$(.*)/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[3]
-				}];
-				assignment.type = match[3].substring(1);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[3]
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[3].substring(1);
 				break;
 			case "mark_uninitialized":
 				var match = args.match(/^((\[\w+\]\s+)*)%(\w+)(#\d+)?\s+:\s\$*(.*)/);
-				assignment.inputs = [{
-					localName: match[3],
-					type: match[5]
-				}];
-				assignment.type = match[5]
+				// assignment.inputs = [{
+				// 	localName: match[3],
+				// 	type: match[5]
+				// }];
+				input.localNames = match[3];
+				input.type = match[5]
+				input.interpretation = "contents";
 				break;
 			case "unchecked_enum_data":
 				var match = args.match(/^%(\w+)\s+:\s*(.*)/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[2]
-				}];
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2]
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[2];
 				break;
 			case "address_to_pointer":
-				var match = args.match(/^%(\w+)\s+:\s*(.*) to /);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[2],
-				}];
-				assignment.type = match[2]
+			case "unchecked_ref_cast":
+				var match = args.match(/^%(\w+)\s+:\s*\$(.*) to \$(.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2],
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[3];
+				input.interpretation = "contents";
 				break;
 			case "unchecked_addr_cast":
-			case "unchecked_ref_cast":
 			case "pointer_to_address":
 			case "ref_to_raw_pointer":
 			case "raw_pointer_to_ref":
-				var match = args.match(/^%(\w+)\s+:\s*(.*)/);
-				assignment.inputs = [{
-					localName: match[1],
-					type: match[2],
-				}];
+				var match = args.match(/^%(\d+)\s+:\s*(.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2],
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
 				break;
 			case "thin_to_thick_function":
 			case "convert_function":
-				var match = args.match(/^%(\d+)\s:/);
-				assignment.inputs = [{
-					localName: match[1],
-				}];
+				var match = args.match(/^%(\d+)\s+:\s+.* to \$(.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// }];
+				input.localNames = [match[1]];
+				input.type = [match[2]];
+				input.interpretation = "contents";
 				break;
 			case "index_raw_pointer":
-			case "index_addr":
-				assignment.inputs = splitNoParens(args).map(arg => {
+				input.localNames = splitNoParens(args).map(arg => {
 					var match = args.match(/^%(\w+)\s+:\s*(.*)*/);
-					return {
-						localName: match[1],
-						type: match[2]
-					}
+					return match[1];
+				});
+				input.type = "Builtin.RawPointer";
+				break;
+			case "index_addr":
+				input.localNames = splitNoParens(args).map(arg => {
+					var match = args.match(/^%(\w+)\s+:\s*(.*)*/);
+					return match[1];
+					// return {
+					// 	localName: match[1],
+					// 	type: match[2]
+					// }
 				});
 				break;
 			case "metatype":
 				var match = args.match(/^\$(.*)/);
-				assignment.type = match[1];
+				input.type = match[1];
+				break;
+			case "upcast":
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*) to \$(.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2],
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[3];
+				input.interpretation = "contents";
+				break;
+			case "class_method":
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+(#.*) : (.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2],
+				// }]
+				input.localNames = [match[1]];
+				input.type = match[4];
 				break;
 			default:
-				assignment.unparsedArguments = args;
+				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
 				break;
 		}
-		this.addLocalName(assignment.destinationLocalName, assignment.type);
+		var assignment = {
+			operation: "assignment",
+			destinationLocalName: destinationLocalName,
+			inputs: [input],
+		};
+		this.addLocalName(assignment.destinationLocalName, input.type, assignment);
 		return assignment;
 	}
 	match = line.match(/^return\s+\%(\d+)\s*:\s*\$(.*)/);
 	if (match) {
 		return {
 			operation: "return",
-			inputs: [{
-				localName: match[1],
-				type: match[2]
-			}]
+			inputs: [simpleLocalContents(match[1], match[2])],
 		};
 	}
 	match = line.match(/^br\s+(\w+)\((.*)\)/) || line.match(/^br\s+(\w+)/);
 	if (match) {
 		var inputs = match[2] ? splitNoParens(match[2]).map(arg => {
 			var match = arg.match(/^%(\d+)\s*:\s*\$(.*)/);
-			return {
-				localName: match[1],
-				type: match[2]
-			};
+			return simpleLocalContents(match[1], match[2]);
 		}) : [];
 		return {
 			operation: "branch",
@@ -395,46 +459,43 @@ Parser.prototype.parseInstruction = function (line) {
 			inputs: inputs,
 		};
 	}
-	match = line.match(/^cond_br\s+\%(\w+),\s*(\w+),\s(\w+)/);
+	match = line.match(/^cond_br\s+\%(\d+),\s*(\w+),\s(\w+)/);
 	if (match) {
 		return {
 			operation: "conditional_branch",
-			inputs: [{
-				localName: match[1],
-			}],
+			inputs: [simpleLocalContents(match[1], undefined)],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
+		};
+	}
+	match = line.match(/^checked_cast_br\s+(\[exact\]\s+)?\%(\d+)\s+:.*,\s*(\w+),\s(\w+)/);
+	if (match) {
+		// We don't do checked casts, assume that the argument type is always correct
+		return {
+			operation: "branch",
+			inputs: [simpleLocalContents(match[2], undefined)],
+			block: { reference: match[3] },
 		};
 	}
 	match = line.match(/^cond_fail\s+\%(\w+)\s+:/);
 	if (match) {
 		return {
 			operation: "conditional_fail",
-			inputs: [{
-				localName: match[1],
-			}]
+			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
 	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
 		return {
 			operation: "store",
-			inputs: [{
-				localName: match[2]
-			},{
-				localName: match[3]
-			}]
+			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[3])],
 		};
 	}
 	match = line.match(/^copy_addr\s+\%(\w+)(\#\d+)?\s+to\s+(\[initialization\]\s+)?\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
 		return {
 			operation: "copy_addr",
-			inputs: [{
-				localName: match[1]
-			},{
-				localName: match[4]
-			}]
+			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
 		};
 	}
 	match = line.match(/^switch_enum\s+\%(\w+)\s+:\s+.*?,\s+(case .*)/);
@@ -455,26 +516,20 @@ Parser.prototype.parseInstruction = function (line) {
 		})
 		return {
 			operation: "switch_enum",
-			inputs: [{
-				localName: match[1]
-			}],
+			inputs: [simpleLocalContents(match[1], undefined)],
 			cases: cases,
 		};
 	}
 	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
 	if (match) {
-		var parameters = splitNoParens(match[3]).map(arg => {
+		var inputs = splitNoParens(match[3]).map(arg => {
 			var match = arg.match(/^%(\d+)$/)
-			return {
-				localName: match[1]
-			};
+			return simpleLocalContents(match[1], undefined);
 		});
-		parameters.unshift({
-			localName: match[1]
-		});
+		inputs.unshift(simpleLocalContents(match[1], undefined))
 		return {
 			operation: "try_apply",
-			inputs: parameters,
+			inputs: inputs,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
 		};
@@ -483,8 +538,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "throw",
-			name: match[1],
-			inputs: [],
+			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
 	throw "Unknown instruction: " + line;
