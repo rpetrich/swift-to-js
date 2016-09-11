@@ -23,7 +23,7 @@ IndentedBuffer.prototype.write = function (line, extra) {
 };
 
 var mangleLocal = local => "_" + local;
-var box = (struct, quotedFieldName) => "{ \"ref\": " + struct + ", \"field\": " + quotedFieldName + " }";
+var box = (struct, quotedFieldName) => "({ \"ref\": " + struct + ", \"field\": " + quotedFieldName + " })";
 var unboxRef = struct => struct + "[\"ref\"]";
 var unboxField = struct => struct + "[\"field\"]";
 var unbox = struct => unboxRef(struct) + "[" + unboxField(struct) + "]";
