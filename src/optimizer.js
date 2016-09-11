@@ -16,8 +16,8 @@ function findBasicBlock(blocks, descriptor) {
 	throw new Error("Neither a reference nor an inline block!");
 }
 
-function unwrapSimpleStructInstructions(basicBlock) {
-	basicBlock.instructions.forEach(instruction => {
+function unwrapSimpleStructInstructions(instructions) {
+	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
 			switch (input.interpretation) {
 				case "struct":
@@ -64,17 +64,17 @@ var fuseableWithAssignment = instruction => {
 var instructionsWithoutSideEffects = ["assignment", "builtin"];
 var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
 
-function fuseAssignments(basicBlock) {
+function fuseAssignments(instructions) {
 	fuse_search:
-	for (var i = 0; i < basicBlock.instructions.length - 1; ) {
-		var instruction = basicBlock.instructions[i];
+	for (var i = 0; i < instructions.length - 1; ) {
+		var instruction = instructions[i];
 		if (instruction.operation == "assignment" && instruction.inputs.length == 1) {
 			proposed_search:
-			for (var k = i + 1; k < basicBlock.instructions.length; k++) {
-				var proposedInstruction = basicBlock.instructions[k];
+			for (var k = i + 1; k < instructions.length; k++) {
+				var proposedInstruction = instructions[k];
 				if (fuseableWithAssignment(proposedInstruction) && countOfUsesOfLocal(proposedInstruction, instruction.destinationLocalName) == 1) {
-					for (var l = k + 1; l < basicBlock.instructions.length; l++) {
-						if (countOfUsesOfLocal(basicBlock.instructions[l], instruction.destinationLocalName) != 0) {
+					for (var l = k + 1; l < instructions.length; l++) {
+						if (countOfUsesOfLocal(instructions[l], instruction.destinationLocalName) != 0) {
 							break proposed_search;
 						}
 					}
@@ -92,7 +92,7 @@ function fuseAssignments(basicBlock) {
 						return input;
 					})
 					if (success) {
-						basicBlock.instructions.splice(i, 1);
+						instructions.splice(i, 1);
 						continue fuse_search;
 					}
 				}
@@ -226,11 +226,25 @@ function pruneDeadBlocks(basicBlocks) {
 	});
 }
 
+function allInstructionLists(basicBlocks) {
+	var result = basicBlocks.map(basicBlock => basicBlock.instructions);
+	for (var i = 0; i < result.length; i++) {
+		blockReferencesForInstructions(result[i]).forEach(descriptor => {
+			if (descriptor.inline) {
+				result.push(descriptor.inline.instructions);
+			}
+		});
+	}
+	return result;
+}
+
 function optimize(declaration) {
 	if (declaration.type == "function") {
 		inlineBlocks(declaration.basicBlocks);
-		declaration.basicBlocks.forEach(unwrapSimpleStructInstructions);
-		declaration.basicBlocks.forEach(fuseAssignments);
+		allInstructionLists(declaration.basicBlocks).forEach(instructions => {
+			unwrapSimpleStructInstructions(instructions);
+			fuseAssignments(instructions);
+		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
 }
