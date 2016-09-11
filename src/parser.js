@@ -466,7 +466,7 @@ Parser.prototype.parseInstruction = function (line) {
 		// We don't do checked casts, assume that the argument type is always correct
 		return {
 			operation: "branch",
-			inputs: [simpleLocalContents(match[2], undefined)],
+			inputs: [/*simpleLocalContents(match[2], undefined)*/], // No inputs
 			block: { reference: match[3] },
 		};
 	}
