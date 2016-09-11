@@ -164,7 +164,7 @@ function recursiveReferencesFromBlock(basicBlock, basicBlocks)
 
 function blocksThatReferenceBlock(basicBlock, basicBlocks)
 {
-	return basicBlocks.filter(otherBlock => (otherBlock !== basicBlock) && recursiveReferencesFromBlock(otherBlock, basicBlocks).some(ref => ref.toBlockName == basicBlock.name));
+	return basicBlocks.filter(otherBlock => recursiveReferencesFromBlock(otherBlock, basicBlocks).some(ref => ref.toBlockName == basicBlock.name));
 }
 
 function inlineBlocks(basicBlocks) {
