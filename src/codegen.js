@@ -320,7 +320,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 			this.writeBasicBlock(basicBlocks[0], basicBlocks);
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
-			if (basicBlocks[0].hasBackReferences) {
+			if (basicBlocks[1].hasBackReferences) {
 				this.buffer.write("for (;;) {")
 				this.buffer.indent(1);
 				this.buffer.write("// " + basicBlocks[1].name);
@@ -340,8 +340,8 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 				this.writeBasicBlock(basicBlocks[i], basicBlocks);
 				this.buffer.write("break;");
 				this.buffer.indent(-1);
-				this.buffer.write("}");
 			}
+			this.buffer.write("}");
 		}
 	}
 	this.buffer.indent(-1);
