@@ -22,18 +22,20 @@ function unwrapSimpleStructInstructions(instructions) {
 			switch (input.interpretation) {
 				case "struct":
 					var structType = types[input.type];
-					if (structType && (structType.length == 1) && structType[0] == "_value") {
+					if (structType && structType.length == 1) {
 						input.interpretation = "contents";
 					}
 					break;
 				case "struct_extract":
-					if (input.fieldName == "_value") {
+					var structType = types[input.type];
+					if (structType && structType.length == 1) {
 						input.interpretation = "contents";
 						delete input.fieldName;
 					}
 					break;
 				case "struct_element_addr":
-					if (input.fieldName == "_value") {
+					var structType = types[input.type];
+					if (structType && structType.length == 1) {
 						throw "Field has been optimized away: _value";
 					}
 					break;
