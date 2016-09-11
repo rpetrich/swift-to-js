@@ -95,12 +95,16 @@ CodeGen.prototype.rValueForInput = function(input) {
 			var enumName = input.type;
 			var enumLayout = enums[enumName];
 			if (!enumLayout) {
-				throw "Unable to find enum: " + enumName;
+				throw new Error("Unable to find enum: " + enumName);
+			}
+			var index = enumLayout.indexOf(input.caseName);
+			if (index == -1) {
+				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
 			}
 			if (input.localNames.length) {
-				return "[" + enumLayout.indexOf(input.caseName) + ", " + mangleLocal(input.localNames[0]) + "]";
+				return "[" + index + ", " + mangleLocal(input.localNames[0]) + "]";
 			} else {
-				return "[" + enumLayout.indexOf(input.caseName) + "]";
+				return "[" + index + "]";
 			}
 		case "struct":
 			var structName = input.type;
