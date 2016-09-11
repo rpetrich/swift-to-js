@@ -17,6 +17,7 @@ module.exports = {
 		"String": ["_core"],
 		"UnsafePointer": ["_rawValue"],
 		"UnsafeMutablePointer": ["_rawValue"],
+		"UnsafeMutableRawPointer": ["_rawValue"],
 		"UnsafeBufferPointer": ["_position", "_end"],
 		"_HeapBuffer": [],
 		"_StringBuffer": ["_storage"],
