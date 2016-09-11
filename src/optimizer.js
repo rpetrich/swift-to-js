@@ -179,35 +179,36 @@ function inlineBlocks(basicBlocks) {
 			var sourceBlockName = reference.toBlockName;
 			var sourceBlock = findBasicBlock(basicBlocks, { reference: sourceBlockName });
 			var sourceBlockIndex = basicBlocks.indexOf(sourceBlock);
-			if (sourceBlockIndex <= work[i].blockIndex) {
-				return;
-			}
-			var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) > sourceBlockIndex);
-			if (hasBackwardsReference && deepBlockReferencesForInstructions(sourceBlock.instructions, basicBlocks) != 0) {
-				return;
+			if (deepBlockReferencesForInstructions(sourceBlock.instructions, basicBlocks).length != 0) {
+				if (sourceBlockIndex <= work[i].blockIndex) {
+					return;
+				}
+				var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) > sourceBlockIndex);
+				if (hasBackwardsReference) {
+					return;
+				}
 			}
 			sourceBlock = serializedClone(sourceBlock);
 			var instruction = reference.instructionList[reference.instructionList.length-1];
-			var instructions
+			var instructions;
 			if (instruction.operation == "branch") {
-				instructions = reference.instructionList
-					.slice(0, reference.instructionList.length - 1)
-					.concat(instruction.inputs.map((input, index) => {
-						return {
-							operation: "assignment",
-							destinationLocalName: sourceBlock.arguments[index].localName,
-							inputs: [ input ],
-						}
-					}))
-					.concat(sourceBlock.instructions);
-				reference.instructionList = instructions;
+				instructions = reference.instructionList;
+				instructions.splice(instructions.length - 1, 1)
+				instruction.inputs.forEach((input, index) => {
+					instructions.push({
+						operation: "assignment",
+						destinationLocalName: sourceBlock.arguments[index].localName,
+						inputs: [ input ],
+					})
+				});
+				sourceBlock.instructions.forEach(instruction => instructions.push(instruction));
 			} else {
 				reference.descriptor.inline = sourceBlock;
 				delete reference.descriptor.reference;
-				instructions = instructions;
+				instructions = reference.instructionList;
 			}
 			work.push({
-				instructions: reference.instructionList,
+				instructions: instructions,
 				blockIndex: work[i].blockIndex,
 			});
 		});
