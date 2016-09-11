@@ -303,7 +303,7 @@ Parser.prototype.parseInstruction = function (line) {
 				// }];
 				input.localNames = [match[1]];
 				input.fieldName = match[4];
-				input.type = "TODO";
+				input.type = match[3];
 				break;
 			case "ref_element_addr":
 				var match = args.match(/%(\d+)\s+:.*#.*\.(.*)/)
