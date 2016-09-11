@@ -582,7 +582,7 @@ Parser.prototype.addLine = function(originalLine) {
 			}
 		} else if (/^  /.test(line)) {
 			if (this.currentBasicBlock) {
-				var instruction = this.parseInstruction(line.trim());
+				var instruction = this.parseInstruction(line.match(/^\s*(.*?)\s*(,? loc "\w+.\w+":\d+:\d+)?(,? scope \d+)?\s*$/)[1]);
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);
 				}
