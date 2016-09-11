@@ -171,13 +171,11 @@ Parser.prototype.parseInstruction = function (line) {
 				input.type = "Builtin.RawPointer";
 				break;
 			case "enum":
-				var match = args.match(/^\$(.*),\s+.*?\.(\w+)\!.*(,\s+\%\w+\s+:)?/);
+				var match = args.match(/^\$(.*),\s+.*?\.(\w+)\!.*?(,\s%(\d+) : \$(.*))?$/);
 				input.type = basicNameForStruct(match[1]);
 				input.caseName = match[2];
-				if (match[3]) {
-					match = match[3].match(/^,\s+\%(\w+)\s+:$(.*)$/);
-					input.localNames = [match[1]];
-					input.type = match[2];
+				if (match[4]) {
+					input.localNames = [match[4]];
 				}
 				break;
 			case "struct":
