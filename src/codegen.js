@@ -230,9 +230,9 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write(this.lValueForInput(instruction.inputs[1]) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
 				break;
 			case "switch_enum":
-				this.buffer.write("switch (" + this.rValueForInput(instruction.inputs[0]) + ") {")
+				this.buffer.write("switch (" + this.rValueForInput(instruction.inputs[0]) + "[0]) {")
 				var args = instruction.cases;
-				var enumName = args[0].case;
+				var enumName = instruction.type;
 				var enumLayout = enums[enumName];
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;

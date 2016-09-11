@@ -498,9 +498,9 @@ Parser.prototype.parseInstruction = function (line) {
 			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
 		};
 	}
-	match = line.match(/^switch_enum\s+\%(\w+)\s+:\s+.*?,\s+(case .*)/);
+	match = line.match(/^switch_enum\s+\%(\d+)\s+:\s+\$(.*?),\s+(case .*?)$/);
 	if (match) {
-		var cases = splitNoParens(match[2]).map(arg => {
+		var cases = splitNoParens(match[3]).map(arg => {
 			var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
 			if (match) {
 				return {
@@ -518,6 +518,7 @@ Parser.prototype.parseInstruction = function (line) {
 			operation: "switch_enum",
 			inputs: [simpleLocalContents(match[1], undefined)],
 			cases: cases,
+			type: basicNameForStruct(match[2]),
 		};
 	}
 	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
