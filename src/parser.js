@@ -45,13 +45,15 @@ Parser.caseNameForEnum = fullEnumName => fullEnumName.match(/^\w+\.(\w+)\!/)[1];
 
 Parser.prototype.parseSil = function(line) {
 	var name = line.split(/:/)[0].split(/\s+/).filter(part => /^@/.test(part))[0].substring(1);
+	var conventionMatch = line.match(/\$\@convention\((\w+)\)\s/);
 	var declaration = {
 		name: name,
 		type: "function",
 		basicBlocks: [],
 		localNames: {},
+		convention: conventionMatch ? conventionMatch[1] : "swift"
 	};
-	if (!/\bhidden\b|\bshared_external\b|\$\@convention\(method\)\s+/.test(line)) {
+	if (!/\b(hidden|shared_external)\b/.test(line) && (declaration.convention != "method")) {
 		if (!/^\/\/ specialized\s/.test(this.lookbackLine)) {
 			var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
 			if (beautifulMatch) {
@@ -247,7 +249,7 @@ Parser.prototype.parseInstruction = function (line) {
 				input.type = match[2]
 				break;
 			case "apply":
-				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:(.*)?\s+\-\>\s+(.*)/);
+				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:\s+\$(@convention\((\w+)\)\s+)?(.*)?\s+\-\>\s+(.*)/);
 				var parameters = splitNoParens(match[4]).map(arg => {
 					var match = arg.match(/^%(\d+)(#\d+)?$(.*)/)
 					return match[1];
@@ -261,7 +263,8 @@ Parser.prototype.parseInstruction = function (line) {
 				// });
 				parameters.unshift(match[2]);
 				input.localNames = parameters;
-				input.type = match[6];
+				input.type = match[7];
+				input.convention = match[6];
 				break;
 			case "partial_apply":
 				var match = args.match(/^(\[nothrow\]\s+)?%(\d+)(<.*>)?\((.*)\)\s*:/);
@@ -438,7 +441,7 @@ Parser.prototype.parseInstruction = function (line) {
 				input.interpretation = "contents";
 				break;
 			case "class_method":
-				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)/);
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)\s+,\s+\$@convention\((\w+)\)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// 	type: match[2],
@@ -446,6 +449,7 @@ Parser.prototype.parseInstruction = function (line) {
 				input.localNames = [match[1]];
 				input.type = match[4];
 				input.entry = match[3];
+				input.convention = match[5] || "swift";
 				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);

@@ -136,8 +136,21 @@ CodeGen.prototype.rValueForInput = function(input) {
 			this.writeBuiltIn(input.functionName);
 			return input.functionName;
 		case "apply":
-			return mangleLocal(input.localNames[0]) + "(" + input.localNames.slice(1).map(mangleLocal).join(", ") + ")";
+			var args = input.localNames.slice(1);
+			var result = mangleLocal(input.localNames[0]);
+			if (input.fieldName) {
+				result += JSON.stringify([input.fieldName]);
+			}
+			if (input.convention == "method") {
+				var hiddenThisArg = args.pop();
+				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
+					args.unshift(hiddenThisArg);
+					result += ".call";
+				}
+			}
+			return result + "(" + args.map(mangleLocal).join(", ") + ")";
 		case "partial_apply":
+			// TODO: Support method calling convention on partial application
 			return mangleLocal(input.localNames[0]) + ".bind(this, " + input.localNames.slice(1).map(mangleLocal).join(", ") + ")";
 		case "alloc_stack":
 			if (input.localNames.length) {
@@ -392,8 +405,18 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
-	this.buffer.write("function " + declaration.name + "(" + basicBlocks[0].arguments.map(arg => mangleLocal(arg.localName)).join(", ") + ") {");
+	var args = basicBlocks[0].arguments;
+	var useMethodCallingConvention = declaration.convention == "method";
+	if (useMethodCallingConvention) {
+		var hiddenThisArg = args[args.length - 1];
+		args = args.slice(0, args.length - 1);
+	}
+	this.buffer.write("function " + declaration.name + "(" + args.map(arg => mangleLocal(arg.localName)).join(", ") + ") {");
 	this.buffer.indent(1);
+	if (useMethodCallingConvention) {
+		this.buffer.write("var " + mangleLocal(hiddenThisArg.localName) + " = this;");
+		hiddenThisArg.localName = "this";
+	}
 	if (basicBlocks.length == 1) {
 		this.writeBasicBlock(basicBlocks[0], basicBlocks);
 	} else {
