@@ -146,7 +146,7 @@ var fuseableWithAssignment = instruction => {
 var instructionsWithoutSideEffects = ["assignment", "builtin"];
 var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
 
-function fuseAssignments(instructions) {
+function fuseAssignments(instructions, downstreamInstructions) {
 	fuse_search:
 	for (var i = 0; i < instructions.length - 1; ) {
 		var instruction = instructions[i];
@@ -161,8 +161,10 @@ function fuseAssignments(instructions) {
 							break proposed_search;
 						}
 					}
+					if (downstreamInstructions.some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
+						break proposed_search;
+					}
 					var success = false;
-					var clone = JSON.parse(JSON.stringify(proposedInstruction));
 					proposedInstruction.inputs = proposedInstruction.inputs.map(input => {
 						if (input.localNames[0] != instruction.destinationLocalName) {
 							return input;
@@ -335,24 +337,45 @@ function pruneDeadBlocks(basicBlocks) {
 }
 
 function allInstructionLists(basicBlocks) {
-	var result = basicBlocks.map(basicBlock => basicBlock.instructions);
-	for (var i = 0; i < result.length; i++) {
-		blockReferencesForInstructions(result[i]).forEach(descriptor => {
+	var result = [];
+	basicBlocks = basicBlocks.slice();
+	for (var i = 0; i < basicBlocks.length; i++) {
+		blockReferencesForInstructions(basicBlocks[i].instructions).forEach(descriptor => {
 			if (descriptor.inline) {
-				result.push(descriptor.inline.instructions);
+				basicBlocks.push(descriptor.inline);
 			}
 		});
 	}
-	return result;
+	return basicBlocks.map((block, i) => {
+		var blockReferences = [{ inline: block }];
+		var downstreamInstructions = [];
+		for (var j = 0; j < blockReferences.length; j++) {
+			var discoveredBlock = findBasicBlock(basicBlocks, blockReferences[j]);
+			if (block !== discoveredBlock) {
+				downstreamInstructions = downstreamInstructions.concat(discoveredBlock.instructions);
+			}
+			blockReferencesForInstructions(discoveredBlock.instructions).forEach(descriptor => {
+				if (blockReferences.indexOf(descriptor) == -1) {
+					blockReferences.push(descriptor)
+				}
+			});
+		}
+		return {
+			instructions: basicBlocks[i].instructions,
+			downstreamInstructions: downstreamInstructions
+		};
+	});
 }
 
 function optimize(declaration) {
 	if (declaration.type == "function") {
 		inlineBlocks(declaration.basicBlocks);
-		allInstructionLists(declaration.basicBlocks).forEach(instructions => {
+		allInstructionLists(declaration.basicBlocks).forEach(item => {
+			var instructions = item.instructions;
+			var downstreamInstructions = item.downstreamInstructions;
 			unwrapSimpleStructInstructions(instructions);
 			unwrapOptionalEnums(instructions);
-			fuseAssignments(instructions);
+			fuseAssignments(instructions, downstreamInstructions);
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
