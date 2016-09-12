@@ -92,6 +92,8 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "float_literal":
 		case "string_literal":
 			return input.value;
+		case "undefined_literal":
+			return "void 0";
 		case "enum":
 			var enumName = input.type;
 			var enumLayout = enums[enumName];
@@ -211,7 +213,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "metatype":
 			return "void 0";
 		case "class_method":
-			return "undefined"; // TODO: Figure out class methods
+			return "void 0"; // TODO: Figure out class methods
 		default:
 			throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 	}
