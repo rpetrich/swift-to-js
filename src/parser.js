@@ -401,6 +401,7 @@ Parser.prototype.parseInstruction = function (line) {
 				break;
 			case "thin_to_thick_function":
 			case "convert_function":
+			case "thin_function_to_pointer":
 				var match = args.match(/^%(\d+)\s+:\s+.* to \$(.*)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
