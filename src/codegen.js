@@ -288,6 +288,20 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
+			case "conditional_defined_branch":
+				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + " === void 0) {");
+				this.buffer.indent(1);
+				findBasicBlock(siblingBlocks, instruction.trueBlock).arguments.forEach((arg, index) => {
+					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
+				});
+				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
+				this.buffer.indent(-1);
+				this.buffer.write("} else {");
+				this.buffer.indent(1);
+				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
+				this.buffer.indent(-1);
+				this.buffer.write("}");
+				break;
 			case "store":
 				this.buffer.write(this.lValueForInput(instruction.inputs[1]) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
 				break;

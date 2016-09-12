@@ -28,7 +28,7 @@ module.exports = {
 		"Array": [],
 	},
 	"enums": {
-		"Optional": ["None", "Some"]
+		"Optional": ["none", "some", "None", "Some"] // Temporary to support both Swift 2 and Swift 3
 	},
 	"builtins": {
 		// Int32

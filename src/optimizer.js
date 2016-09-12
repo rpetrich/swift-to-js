@@ -1,6 +1,8 @@
 var stdlib = require("./stdlib.js");
 var types = stdlib.types;
 
+var Parser = require("./parser.js");
+
 function findBasicBlock(blocks, descriptor) {
 	if (descriptor.reference) {
 		for (var i = 0; i < blocks.length; i++) {
@@ -42,6 +44,84 @@ function unwrapSimpleStructInstructions(instructions) {
 			}
 		});
 	})
+}
+
+function unwrapOptionalEnums(instructions) {
+	instructions.forEach(instruction => {
+		instruction.inputs.forEach(input => {
+			switch (input.interpretation) {
+				case "enum":
+					if (input.type == "Optional") {
+						if (input.caseName.toLowerCase() == "some") {
+							input.interpretation = "contents";
+						} else {
+							input.interpretation = "undefined_literal";
+						}
+						delete input.type;
+						delete input.caseName;
+					}
+					break;
+				case "unchecked_enum_data":
+					if (input.type == "Optional") {
+						input.interpretation = "contents";
+						delete input.type;
+					}
+					break;
+				case "select_enum":
+					if (input.type == "Optional") {
+						var defaultLocal;
+						var trueLocal;
+						var falseLocal;
+						input.cases.forEach((enumCase, index) => {
+							var caseName = Parser.caseNameForEnum(enumCase.case);
+							if (caseName) {
+								if (caseName.toLowerCase() == "some") {
+									trueLocal = index + 1;
+								} else {
+									falseLocal = index + 1;
+								}
+							} else {
+								defaultLocal = index + 1;
+							}
+						});
+						delete input.cases;
+						delete input.type;
+						input.interpretation = "select_value";
+						if (trueLocal | defaultLocal < falseLocal | defaultLocal) {
+							input.values = [{}, {value: undefined}];
+						} else {
+							input.values = [{value: undefined}, {}];
+						}
+					}
+					break;
+			}
+		});
+		switch (instruction.operation) {
+			case "switch_enum":
+				if (instruction.type == "Optional") {
+					instruction.operation = "conditional_defined_branch";
+					var defaultBlock;
+					var trueBlock;
+					var falseBlock;
+					instruction.cases.forEach(enumCase => {
+						var caseName = Parser.caseNameForEnum(enumCase.case);
+						if (caseName) {
+							if (caseName.toLowerCase() == "some") {
+								trueBlock = enumCase.basicBlock;
+							} else {
+								falseBlock = enumCase.basicBlock;
+							}
+						} else {
+							defaultBlock = enumCase.basicBlock;
+						}
+					});
+					instruction.trueBlock = trueBlock || defaultBlock;
+					instruction.falseBlock = falseBlock || defaultBlock;
+					delete instruction.cases;
+				}
+				break;
+		}
+	});
 }
 
 var countOfUsesOfLocal = (instruction, localName) => instruction.inputs.reduce((count, input) => count + input.localNames.filter(usedName => usedName == localName).length, 0);
@@ -118,6 +198,7 @@ function fuseAssignments(instructions) {
 var blockReferencesForInstructionTypes = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
+	"conditional_defined_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
 	"checked_cast_branch": ins => [ins.trueBlock, ins.falseBlock],
@@ -255,6 +336,7 @@ function optimize(declaration) {
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(instructions => {
 			unwrapSimpleStructInstructions(instructions);
+			unwrapOptionalEnums(instructions);
 			fuseAssignments(instructions);
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
