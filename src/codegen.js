@@ -162,6 +162,48 @@ CodeGen.prototype.rValueForInput = function(input) {
 			}
 		case "unchecked_enum_data":
 			return mangleLocal(input.localNames[0]) + "[1]";
+		case "select_enum":
+			var enumName = input.type;
+			var enumLayout = enums[enumName];
+			if (!enumLayout) {
+				throw "Unable to find enum: " + enumName;
+			}
+			var prefix = "(function(value";
+			var contents = "){switch(value){";
+			var suffix = "}})(" + mangleLocal(input.localNames[0]) + "[0]";
+			input.cases.forEach((enumCase, index) => {
+				prefix += ",$" + index;
+				var caseName = Parser.caseNameForEnum(enumCase.case);
+				if (caseName) {
+					contents += "case " + enumLayout.indexOf(caseName) + ":return $" + index + ";";
+				} else {
+					contents += "default:return $" + index + ";";
+				}
+				suffix += ", " + mangleLocal(input.localNames[index + 1]);
+			});
+			return prefix + contents + suffix + ")";
+		case "select_value":
+			if (input.values.length == 2) {
+				if ("value" in input.values[0]) {
+					return "(" + mangleLocal(input.localNames[0]) + " === " + input.values[0].value + " ? " + mangleLocal(input.localNames[1]) + " : " + mangleLocal(input.localNames[2]) + ")";
+				} else {
+					return "(" + mangleLocal(input.localNames[0]) + " !== " + input.values[1].value + " ? " + mangleLocal(input.localNames[1]) + " : " + mangleLocal(input.localNames[2]) + ")";
+				}
+			} else {
+				var prefix = "(function(value";
+				var contents = "){switch(value){";
+				var suffix = "}})(" + mangleLocal(input.localNames[0]);
+				input.values.forEach((object, index) => {
+					prefix += ",$" + index;
+					if ("value" in object) {
+						contents += "case " + object.value + ":return $" + index + ";";
+					} else {
+						contents += "default:return $" + index + ";";
+					}
+					suffix += ", " + mangleLocal(input.localNames[index + 1]);
+				});
+			}
+			return prefix + contents + suffix + ")";
 		case "index_raw_pointer":
 		case "index_addr":
 			return box(unboxRef(mangleLocal(input.localNames[0])), unboxField(mangleLocal(input.localNames[0])) + " + " + mangleLocal(input.localNames[1]));

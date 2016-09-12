@@ -347,6 +347,27 @@ Parser.prototype.parseInstruction = function (line) {
 				input.localNames = [match[1]];
 				input.type = match[2];
 				break;
+			case "select_enum":
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+(case .*?)$/);
+				var localNames = [match[1]];
+				var cases = splitNoParens(match[3]).map(arg => {
+					var match = arg.match(/^case\s+\#(.*):\s+%(\d+)( : .*)?$/);
+					if (match) {
+						localNames.push(match[2]);
+						return {
+							"case": match[1],
+						};
+					} else {
+						match = arg.match(/^default\s+(.*)/);
+						localNames.push(match[1]);
+						return {
+						};
+					}
+				})
+				input.localNames = localNames;
+				input.type = basicNameForStruct(match[2]);
+				input.cases = cases;
+				break;
 			case "address_to_pointer":
 			case "unchecked_ref_cast":
 				var match = args.match(/^%(\w+)\s+:\s*\$(.*) to \$(.*)/);
