@@ -34,10 +34,16 @@ module.exports = {
 	},
 	"builtins": {
 		// Int32
-		"sadd_with_overflow_Int32": "(left, right, overflow_check) { return [(left + right) | 0, 0] }",
-		"uadd_with_overflow_Int32": "(left, right, overflow_check) { return [(left + right) | 0, 0] }", // TODO: Implement unsigned
-		"ssub_with_overflow_Int32": "(left, right, overflow_check) { return [(left - right) | 0, 0] }",
-		"smul_with_overflow_Int32": "(left, right, overflow_check) { return [(left * right) | 0, 0] }",
+		"sadd_with_overflow_Int32": "(left, right, overflow_check) { var result = left + right; var truncated = result | 0; return [truncated, false] }",
+		"uadd_with_overflow_Int32": "(left, right, overflow_check) { var result = left + right; var truncated = result | 0; return [truncated, false] }", // TODO: Implement unsigned
+		"ssub_with_overflow_Int32": "(left, right, overflow_check) { var result = left - right; var truncated = result | 0; return [truncated, false] }",
+		"usub_with_overflow_Int32": "(left, right, overflow_check) { var result = left - right; var truncated = result | 0; return [truncated, false] }", // TODO: Implement unsigned
+		"smul_with_overflow_Int32": "(left, right, overflow_check) { var result = left * right; var truncated = result | 0; return [truncated, false] }",
+		// "sadd_with_overflow_Int32": "(left, right, overflow_check) { var result = left + right; var truncated = result | 0; return [truncated, result != truncated] }",
+		// "uadd_with_overflow_Int32": "(left, right, overflow_check) { var result = left + right; var truncated = result | 0; return [truncated, result != truncated] }", // TODO: Implement unsigned
+		// "ssub_with_overflow_Int32": "(left, right, overflow_check) { var result = left - right; var truncated = result | 0; return [truncated, result != truncated] }",
+		// "usub_with_overflow_Int32": "(left, right, overflow_check) { var result = left - right; var truncated = result | 0; return [truncated, result != truncated] }", // TODO: Implement unsigned
+		// "smul_with_overflow_Int32": "(left, right, overflow_check) { var result = left * right; var truncated = result | 0; return [truncated, result != truncated] }",
 		"sdiv_Int32": "(left, right) { return (left / right) | 0 }",
 		"cmp_sgt_Int32": "(left, right) { return left > right }",
 		"cmp_sge_Int32": "(left, right) { return left >= right }",
@@ -56,6 +62,8 @@ module.exports = {
 		"zext_Int8_Int32": "(value) { return value }",
 		"zext_Int16_Int32": "(value) { return value }",
 		"s_to_u_checked_conversion_Int32": "(value) { return [value, false] }",
+		"u_to_s_checked_conversion_Int32": "(value) { return [value, false] }",
+		"assumeNonNegative_Int32": "(value) { return value }",
 		// Int64
 		"zext_Int32_Int64": "(value) { return value }",
 		"sext_Int32_Int64": "(value) { return value }",
@@ -105,7 +113,8 @@ module.exports = {
 		"sub_Word": "(left, right) { return (left - right) | 0 }",
 		"zextOrBitCast_Int32_Word": "(value) { return value }",
 		// Functions
-		"swift_bufferAllocate": "(bufferType, size, alignMask) { return {} }",
+		"onFastPath": "() {}",
+		"swift_bufferAllocate": "(bufferType, size, alignMask) { return { \"ref\":[], \"field\":0 } }",
 		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { dest = source }",
 		// Int
 		"_TZFsoi1pFTSiSi_Si": "(left, right) { return (left + right) | 0 }",
