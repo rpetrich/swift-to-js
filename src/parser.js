@@ -52,9 +52,9 @@ Parser.prototype.parseSil = function(line) {
 		localNames: {},
 	};
 	if (!/\b(hidden|shared_external)\b/.test(line)) {
-		var beautifulMatch = this.lookbackLine.match(/^\/\/ \w+\.(\w+)/);
+		var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
 		if (beautifulMatch) {
-			declaration.beautifulName = beautifulMatch[1];
+			declaration.beautifulName = beautifulMatch[2];
 		}
 	}
 	if (/{$/.test(line)) {
