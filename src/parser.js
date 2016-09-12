@@ -424,7 +424,7 @@ Parser.prototype.parseInstruction = function (line) {
 				break;
 			case "index_raw_pointer":
 				input.localNames = splitNoParens(args).map(arg => {
-					var match = args.match(/^%(\w+)\s+:\s*(.*)*/);
+					var match = arg.match(/^%(\w+)\s+:\s*(.*)*/);
 					return match[1];
 				});
 				input.type = "Builtin.RawPointer";
