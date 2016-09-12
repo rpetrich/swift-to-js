@@ -229,6 +229,10 @@ CodeGen.prototype.lValueForInput = function (input) {
 		case "index_raw_pointer":
 		case "index_addr":
 			return unboxRef(mangleLocal(input.localNames[0])) + "[" + unboxField(mangleLocal(input.localNames[0])) + " + " + mangleLocal(input.localNames[1]) + "]";
+		case "struct_extract":
+			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName]);
+		case "tuple_extract":
+			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName | 0]);
 		default:
 			throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 	}
