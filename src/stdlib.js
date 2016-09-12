@@ -19,18 +19,21 @@ module.exports = {
 		"UnsafeMutablePointer": ["_rawValue"],
 		"UnsafeMutableRawPointer": ["_rawValue"],
 		"UnsafeBufferPointer": ["_position", "_end"],
-		"_HeapBuffer": [],
+		"UnsafeRawPointer": ["_rawValue"],
+		"_HeapBuffer": ["_storage"],
 		"_StringBuffer": ["_storage"],
 		"_SwiftArrayBodyStorage": ["count", "_capacityAndFlags"],
 		"_ArrayBody": ["_storage"],
 		"_BridgeStorage": ["rawValue"],
 		"_ArrayBuffer": ["_storage"],
+		"_StringBufferIVars": ["usedEnd", "capacityAndElementShift"],
 		"Array": ["_buffer"],
 		"Range": ["startIndex", "endIndex"],
 		"Point": ["x", "y"],
 	},
 	"enums": {
-		"Optional": ["none", "some", "None", "Some"] // Temporary to support both Swift 2 and Swift 3
+		"Optional": ["none", "some", "None", "Some"], // Temporary to support both Swift 2 and Swift 3
+		"ImplicitlyUnwrappedOptional": ["none", "some"],
 	},
 	"builtins": {
 		// Int32
@@ -102,6 +105,7 @@ module.exports = {
 		"alignof": "(type) { return 1 }",
 		"ptrtoint_Word": "(pointer) { return 0 }",
 		"cmpxchg_seqcst_seqcst_RawPointer": "(target, expected, desired) { var oldValue = target[0]; var won = oldValue == expected; if (won) { target[0] = desired; } return won }",
+		"cmpxchg_seqcst_seqcst_Word": "(target, expected, desired) { var oldValue = target[\"ref\"][target[\"field\"]]; var success = oldValue === expected; if (success) { target[\"ref\"][target[\"field\"]] = desired; } return [ oldValue, success ]; }",
 		"int_memcpy_RawPointer_RawPointer_Int64": "(dest, src, size, alignment, volatile) { }",
 		"_swift_stdlib_malloc_size": "(buffer) { return 0 }",
 		// Booleans
@@ -115,7 +119,8 @@ module.exports = {
 		// Functions
 		"onFastPath": "() {}",
 		"swift_bufferAllocate": "(bufferType, size, alignMask) { return { \"ref\":[], \"field\":0 } }",
-		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { dest = source }",
+		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
+		"_TTSfq4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
 		// Int
 		"_TZFsoi1pFTSiSi_Si": "(left, right) { return (left + right) | 0 }",
 		// Generic numeric types

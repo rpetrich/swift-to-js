@@ -113,7 +113,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 			var structName = input.type;
 			var structType = types[structName];
 			if (!structType) {
-				throw "No type for " + structName;
+				throw new Error("No type for " + structName);
 			}
 			return "{ " + input.localNames.map((localName, index) => "\"" + structType[index] + "\": " + mangleLocal(localName)).join(", ") + " }";
 		case "tuple":
@@ -227,6 +227,8 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return "void 0";
 		case "class_method":
 			return mangleLocal(input.localNames[0]) + JSON.stringify([input.entry]);
+		case "open_existential_ref":
+			return "{ \"ref\": [], \"field\": 0 }";
 		default:
 			throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 	}

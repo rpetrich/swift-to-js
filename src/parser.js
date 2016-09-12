@@ -142,9 +142,13 @@ Parser.prototype.parseInstruction = function (line) {
 	if (/^strong_release\s+/.test(line)) {
 		return;
 	}
+	if (/^bind_memory\s+/.test(line)) {
+		return;
+	}
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
+			line: line,
 			inputs: []
 		};
 	}
@@ -301,6 +305,11 @@ Parser.prototype.parseInstruction = function (line) {
 				// 	localName: match[1]
 				// }];
 				input.localNames = [match[1]];
+				break;
+			case "is_unique":
+				input.value = "false";
+				input.type = "Builtin.Int1";
+				input.interpretation = "integer_literal";
 				break;
 			case "struct_element_addr":
 				var match = args.match(/^%(\w+)(\#\d+)?\s+:\s+.*?#(\w+)\.(\w+)$/);
@@ -459,11 +468,15 @@ Parser.prototype.parseInstruction = function (line) {
 				input.entry = match[3];
 				input.convention = match[5] || "swift";
 				break;
+			case "open_existential_ref":
+				input.type = "TODO";
+				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
 				break;
 		}
 		var assignment = {
+			line: line,
 			operation: "assignment",
 			destinationLocalName: destinationLocalName,
 			inputs: [input],
@@ -475,6 +488,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "return",
+			line: line,
 			inputs: [simpleLocalContents(match[1], match[2])],
 		};
 	}
@@ -486,6 +500,7 @@ Parser.prototype.parseInstruction = function (line) {
 		}) : [];
 		return {
 			operation: "branch",
+			line: line,
 			block: { reference: match[1] },
 			inputs: inputs,
 		};
@@ -494,6 +509,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "conditional_branch",
+			line: line,
 			inputs: [simpleLocalContents(match[1], undefined)],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
@@ -504,6 +520,7 @@ Parser.prototype.parseInstruction = function (line) {
 		// We don't do checked casts, assume that the argument type is always correct
 		return {
 			operation: "checked_cast_branch",
+			line: line,
 			inputs: [simpleLocalContents(match[2], undefined)], // No inputs
 			trueBlock: { reference: match[4] },
 			falseBlock: { reference: match[5] },
@@ -515,6 +532,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "conditional_fail",
+			line: line,
 			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
@@ -522,6 +540,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "store",
+			line: line,
 			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[3])],
 		};
 	}
@@ -529,6 +548,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "copy_addr",
+			line: line,
 			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
 		};
 	}
@@ -550,6 +570,7 @@ Parser.prototype.parseInstruction = function (line) {
 		})
 		return {
 			operation: "switch_enum",
+			line: line,
 			inputs: [simpleLocalContents(match[1], undefined)],
 			cases: cases,
 			type: basicNameForStruct(match[2]),
@@ -564,6 +585,7 @@ Parser.prototype.parseInstruction = function (line) {
 		inputs.unshift(simpleLocalContents(match[1], undefined))
 		return {
 			operation: "try_apply",
+			line: line,
 			inputs: inputs,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
@@ -573,6 +595,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "throw",
+			line: line,
 			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
