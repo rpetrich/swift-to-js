@@ -3,6 +3,8 @@ var types = stdlib.types;
 var enums = stdlib.enums;
 var builtins = stdlib.builtins;
 
+var Parser = require("./parser.js");
+
 function IndentedBuffer(){
     this.lines = [];
     this.indentation = 0;
@@ -27,7 +29,6 @@ var box = (struct, quotedFieldName) => "({ \"ref\": " + struct + ", \"field\": "
 var unboxRef = struct => struct + "[\"ref\"]";
 var unboxField = struct => struct + "[\"field\"]";
 var unbox = struct => unboxRef(struct) + "[" + unboxField(struct) + "]";
-var caseNameForEnum = fullEnumName => fullEnumName.match(/^\w+\.(\w+)\!/)[1];
 
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
@@ -272,28 +273,28 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				this.buffer.write(this.lValueForInput(instruction.inputs[1]) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
 				break;
 			case "switch_enum":
-				this.buffer.write("switch (" + this.rValueForInput(instruction.inputs[0]) + "[0]) {")
+				this.buffer.write("switch (" + this.rValueForInput(instruction.inputs[0]) + ") {")
 				var args = instruction.cases;
 				var enumName = instruction.type;
 				var enumLayout = enums[enumName];
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;
 				}
-				for (var k = 0; k < args.length; k++) {
-					var caseName = caseNameForEnum(args[k].case);
+				instruction.cases.forEach(enumCase => {
+					var caseName = Parser.caseNameForEnum(enumCase.case);
 					if (caseName) {
 						this.buffer.write("case " + enumLayout.indexOf(caseName) + ":");
 					} else {
 						this.buffer.write("default:");
 					}
 					this.buffer.indent(1);
-					var targetBlock = findBasicBlock(siblingBlocks, args[k].basicBlock);
+					var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
 					if (targetBlock.arguments.length > 0) {
-						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0].localName) + " = " + value + "[1];");
+						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0].localName) + " = " + this.rValueForInput(instruction.inputs[0]) + "[1];");
 					}
-					this.writeBranchToBlock(args[k].basicBlock, siblingBlocks);
+					this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks);
 					this.buffer.indent(-1);
-				}
+				});
 				this.buffer.write("}");
 				break;
 			case "try_apply":

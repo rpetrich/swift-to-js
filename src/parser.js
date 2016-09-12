@@ -41,6 +41,8 @@ function Parser() {
 	this.lookbackLine = undefined;
 }
 
+Parser.caseNameForEnum = fullEnumName => fullEnumName.match(/^\w+\.(\w+)\!/)[1];
+
 Parser.prototype.parseSil = function(line) {
 	var name = line.split(/:/)[0].split(/\s+/).filter(part => /^@/.test(part))[0].substring(1);
 	var declaration = {
