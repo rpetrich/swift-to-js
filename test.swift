@@ -78,6 +78,10 @@ public func hello_world() -> String {
     return "Hello World!"
 }
 
+public func concat(l: String, r: String) -> String {
+    return l + r
+}
+
 public func string_length(str: String) -> Int {
     return str.utf16.count;
 }
