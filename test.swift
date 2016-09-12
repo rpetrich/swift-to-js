@@ -82,6 +82,22 @@ public func string_length(str: String) -> Int {
     return str.utf16.count;
 }
 
+public func twoInts(first: Int, second: Int) -> [Int] {
+    return [first, second]
+}
+
+public func arrayCount(array: [Int]) -> Int {
+    return array.count
+}
+
+public func arrayGet(array: [Int], index: Int) -> Int {
+    return array[index]
+}
+
+public func oneInt(value: Int) -> [Int] {
+    return [value]
+}
+
 // public enum Divisible {
 //     case byNone
 //     case byThree
