@@ -38,7 +38,8 @@ function unwrapSimpleStructInstructions(instructions) {
 				case "struct_element_addr":
 					var structType = types[input.type];
 					if (structType && structType.length == 1) {
-						throw "Field has been optimized away: _value";
+						input.interpretation = "contents";
+						delete input.fieldName;
 					}
 					break;
 			}
