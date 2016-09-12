@@ -148,7 +148,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "alloc_box":
 			return box("[{}]", 0);
 		case "alloc_ref":
-			return box("{}", 0);
+			return "new " + input.type;
 		case "project_box":
 			return box(mangleLocal(input.localNames[0]), 0);
 		case "struct_element_addr":
@@ -213,7 +213,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "metatype":
 			return "void 0";
 		case "class_method":
-			return "void 0"; // TODO: Figure out class methods
+			return mangleLocal(input.localNames[0]) + JSON.stringify([input.entry]);
 		default:
 			throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 	}
@@ -260,6 +260,22 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "conditional_branch":
 				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + ") {");
 				this.buffer.indent(1);
+				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
+				this.buffer.indent(-1);
+				this.buffer.write("} else {");
+				this.buffer.indent(1);
+				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
+				this.buffer.indent(-1);
+				this.buffer.write("}");
+				break;
+			case "checked_cast_branch":
+				var comparison = instruction.exact ? ".constructor == " : " instanceof ";
+				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + comparison + instruction.type + ") {");
+				this.buffer.indent(1);
+				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
+				targetBlock.arguments.forEach((arg, index) => {
+					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
+				});
 				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
 				this.buffer.indent(-1);
 				this.buffer.write("} else {");
@@ -342,6 +358,9 @@ CodeGen.prototype.consume = function(declaration) {
 		case "global":
 			this.consumeGlobal(declaration);
 			break;
+		case "vtable":
+			this.consumeVTable(declaration);
+			break;
 	}
 }
 
@@ -398,6 +417,17 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	var beautifulName = declaration.beautifulName;
 	if (beautifulName) {
 		this.buffer.write("window[\"" + beautifulName + "\"] = " + declaration.name + ";");
+	}
+}
+
+CodeGen.prototype.consumeVTable = function(declaration) {
+	this.buffer.write("/** @constructor */");
+	this.buffer.write("function " + declaration.name + "() {}");
+	this.buffer.write("window[\"" + declaration.name + "\"] = " + declaration.name + ";");
+	for (var key in declaration.entries) {
+		if (declaration.entries.hasOwnProperty(key)) {
+			this.buffer.write(declaration.name + ".prototype" + JSON.stringify([key]) + " = " + declaration.entries[key] + ";");
+		}
 	}
 }
 

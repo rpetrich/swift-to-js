@@ -51,10 +51,12 @@ Parser.prototype.parseSil = function(line) {
 		basicBlocks: [],
 		localNames: {},
 	};
-	if (!/\b(hidden|shared_external)\b/.test(line)) {
-		var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
-		if (beautifulMatch) {
-			declaration.beautifulName = beautifulMatch[2];
+	if (!/\bhidden\b|\bshared_external\b|\$\@convention\(method\)\s+/.test(line)) {
+		if (!/^\/\/ specialized\s/.test(this.lookbackLine)) {
+			var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
+			if (beautifulMatch) {
+				declaration.beautifulName = beautifulMatch[2];
+			}
 		}
 	}
 	if (/{$/.test(line)) {
@@ -436,13 +438,14 @@ Parser.prototype.parseInstruction = function (line) {
 				input.interpretation = "contents";
 				break;
 			case "class_method":
-				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+(#.*) : (.*)/);
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// 	type: match[2],
 				// }]
 				input.localNames = [match[1]];
 				input.type = match[4];
+				input.entry = match[3];
 				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
@@ -484,13 +487,16 @@ Parser.prototype.parseInstruction = function (line) {
 			falseBlock: { reference: match[3] },
 		};
 	}
-	match = line.match(/^checked_cast_br\s+(\[exact\]\s+)?\%(\d+)\s+:.*,\s*(\w+),\s(\w+)/);
+	match = line.match(/^checked_cast_br\s+(\[exact\]\s+)?\%(\d+)\s+:.* to \$(.*),\s*(\w+),\s*(\w+)/);
 	if (match) {
 		// We don't do checked casts, assume that the argument type is always correct
 		return {
-			operation: "branch",
-			inputs: [/*simpleLocalContents(match[2], undefined)*/], // No inputs
-			block: { reference: match[3] },
+			operation: "checked_cast_branch",
+			inputs: [simpleLocalContents(match[2], undefined)], // No inputs
+			trueBlock: { reference: match[4] },
+			falseBlock: { reference: match[5] },
+			type: match[3],
+			exact: !!match[1],
 		};
 	}
 	match = line.match(/^cond_fail\s+\%(\w+)\s+:/);
@@ -569,6 +575,21 @@ Parser.prototype.parseSilGlobal = function (line) {
 	this.declarations.push(declaration);
 }
 
+Parser.prototype.parseSilVTable = function (line) {
+	var declaration = {
+		name: line.match(/sil_vtable\s+(.*)\s+{/)[1],
+		type: "vtable",
+		entries: {}
+	};
+	this.declarations.push(declaration);
+	this.currentDeclaration = declaration;
+}
+
+Parser.prototype.parseVTableMapping = function (line) {
+	var match = line.match(/^\#(.*):\s+(.*)$/);
+	this.currentDeclaration.entries[match[1]] = match[2];
+}
+
 Parser.prototype.addLine = function(originalLine) {
 	line = originalLine.replace(/\s*\/\/.*/, "");
 	if (line.length != 0) {
@@ -587,6 +608,9 @@ Parser.prototype.addLine = function(originalLine) {
 					break;
 				case "sil_global":
 					this.parseSilGlobal(line);
+					break;
+				case "sil_vtable":
+					this.parseSilVTable(line);
 					break;
 				default:
 					if (/^\w+(\(.*\))?:$/.test(line)) {
@@ -609,6 +633,8 @@ Parser.prototype.addLine = function(originalLine) {
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);
 				}
+			} else if (this.currentDeclaration && this.currentDeclaration.type == "vtable") {
+				this.parseVTableMapping(line.match(/^\s*(.*)$/)[1]);
 			} else {
 				// Not inside a declaration or basic block!
 				// Should be an error, but we aren't even close to understanding Swift's protocols/method tables

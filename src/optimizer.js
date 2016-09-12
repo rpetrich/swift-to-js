@@ -112,6 +112,7 @@ var blockReferencesForInstructionTypes = {
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
+	"checked_cast_branch": ins => [ins.trueBlock, ins.falseBlock],
 };
 
 function newLocalName(declaration, basicBlock) {
