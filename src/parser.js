@@ -345,6 +345,18 @@ Parser.prototype.parseInstruction = function (line) {
 				input.type = match[5]
 				input.interpretation = "contents";
 				break;
+			case "init_existential_metatype":
+				var match = args.match(/^%(\d+)\s+:\s+\$(@thin\s+)?(.*)\.Type/);
+				input.localNames = [match[1]];
+				input.type = match[3];
+				input.interpretation = "contents";
+				break;
+			case "mark_dependence":
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*)\s+on\s+/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
+				break;
 			case "unchecked_enum_data":
 				var match = args.match(/^%(\w+)\s+:\s*.*#(.*)\..*\!/);
 				// assignment.inputs = [{
