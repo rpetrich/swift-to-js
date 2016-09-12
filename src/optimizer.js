@@ -71,6 +71,13 @@ function fuseAssignments(instructions) {
 	for (var i = 0; i < instructions.length - 1; ) {
 		var instruction = instructions[i];
 		if (instruction.operation == "assignment" && instruction.inputs.length == 1) {
+			var replacementInput = instruction.inputs[0];
+			var loadInterpretation = replacementInput.interpretation;
+			switch (loadInterpretation) {
+				case "ref_element_addr":
+					loadInterpretation = "struct_extract";
+					break;
+			}
 			proposed_search:
 			for (var k = i + 1; k < instructions.length; k++) {
 				var proposedInstruction = instructions[k];
@@ -85,10 +92,11 @@ function fuseAssignments(instructions) {
 						if (input.localNames[0] == instruction.destinationLocalName) {
 							switch (input.interpretation) {
 								case "load":
+									replacementInput.interpretation = loadInterpretation;
 								case "function_ref":
 								case "contents":
 									success = true;
-									return instruction.inputs[0];
+									return replacementInput;
 							}
 						}
 						return input;
