@@ -26,7 +26,7 @@ function splitNoParens(s) {
 		} while(opens);
 		result[i] = result[i].trim();
     }
-    return result;
+    return result.length == 1 && result[0] == "" ? [] : result;
 }
 
 function basicNameForStruct(structName) {
