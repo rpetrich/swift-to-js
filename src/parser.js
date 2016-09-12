@@ -430,14 +430,9 @@ Parser.prototype.parseInstruction = function (line) {
 				input.type = "Builtin.RawPointer";
 				break;
 			case "index_addr":
-				input.localNames = splitNoParens(args).map(arg => {
-					var match = args.match(/^%(\w+)\s+:\s*(.*)*/);
-					return match[1];
-					// return {
-					// 	localName: match[1],
-					// 	type: match[2]
-					// }
-				});
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*),\s+%(\d+)\s+:\s+/);
+				input.localNames = [match[1], match[3]];
+				input.type = match[2];
 				break;
 			case "metatype":
 				var match = args.match(/^\$(.*)/);
