@@ -192,6 +192,7 @@ function fuseAssignments(instructions, downstreamInstructions) {
 										success = true;
 										return replacementInput;
 								}
+								break;
 							case "contents":
 								success = true;
 								return replacementInput;
