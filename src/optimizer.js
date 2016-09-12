@@ -259,6 +259,13 @@ function optimize(declaration) {
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
+	if (declaration.type == "vtable") {
+		for (var key in declaration.entries) {
+			if (/\!deallocator$/.test(key)) {
+				delete declaration.entries[key];
+			}
+		}
+	}
 }
 
 module.exports = {
