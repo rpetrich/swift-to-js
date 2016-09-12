@@ -58,6 +58,9 @@ module.exports = {
 		"s_to_u_checked_conversion_Int32": "(value) { return [value, false] }",
 		// Int64
 		"zext_Int32_Int64": "(value) { return value }",
+		"sext_Int32_Int64": "(value) { return value }",
+		"sadd_with_overflow_Int64": "(left, right, overflow) { return [left + right, false] }",
+		"s_to_s_checked_trunc_Int64_Int32": "(value) { return [value | 0, 0] }",
 		// Int16
 		"zext_Int8_Int16": "(value) { return value }",
 		"cmp_ugt_Int16": "(left, right) { return left > right }",
@@ -78,6 +81,10 @@ module.exports = {
 		"fadd_FPIEEE64": "(left, right) { return left - right }",
 		"fsub_FPIEEE64": "(left, right) { return left - right }",
 		"fmul_FPIEEE64": "(left, right) { return left * right }",
+		"_TZFsoi2eeFTSdSd_Sb": "(left, right) { return left == right }",
+		"_TZFsoi1pFTSdSd_Sd": "(left, right) { return left + right }",
+		"_TZFsoi1sFTSdSd_Sd": "(left, right) { return left - right }",
+		"_TZFsoi1mFTSdSd_Sd": "(left, right) { return left * right }",
 		"sqrt": "Math.sqrt",
 		// Pointers (unsound!)
 		"inttoptr_Int8": "(value) { return value }",
@@ -93,6 +100,7 @@ module.exports = {
 		"xor_Int1": "(left, right) { return left ^ right }",
 		"or_Int1": "(left, right) { return left | right }",
 		"int_expect_Int1": "(value, expected) { return value }",
+		"_TZFsoi2aauRxs11BooleanTyperFzTxKzT_Sb_Sb": "(left, right) { return left && right }",
 		// Words,
 		"sub_Word": "(left, right) { return (left - right) | 0 }",
 		"zextOrBitCast_Int32_Word": "(value) { return value }",
