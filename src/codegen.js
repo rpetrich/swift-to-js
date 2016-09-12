@@ -462,12 +462,14 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 }
 
 CodeGen.prototype.consumeVTable = function(declaration) {
-	this.buffer.write("/** @constructor */");
-	this.buffer.write("function " + declaration.name + "() {}");
-	this.buffer.write("window[\"" + declaration.name + "\"] = " + declaration.name + ";");
-	for (var key in declaration.entries) {
-		if (declaration.entries.hasOwnProperty(key)) {
-			this.buffer.write(declaration.name + ".prototype" + JSON.stringify([key]) + " = " + declaration.entries[key] + ";");
+	if (!/^_/.test(declaration.name)) {
+		this.buffer.write("/** @constructor */");
+		this.buffer.write("function " + declaration.name + "() {}");
+		this.buffer.write("window[\"" + declaration.name + "\"] = " + declaration.name + ";");
+		for (var key in declaration.entries) {
+			if (declaration.entries.hasOwnProperty(key)) {
+				this.buffer.write(declaration.name + ".prototype" + JSON.stringify([key]) + " = " + declaration.entries[key] + ";");
+			}
 		}
 	}
 }
