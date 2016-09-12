@@ -341,7 +341,7 @@ Parser.prototype.parseInstruction = function (line) {
 				input.interpretation = "contents";
 				break;
 			case "unchecked_enum_data":
-				var match = args.match(/^%(\w+)\s+:\s*(.*)/);
+				var match = args.match(/^%(\w+)\s+:\s*.*#(.*)\..*\!/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// 	type: match[2]
