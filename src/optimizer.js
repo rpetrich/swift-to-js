@@ -152,12 +152,6 @@ function fuseAssignments(instructions) {
 		var instruction = instructions[i];
 		if (instruction.operation == "assignment" && instruction.inputs.length == 1) {
 			var replacementInput = instruction.inputs[0];
-			var loadInterpretation = replacementInput.interpretation;
-			switch (loadInterpretation) {
-				case "ref_element_addr":
-					loadInterpretation = "struct_extract";
-					break;
-			}
 			proposed_search:
 			for (var k = i + 1; k < instructions.length; k++) {
 				var proposedInstruction = instructions[k];
@@ -168,16 +162,37 @@ function fuseAssignments(instructions) {
 						}
 					}
 					var success = false;
+					var clone = JSON.parse(JSON.stringify(proposedInstruction));
 					proposedInstruction.inputs = proposedInstruction.inputs.map(input => {
-						if (input.localNames[0] == instruction.destinationLocalName) {
-							switch (input.interpretation) {
-								case "load":
-									replacementInput.interpretation = loadInterpretation;
-								case "function_ref":
-								case "contents":
-									success = true;
-									return replacementInput;
-							}
+						if (input.localNames[0] != instruction.destinationLocalName) {
+							return input;
+						}
+						switch (input.interpretation) {
+							case "apply":
+								switch (replacementInput.interpretation) {
+									case "contents":
+										success = true;
+										return replacementInput;
+									case "class_method":
+										input.localNames[0] = replacementInput.localNames[0];
+										input.fieldName = replacementInput.entry;
+										success = true;
+										return input;
+								}
+								break;
+							case "load":
+								switch (replacementInput.interpretation) {
+									case "contents":
+										success = true;
+										return replacementInput;
+									case "ref_element_addr":
+										replacementInput.interpretation = "struct_extract";
+										success = true;
+										return replacementInput;
+								}
+							case "contents":
+								success = true;
+								return replacementInput;
 						}
 						return input;
 					})
