@@ -4,6 +4,8 @@ var enums = stdlib.enums;
 var builtins = stdlib.builtins;
 
 var Parser = require("./parser.js");
+var esmangle = require("esmangle");
+var escodegen = require("escodegen");
 
 function IndentedBuffer(){
     this.lines = [];
@@ -32,6 +34,11 @@ var unbox = struct => unboxRef(struct) + "[" + unboxField(struct) + "]";
 
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
+	this.body = [];
+	this.program = {
+		type: "Program",
+		body: this.body,
+	};
 	this.usedBuiltins = {};
 }
 
@@ -63,7 +70,7 @@ CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
 	}
 	if (descriptor.inline) {
 		this.buffer.write("// " + descriptor.inline.name);
-		this.writeBasicBlock(descriptor.inline, siblingBlocks);
+		return this.writeBasicBlock(descriptor.inline, siblingBlocks);
 	} else {
 		throw new Error("Neither a reference to a basic block nor inline!");
 	}
@@ -234,6 +241,194 @@ CodeGen.prototype.rValueForInput = function(input) {
 	}
 }
 
+function identifier(name) {
+	return {
+		type: "Identifier",
+		name: name,
+	};
+}
+
+function literal(value) {
+	return {
+		type: "Literal",
+		value: value,
+	};
+}
+
+function array(elements) {
+	return {
+		type: "ArrayExpression",
+		elements: elements,
+	};
+}
+
+function call(callee, args) {
+	return {
+		type: "CallExpression",
+		callee: callee,
+		arguments: args,
+	};
+}
+
+CodeGen.prototype.rValueExpressionForInput = function(input) {
+	switch (input.interpretation) {
+		case "contents":
+			return identifier(input.localNames[0]);
+		case "integer_literal":
+		case "float_literal":
+			var value = Number(input.value);
+			if (value >= 0) {
+				return literal(value);
+			}
+			// TODO: Support negative numbers
+			return null;
+		case "string_literal":
+			return literal(JSON.parse("[" + input.value + "]")[0]);
+		case "undefined_literal":
+			return {
+				type: "UnaryExpression",
+				prefix: true,
+				operator: "void",
+				argument: literal(0),
+			};
+		case "enum":
+			var enumName = input.type;
+			var enumLayout = enums[enumName];
+			if (!enumLayout) {
+				throw new Error("Unable to find enum: " + enumName);
+			}
+			var index = enumLayout.indexOf(input.caseName);
+			if (index == -1) {
+				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
+			}
+			var elements = [literal(0)];
+			if (input.localNames.length) {
+				elements.push(identifier(input.localNames[0]));
+			}
+			return array(elements);
+		case "struct":
+			var structName = input.type;
+			var structType = types[structName];
+			if (!structType) {
+				throw new Error("No type for " + structName);
+			}
+			return {
+				type: "ObjectExpression",
+				properties: input.localNames.map((localName, index) => ({
+					type: "Property",
+					key: identifier(structType[index]),
+					kind: "init",
+					value: identifier(mangleLocal(localName)),
+				}))
+			};
+		case "tuple":
+			if (input.localNames.length == 0) {
+				return {
+					type: "UnaryExpression",
+					prefix: true,
+					operator: "void",
+					argument: literal(0),
+				};
+			}
+			return array(input.localNames.map(localName => identifier(mangleLocal(localName))));
+		case "struct_extract":
+			return {
+				type: "MemberExpression",
+				object: identifier(input.localNames[0]),
+				property: identifier(input.fieldName),
+				computed: false,
+			};
+		case "tuple_extract":
+			return {
+				type: "MemberExpression",
+				object: identifier(input.localNames[0]),
+				property: literal(input.fieldName),
+				computed: true,
+			};
+		case "builtin":
+			var builtinName = input.builtinName;
+			if (!this.writeBuiltIn(builtinName)) {
+				throw new Error("No builtin available for " + builtinName + " (expects " + (input.localNames.length - 1) + " arguments)");
+			}
+			return call(identifier(builtinName), input.localNames.map(localName => identifier(mangleLocal(localName))));
+		case "function_ref":
+			this.writeBuiltIn(input.functionName);
+			return identifier(mangleLocal(input.functionName));
+		case "apply":
+			var args = input.localNames.slice(1);
+			var result = mangleLocal(input.localNames[0]);
+			if (input.fieldName) {
+				result += JSON.stringify([input.fieldName]);
+			}
+			var callee = identifier(mangleLocal(input.localNames[0]));
+			if (input.convention == "method") {
+				callee = {
+					type: "MemberExpression",
+					object: callee,
+					property: identifier(input.fieldName),
+					computed: false,
+				};
+				var hiddenThisArg = args.pop();
+				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
+					args.unshift(hiddenThisArg);
+					callee = {
+						type: "MemberExpression",
+						object: callee,
+						property: identifier("call"),
+						computed: false,
+					};
+				}
+			}
+			return call(callee, args.map(localName => identifier(mangleLocal(localName))));
+		case "partial_apply":
+			throw new Error("partial_apply not supported!");
+		case "alloc_stack":
+			return array(input.localNames.map(localName => identifier(mangleLocal(localName))))
+		case "alloc_box":
+			return array([{
+				type: "ObjectExpression",
+				properties: []
+			}]);
+		case "alloc_ref":
+			return {
+				type: "NewExpression",
+				callee: identifier(mangleLocal(input.localNames[0])),
+				arguments: [],
+			};
+		case "project_box":
+			return {
+				type: "ObjectExpression",
+				properties: [{
+					type: "Property",
+					key: identifier("ref"),
+					kind: "init",
+					value: identifier(mangleLocal(input.localNames[0])),
+				}, {
+					type: "Property",
+					key: identifier("field"),
+					kind: "init",
+					value: literal(0),
+				}]
+			};
+		case "struct_element_addr":
+			return {
+				type: "ObjectExpression",
+				properties: [{
+					type: "Property",
+					key: identifier("ref"),
+					kind: "init",
+					value: identifier(mangleLocal(input.localNames[0])),
+				}, {
+					type: "Property",
+					key: identifier("field"),
+					kind: "init",
+					value: literal(input.fieldName),
+				}]
+			};
+	}
+	return null;
+}
+
 CodeGen.prototype.lValueForInput = function (input) {
 	switch (input.interpretation) {
 		case "contents":
@@ -253,9 +448,17 @@ CodeGen.prototype.lValueForInput = function (input) {
 	}
 }
 
+CodeGen.prototype.writeSourceMap = function(source) {
+	if (source && source.file && source.line) {
+		this.buffer.write("/* " + source.file + ":" + source.line + " */");
+	}
+};
+
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
+	var result = [];
 	for (var j = 0; j < basicBlock.instructions.length; j++) {
 		var instruction = basicBlock.instructions[j];
+		this.writeSourceMap(instruction.source);
 		if (instruction.inputs.length) {
 			this.buffer.write("// " + instruction.operation + " from " + instruction.inputs.map(i => i.interpretation).join(", "));
 		} else {
@@ -265,6 +468,18 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 		switch (instruction.operation) {
 			case "assignment":
 				this.buffer.write("var " + mangleLocal(instruction.destinationLocalName) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
+				result.push({
+					type: "VariableDeclaration",
+					kind: "var",
+					declarations: [{
+						type: "VariableDeclarator",
+						id: {
+							type: "Identifier",
+							name: mangleLocal(instruction.destinationLocalName),
+						},
+						init: this.rValueExpressionForInput(instruction.inputs[0]),
+					}],
+				});
 				break;
 			case "return":
 				this.buffer.write("return " + this.rValueForInput(instruction.inputs[0]) + ";");
@@ -274,16 +489,16 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				targetBlock.arguments.forEach((arg, index) => {
 					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
 				});
-				this.writeBranchToBlock(instruction.block, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.block, siblingBlocks));
 				break;
 			case "conditional_branch":
 				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + ") {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("} else {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -295,11 +510,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				targetBlock.arguments.forEach((arg, index) => {
 					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
 				});
-				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("} else {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -309,11 +524,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				findBasicBlock(siblingBlocks, instruction.trueBlock).arguments.forEach((arg, index) => {
 					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
 				});
-				this.writeBranchToBlock(instruction.trueBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("} else {");
 				this.buffer.indent(1);
-				this.writeBranchToBlock(instruction.falseBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -343,7 +558,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 					if (targetBlock.arguments.length > 0) {
 						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0].localName) + " = " + this.rValueForInput(instruction.inputs[0]) + "[1];");
 					}
-					this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks);
+					result.push.apply(result, this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks));
 					this.buffer.indent(-1);
 				});
 				this.buffer.write("}");
@@ -353,13 +568,13 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
 				this.buffer.indent(1);
 				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0].localName) + " = " + this.rValueForInput(instruction.inputs[0]) + "(" + instruction.inputs.slice(1).map(input => this.rValueForInput(input)).join(", ") + ");");
-				this.writeBranchToBlock(instruction.normalBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.normalBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("} catch (e) {");
 				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
 				this.buffer.indent(1);
 				this.buffer.write("var " + mangleLocal(errorBasicBlock.arguments[0].localName) + " = e;");
-				this.writeBranchToBlock(instruction.errorBlock, siblingBlocks);
+				result.push.apply(result, this.writeBranchToBlock(instruction.errorBlock, siblingBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 				break;
@@ -381,6 +596,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				break;
 		}
 	}
+	return result;
 }
 
 CodeGen.prototype.consume = function(declaration) {
@@ -407,20 +623,54 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
+	// Apply calling convention to the argument list
 	var args = basicBlocks[0].arguments;
 	var useMethodCallingConvention = declaration.convention == "method";
 	if (useMethodCallingConvention) {
 		var hiddenThisArg = args[args.length - 1];
 		args = args.slice(0, args.length - 1);
 	}
+	// Setup the JavaScript AST
+	var body = [];
+	this.body.push({
+		type: "FunctionDeclaration",
+		id: {
+			type: "Identifier",
+			name: declaration.name,
+		},
+		params: args.map(arg => ({
+			type: "Identifier",
+			name: mangleLocal(arg.localName),
+		})),
+		body: {
+			type: "BlockStatement",
+			body: body,
+		},
+		loc: null,
+	});
 	this.buffer.write("function " + declaration.name + "(" + args.map(arg => mangleLocal(arg.localName)).join(", ") + ") {");
 	this.buffer.indent(1);
+	// Convert the this argument to a variable
 	if (useMethodCallingConvention) {
+		body.push({
+			type: "VariableDeclaration",
+			kind: "var",
+			declarations: [{
+				type: "VariableDeclarator",
+				id: {
+					type: "Identifier",
+					name: mangleLocal(hiddenThisArg.localName),
+				},
+				init: {
+					type: "ThisExpression",
+				},
+			}],
+		});
 		this.buffer.write("var " + mangleLocal(hiddenThisArg.localName) + " = this;");
 		hiddenThisArg.localName = "this";
 	}
 	if (basicBlocks.length == 1) {
-		this.writeBasicBlock(basicBlocks[0], basicBlocks);
+		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
 	} else {
 		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
 		if (firstBlockHasBackreferences) {
@@ -428,19 +678,19 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 		} else {
 			this.buffer.write("var state;");
 			this.buffer.write("// " + basicBlocks[0].name);
-			this.writeBasicBlock(basicBlocks[0], basicBlocks);
+			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
 			if (basicBlocks[1].hasBackReferences) {
 				this.buffer.write("for (;;) {")
 				this.buffer.indent(1);
 				this.buffer.write("// " + basicBlocks[1].name);
-				this.writeBasicBlock(basicBlocks[1], basicBlocks);
+				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
 				this.buffer.indent(-1);
 				this.buffer.write("}");
 			} else {
 				this.buffer.write("// " + basicBlocks[1].name);
-				this.writeBasicBlock(basicBlocks[1], basicBlocks);
+				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
 			}
 		} else {
 			this.buffer.write("for (;;) switch(state) {")
@@ -448,7 +698,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 				var basicBlock = basicBlocks[i];
 				this.buffer.write("case " + i + ": // " + basicBlock.name);
 				this.buffer.indent(1);
-				this.writeBasicBlock(basicBlocks[i], basicBlocks);
+				body.push.apply(body, this.writeBasicBlock(basicBlocks[i], basicBlocks));
 				this.buffer.write("break;");
 				this.buffer.indent(-1);
 			}
@@ -474,6 +724,10 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 			}
 		}
 	}
+}
+
+CodeGen.prototype.end = function() {
+	console.log(escodegen.generate(this.program));
 }
 
 module.exports = CodeGen;

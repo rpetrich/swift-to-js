@@ -117,7 +117,7 @@ function simpleLocalContents(name, type) {
 	};
 }
 
-Parser.prototype.parseInstruction = function (line) {
+Parser.prototype.parseInstruction = function (line, source) {
 	if (/^debug_value\s/.test(line)) {
 		return;
 	}
@@ -148,7 +148,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
-			line: line,
+			source: source,
 			inputs: []
 		};
 	}
@@ -160,7 +160,7 @@ Parser.prototype.parseInstruction = function (line) {
 		var input = {
 			interpretation: interpretation,
 			localNames: [],
-			line: line,
+			source: source,
 		};
 		switch (interpretation) {
 			case "integer_literal":
@@ -476,7 +476,7 @@ Parser.prototype.parseInstruction = function (line) {
 				break;
 		}
 		var assignment = {
-			line: line,
+			source: source,
 			operation: "assignment",
 			destinationLocalName: destinationLocalName,
 			inputs: [input],
@@ -488,7 +488,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "return",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], match[2])],
 		};
 	}
@@ -500,7 +500,7 @@ Parser.prototype.parseInstruction = function (line) {
 		}) : [];
 		return {
 			operation: "branch",
-			line: line,
+			source: source,
 			block: { reference: match[1] },
 			inputs: inputs,
 		};
@@ -509,7 +509,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "conditional_branch",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], undefined)],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
@@ -520,7 +520,7 @@ Parser.prototype.parseInstruction = function (line) {
 		// We don't do checked casts, assume that the argument type is always correct
 		return {
 			operation: "checked_cast_branch",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[2], undefined)], // No inputs
 			trueBlock: { reference: match[4] },
 			falseBlock: { reference: match[5] },
@@ -532,7 +532,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "conditional_fail",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
@@ -540,7 +540,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "store",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[3])],
 		};
 	}
@@ -548,7 +548,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "copy_addr",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
 		};
 	}
@@ -570,7 +570,7 @@ Parser.prototype.parseInstruction = function (line) {
 		})
 		return {
 			operation: "switch_enum",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], undefined)],
 			cases: cases,
 			type: basicNameForStruct(match[2]),
@@ -585,7 +585,7 @@ Parser.prototype.parseInstruction = function (line) {
 		inputs.unshift(simpleLocalContents(match[1], undefined))
 		return {
 			operation: "try_apply",
-			line: line,
+			source: source,
 			inputs: inputs,
 			normalBlock: { reference: match[4] },
 			errorBlock: { reference: match[5] },
@@ -595,7 +595,7 @@ Parser.prototype.parseInstruction = function (line) {
 	if (match) {
 		return {
 			operation: "throw",
-			line: line,
+			source: source,
 			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
@@ -664,7 +664,12 @@ Parser.prototype.addLine = function(originalLine) {
 			}
 		} else if (/^  /.test(line)) {
 			if (this.currentBasicBlock) {
-				var instruction = this.parseInstruction(line.match(/^\s*(.*?)\s*(,? loc "\w+.\w+":\d+:\d+)?(,? scope \d+)?\s*$/)[1]);
+				var match = line.match(/^\s*(.*?)\s*(,? loc "(\w+.\w+)":(\d+):\d+)?(,? scope \d+)?\s*$/);
+				var instruction = this.parseInstruction(match[1], {
+					sil: match[1],
+					file: match[3],
+					line: match[4],
+				});
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);
 				}
