@@ -116,6 +116,32 @@ const expressionStatement = expression => ({
 	expression: expression,
 })
 
+const declarator = (id, init) => ({
+	type: "VariableDeclarator",
+	id: id,
+	init: init,
+});
+
+const declaration = (id, init) => ({
+	type: "VariableDeclaration",
+	kind: "var",
+	declarations: [declarator(id, init)],
+});
+
+const declarations = declarations => declarations.length == 0 ? [] : [{
+	type: "VariableDeclaration",
+	kind: "var",
+	declarations: declarations.map(declaration => declarator(declaration[0], declaration[1])),
+}];
+
+const switchCase = (test, consequents) => ({
+	type: "SwitchCase",
+	test: test,
+	consequent: consequents.concat([{
+		type: "BreakStatement",
+	}]),
+});
+
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
@@ -230,7 +256,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return call(identifier(builtinName), input.localNames.map(localName => mangledLocal(localName)));
 		case "function_ref":
 			this.writeBuiltIn(input.functionName);
-			return mangledLocal(input.functionName);
+			return identifier(input.functionName);
 		case "apply":
 			var args = input.localNames.slice(1);
 			var callee = mangledLocal(input.localNames[0]);
@@ -257,7 +283,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "alloc_ref":
 			return {
 				type: "NewExpression",
-				callee: mangledLocal(input.localNames[0]),
+				callee: identifier(input.type),
 				arguments: [],
 			};
 		case "project_box":
@@ -340,15 +366,9 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 		switch (instruction.operation) {
 			case "assignment":
 				var init = this.rValueForInput(instruction.inputs[0]);
-				init && result.push({
-					type: "VariableDeclaration",
-					kind: "var",
-					declarations: [{
-						type: "VariableDeclarator",
-						id: mangledLocal(instruction.destinationLocalName),
-						init: init,
-					}],
-				});
+				if (init) {
+					result.push(declaration(mangledLocal(instruction.destinationLocalName), init));
+				}
 				break;
 			case "return":
 				result.push({
@@ -359,15 +379,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "branch":
 				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
 				if (targetBlock.arguments.length) {
-					result.push({
-						type: "VariableDeclaration",
-						kind: "var",
-						declarations: targetBlock.arguments.map((arg, index) => ({
-							type: "VariableDeclarator",
-							id: mangledLocal(arg.localName),
-							init: this.rValueForInput(instruction.inputs[index]),
-						})),
-					})
+					result = result.concat(declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])))
 				}
 				result.push.apply(result, this.writeBranchToBlock(instruction.block, siblingBlocks));
 				break;
@@ -387,14 +399,14 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				break;
 			case "checked_cast_branch":
 				var comparison = instruction.exact ? ".constructor == " : " instanceof ";
-				// TODO: Support arguments for the first BlockStatement
+				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 				var value = this.rValueForInput(instruction.inputs[0]);
 				result.push({
 					type: "IfStatement",
 					test: instruction.exact ? binary("instanceof", member(value, literal("constructor")), identifier(instruction.type)) : binary("==", value, identifier(instruction.type)),
 					consequent: {
 						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+						body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
 					},
 					alternate: {
 						type: "BlockStatement",
@@ -403,14 +415,14 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				});
 				break;
 			case "conditional_defined_branch":
-				// TODO: Support arguments for the first BlockStatement
+				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 				var value = this.rValueForInput(instruction.inputs[0]);
 				result.push({
 					type: "IfStatement",
 					test: binary("!==", value, literal(undefined)),
 					consequent: {
 						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+						body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
 					},
 					alternate: {
 						type: "BlockStatement",
@@ -435,15 +447,12 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 					discriminant: value,
 					cases: instruction.cases.map(enumCase => {
 						var caseName = Parser.caseNameForEnum(enumCase.case);
-						// TODO: Support passing arguments into the branch
-						return {
-							type: "SwitchCase",
-							test: literal(caseName ? enumLayout.indexOf(caseName) : null),
-							consequent: {
-								type: "BlockStatement",
-								body: this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks),
-							},
-						};
+						var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
+						return switchCase(
+							literal(caseName.enumLayout ? enumLayout.indexOf(caseName) : null),
+							declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]))
+								.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks))
+						);
 					}),
 				});
 				break;
@@ -460,27 +469,21 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 						param: identifier("e"),
 						body: {
 							type: "BlockStatement",
-							body:[{
-								type: "VariableDeclaration",
-								kind: "var",
-								declarations: [{
-									type: "VariableDeclarator",
-									id: mangledLocal(errorBasicBlock.arguments[0].localName),
-									init: identifier("e"),
-								}],
-							}].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
+							body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
 						}
 					}
 				});
 				break;
 			case "conditional_fail":
+				this.writeBuiltIn("trap");
 				result.push({
 					type: "IfStatement",
 					test: this.rValueForInput(instruction.inputs[0]),
-					consequent: expressionStatement(call(identifier("trap"), []))
+					consequent: expressionStatement(call(identifier("trap"), [])),
 				});
 				break;
 			case "unreachable":
+				this.writeBuiltIn("trap");
 				result.push(expressionStatement(call(identifier("trap"), [])));
 				break;
 			case "throw":
@@ -517,27 +520,19 @@ CodeGen.prototype.consume = function(declaration) {
 	}
 }
 
-CodeGen.prototype.consumeGlobal = function(declaration) {
-	this.body.push({
-		type: "VariableDeclaration",
-		kind: "var",
-		declarations: [{
-			type: "VariableDeclarator",
-			id: identifier(declaration.name),
-			init: array([]),
-		}],
-	});
+CodeGen.prototype.consumeGlobal = function(global) {
+	this.body.push(declaration(identifier(global.name), array([])));
 }
 
-CodeGen.prototype.consumeFunction = function(declaration) {
-	var basicBlocks = declaration.basicBlocks;
+CodeGen.prototype.consumeFunction = function(fn) {
+	var basicBlocks = fn.basicBlocks;
 	if (basicBlocks.length == 0) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
 	// Apply calling convention to the argument list
 	var args = basicBlocks[0].arguments;
-	var useMethodCallingConvention = declaration.convention == "method";
+	var useMethodCallingConvention = fn.convention == "method";
 	if (useMethodCallingConvention) {
 		var hiddenThisArg = args[args.length - 1];
 		args = args.slice(0, args.length - 1);
@@ -546,7 +541,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	var body = [];
 	this.body.push({
 		type: "FunctionDeclaration",
-		id: identifier(declaration.name),
+		id: identifier(fn.name),
 		params: args.map(arg => mangledLocal(arg.localName)),
 		body: {
 			type: "BlockStatement",
@@ -556,17 +551,7 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	});
 	// Convert the this argument to a variable
 	if (useMethodCallingConvention) {
-		body.push({
-			type: "VariableDeclaration",
-			kind: "var",
-			declarations: [{
-				type: "VariableDeclarator",
-				id: mangledLocal(hiddenThisArg.localName),
-				init: {
-					type: "ThisExpression",
-				},
-			}],
-		});
+		body.push(declaration(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" }));
 		hiddenThisArg.localName = "this";
 	}
 	if (basicBlocks.length == 1) {
@@ -574,24 +559,9 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	} else {
 		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
 		if (firstBlockHasBackreferences) {
-			body.push({
-				type: "VariableDeclaration",
-				kind: "var",
-				declarations: [{
-					type: "VariableDeclarator",
-					id: identifier(state),
-					init: literal(0),
-				}],
-			});
+			body.push(declaration(identifier("state"), literal(0)));
 		} else {
-			body.push({
-				type: "VariableDeclaration",
-				kind: "var",
-				declarations: [{
-					type: "VariableDeclarator",
-					id: identifier("state"),
-				}],
-			});
+			body.push(declaration(identifier("state")));
 			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
@@ -612,18 +582,14 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 				body: {
 					type: "SwitchStatement",
 					discriminant: identifier("state"),
-					cases: basicBlocks.slice(firstBlockHasBackreferences ? 0 : 1).map((basicBlock, i) => ({
-						type: "SwitchCase",
-						test: literal(i),
-						consequent: this.writeBasicBlock(basicBlock, basicBlocks),
-					})),
+					cases: basicBlocks.slice(firstBlockHasBackreferences ? 0 : 1).map((basicBlock, i) => switchCase(literal(i), this.writeBasicBlock(basicBlock, basicBlocks))),
 				}
 			});
 		}
 	}
-	var beautifulName = declaration.beautifulName;
+	var beautifulName = fn.beautifulName;
 	if (beautifulName) {
-		this.body.push(expressionStatement(assignment(member(identifier("window"), literal(beautifulName)), literal(declaration.name))));
+		this.body.push(expressionStatement(assignment(member(identifier("window"), literal(beautifulName)), identifier(fn.name))));
 	}
 }
 
