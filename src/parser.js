@@ -166,7 +166,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			case "integer_literal":
 				var match = args.match(/^\$(.*),\s+(.*)?$/);
 				input.type = match[1];
-				input.value = match[2];
+				input.value = Number(match[2]);
 				if (input.type == "Builtin.Int1") {
 					input.value = input.value != 0;
 				}
@@ -174,10 +174,10 @@ Parser.prototype.parseInstruction = function (line, source) {
 			case "float_literal":
 				var match = args.match(/^\$(.*),\s+(.*)?$/);
 				input.type = match[1];
-				input.value = match[2];
+				input.value = Number(match[2]);
 				break;
 			case "string_literal":
-				input.value = args.match(/\".*\"/)[0];
+				input.value = JSON.parse("[" + args.match(/\".*\"/)[0] + "]")[0];
 				input.type = "Builtin.RawPointer";
 				break;
 			case "enum":

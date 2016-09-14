@@ -26,11 +26,95 @@ IndentedBuffer.prototype.write = function (line, extra) {
 	}
 };
 
-var mangleLocal = local => "_" + local;
-var box = (struct, quotedFieldName) => "({ \"ref\": " + struct + ", \"field\": " + quotedFieldName + " })";
-var unboxRef = struct => struct + "[\"ref\"]";
-var unboxField = struct => struct + "[\"field\"]";
-var unbox = struct => unboxRef(struct) + "[" + unboxField(struct) + "]";
+const identifier = name => ({
+	type: "Identifier",
+	name: name,
+});
+
+var mangledLocal = local => identifier("_" + local);
+
+function literal(value) {
+	if (typeof value == "undefined") {
+		return unary("void", literal(0));
+	}
+	if (typeof value == "number" && value < 0) {
+		return unary("-", literal(-value));
+	}
+	return {
+		type: "Literal",
+		value: value,
+	};
+}
+
+const array = elements => ({
+	type: "ArrayExpression",
+	elements: elements,
+});
+
+const call = (callee, args) => ({
+	type: "CallExpression",
+	callee: callee,
+	arguments: args,
+});
+
+const member = (object, property) => ({
+	type: "MemberExpression",
+	object: object,
+	property: property,
+	computed: true,
+});
+
+const box = (parent, field) => ({
+	type: "ObjectExpression",
+	properties: [{
+		type: "Property",
+		key: literal("ref"),
+		kind: "init",
+		value: parent,
+	}, {
+		type: "Property",
+		key: literal("field"),
+		kind: "init",
+		value: field,
+	}]
+});
+
+const unboxRef = boxed => member(boxed, literal("ref"));
+const unboxField = boxed => member(boxed, literal("field"));
+const unbox = boxed => member(unboxRef(boxed), unboxField(boxed));
+
+const unary = (operator, value) => ({
+	type: "UnaryExpression",
+	prefix: true,
+	operator: operator,
+	argument: value,
+});
+
+const binary = (operator, left, right) => ({
+	type: "BinaryExpression",
+	operator: operator,
+	left: left,
+	right: right,
+});
+
+const ternary = (test, alternate, consequent) => ({
+	type: "ConditionalExpression",
+	test: test,
+	alternate: alternate,
+	consequent: consequent,
+});
+
+const assignment = (left, right) => ({
+	type: "AssignmentExpression",
+	operator: "=",
+	left: left,
+	right: right,
+});
+
+const expressionStatement = expression => ({
+	type: "ExpressionStatement",
+	expression: expression,
+})
 
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
@@ -62,14 +146,12 @@ CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
 	if (descriptor.reference) {
 		for (var i = 0; i < siblingBlocks.length; i++) {
 			if (siblingBlocks[i].name == descriptor.reference) {
-				this.buffer.write("state = " + i + ";");
-				return;
+				return [expressionStatement(assignment(identifier("state"), literal(i)))]
 			}
 		}
 		throw new Error("Unable to find block with name: " + descriptor.reference);
 	}
 	if (descriptor.inline) {
-		this.buffer.write("// " + descriptor.inline.name);
 		return this.writeBasicBlock(descriptor.inline, siblingBlocks);
 	} else {
 		throw new Error("Neither a reference to a basic block nor inline!");
@@ -94,203 +176,13 @@ function findBasicBlock(blocks, descriptor) {
 CodeGen.prototype.rValueForInput = function(input) {
 	switch (input.interpretation) {
 		case "contents":
-			return mangleLocal(input.localNames[0]);
+			return mangledLocal(input.localNames[0]);
 		case "integer_literal":
 		case "float_literal":
 		case "string_literal":
-			return input.value;
+			return literal(input.value);
 		case "undefined_literal":
-			return "void 0";
-		case "enum":
-			var enumName = input.type;
-			var enumLayout = enums[enumName];
-			if (!enumLayout) {
-				throw new Error("Unable to find enum: " + enumName);
-			}
-			var index = enumLayout.indexOf(input.caseName);
-			if (index == -1) {
-				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
-			}
-			if (input.localNames.length) {
-				return "[" + index + ", " + mangleLocal(input.localNames[0]) + "]";
-			} else {
-				return "[" + index + "]";
-			}
-		case "struct":
-			var structName = input.type;
-			var structType = types[structName];
-			if (!structType) {
-				throw new Error("No type for " + structName);
-			}
-			return "{ " + input.localNames.map((localName, index) => "\"" + structType[index] + "\": " + mangleLocal(localName)).join(", ") + " }";
-		case "tuple":
-			if (input.localNames.length == 0) {
-				return "void 0";
-			} else {
-				return "[" + input.localNames.map(mangleLocal).join(", ") + "]";
-			}
-		case "struct_extract":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName]);
-		case "tuple_extract":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName | 0]);
-		case "builtin":
-			var builtinName = input.builtinName;
-			if (!this.writeBuiltIn(builtinName)) {
-				throw new Error("No builtin available for " + builtinName + " (expects " + (input.localNames.length - 1) + " arguments)");
-			}
-			return builtinName + "(" + input.localNames.map(mangleLocal).join(", ") + ")";
-		case "function_ref":
-			this.writeBuiltIn(input.functionName);
-			return input.functionName;
-		case "apply":
-			var args = input.localNames.slice(1);
-			var result = mangleLocal(input.localNames[0]);
-			if (input.fieldName) {
-				result += JSON.stringify([input.fieldName]);
-			}
-			if (input.convention == "method") {
-				var hiddenThisArg = args.pop();
-				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
-					args.unshift(hiddenThisArg);
-					result += ".call";
-				}
-			}
-			return result + "(" + args.map(mangleLocal).join(", ") + ")";
-		case "partial_apply":
-			// TODO: Support method calling convention on partial application
-			return mangleLocal(input.localNames[0]) + ".bind(this, " + input.localNames.slice(1).map(mangleLocal).join(", ") + ")";
-		case "alloc_stack":
-			if (input.localNames.length) {
-				return box("[" + mangleLocal(input.localNames[0]) + "]", 0);
-			} else {
-				return box("[]", 0);
-			}
-		case "alloc_box":
-			return box("[{}]", 0);
-		case "alloc_ref":
-			return "new " + input.type;
-		case "project_box":
-			return box(mangleLocal(input.localNames[0]), 0);
-		case "struct_element_addr":
-			return box(unbox(mangleLocal(input.localNames[0])), "\"" + input.fieldName + "\"");
-		case "ref_element_addr":
-			return box(mangleLocal(input.localNames[0]), "\"" + input.fieldName + "\"");
-		case "global_addr":
-			return box(input.globalName, 0);
-		case "load":
-			if ("fieldName" in input) {
-				return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName]);
-			} else {
-				return unbox(mangleLocal(input.localNames[0]));
-			}
-		case "unchecked_enum_data":
-			return mangleLocal(input.localNames[0]) + "[1]";
-		case "select_enum":
-			var enumName = input.type;
-			var enumLayout = enums[enumName];
-			if (!enumLayout) {
-				throw "Unable to find enum: " + enumName;
-			}
-			var prefix = "(function(value";
-			var contents = "){switch(value){";
-			var suffix = "}})(" + mangleLocal(input.localNames[0]) + "[0]";
-			input.cases.forEach((enumCase, index) => {
-				prefix += ",$" + index;
-				var caseName = Parser.caseNameForEnum(enumCase.case);
-				if (caseName) {
-					contents += "case " + enumLayout.indexOf(caseName) + ":return $" + index + ";";
-				} else {
-					contents += "default:return $" + index + ";";
-				}
-				suffix += ", " + mangleLocal(input.localNames[index + 1]);
-			});
-			return prefix + contents + suffix + ")";
-		case "select_value":
-			if (input.values.length == 2) {
-				if ("value" in input.values[0]) {
-					return "(" + mangleLocal(input.localNames[0]) + " === " + input.values[0].value + " ? " + mangleLocal(input.localNames[1]) + " : " + mangleLocal(input.localNames[2]) + ")";
-				} else {
-					return "(" + mangleLocal(input.localNames[0]) + " !== " + input.values[1].value + " ? " + mangleLocal(input.localNames[1]) + " : " + mangleLocal(input.localNames[2]) + ")";
-				}
-			} else {
-				var prefix = "(function(value";
-				var contents = "){switch(value){";
-				var suffix = "}})(" + mangleLocal(input.localNames[0]);
-				input.values.forEach((object, index) => {
-					prefix += ",$" + index;
-					if ("value" in object) {
-						contents += "case " + object.value + ":return $" + index + ";";
-					} else {
-						contents += "default:return $" + index + ";";
-					}
-					suffix += ", " + mangleLocal(input.localNames[index + 1]);
-				});
-			}
-			return prefix + contents + suffix + ")";
-		case "index_raw_pointer":
-		case "index_addr":
-			return box(unboxRef(mangleLocal(input.localNames[0])), unboxField(mangleLocal(input.localNames[0])) + " + " + mangleLocal(input.localNames[1]));
-		case "metatype":
-			return "void 0";
-		case "class_method":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.entry]);
-		case "open_existential_ref":
-			return "{ \"ref\": [], \"field\": 0 }";
-		default:
-			throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
-	}
-}
-
-function identifier(name) {
-	return {
-		type: "Identifier",
-		name: name,
-	};
-}
-
-function literal(value) {
-	return {
-		type: "Literal",
-		value: value,
-	};
-}
-
-function array(elements) {
-	return {
-		type: "ArrayExpression",
-		elements: elements,
-	};
-}
-
-function call(callee, args) {
-	return {
-		type: "CallExpression",
-		callee: callee,
-		arguments: args,
-	};
-}
-
-CodeGen.prototype.rValueExpressionForInput = function(input) {
-	switch (input.interpretation) {
-		case "contents":
-			return identifier(input.localNames[0]);
-		case "integer_literal":
-		case "float_literal":
-			var value = Number(input.value);
-			if (value >= 0) {
-				return literal(value);
-			}
-			// TODO: Support negative numbers
-			return null;
-		case "string_literal":
-			return literal(JSON.parse("[" + input.value + "]")[0]);
-		case "undefined_literal":
-			return {
-				type: "UnaryExpression",
-				prefix: true,
-				operator: "void",
-				argument: literal(0),
-			};
+			return unary("void", literal(0));
 		case "enum":
 			var enumName = input.type;
 			var enumLayout = enums[enumName];
@@ -318,72 +210,45 @@ CodeGen.prototype.rValueExpressionForInput = function(input) {
 					type: "Property",
 					key: identifier(structType[index]),
 					kind: "init",
-					value: identifier(mangleLocal(localName)),
+					value: mangledLocal(localName),
 				}))
 			};
 		case "tuple":
 			if (input.localNames.length == 0) {
-				return {
-					type: "UnaryExpression",
-					prefix: true,
-					operator: "void",
-					argument: literal(0),
-				};
+				return unary("void", literal(0));
 			}
-			return array(input.localNames.map(localName => identifier(mangleLocal(localName))));
+			return array(input.localNames.map(localName => mangledLocal(localName)));
 		case "struct_extract":
-			return {
-				type: "MemberExpression",
-				object: identifier(input.localNames[0]),
-				property: identifier(input.fieldName),
-				computed: false,
-			};
+			return member(identifier(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
-			return {
-				type: "MemberExpression",
-				object: identifier(input.localNames[0]),
-				property: literal(input.fieldName),
-				computed: true,
-			};
+			return member(identifier(input.localNames[0]), literal(input.fieldName | 0));
 		case "builtin":
 			var builtinName = input.builtinName;
 			if (!this.writeBuiltIn(builtinName)) {
 				throw new Error("No builtin available for " + builtinName + " (expects " + (input.localNames.length - 1) + " arguments)");
 			}
-			return call(identifier(builtinName), input.localNames.map(localName => identifier(mangleLocal(localName))));
+			return call(identifier(builtinName), input.localNames.map(localName => mangledLocal(localName)));
 		case "function_ref":
 			this.writeBuiltIn(input.functionName);
-			return identifier(mangleLocal(input.functionName));
+			return mangledLocal(input.functionName);
 		case "apply":
 			var args = input.localNames.slice(1);
-			var result = mangleLocal(input.localNames[0]);
-			if (input.fieldName) {
-				result += JSON.stringify([input.fieldName]);
+			var callee = mangledLocal(input.localNames[0]);
+			if ("fieldName" in input) {
+				callee = member(callee, literal(input.fieldName));
 			}
-			var callee = identifier(mangleLocal(input.localNames[0]));
 			if (input.convention == "method") {
-				callee = {
-					type: "MemberExpression",
-					object: callee,
-					property: identifier(input.fieldName),
-					computed: false,
-				};
 				var hiddenThisArg = args.pop();
 				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
 					args.unshift(hiddenThisArg);
-					callee = {
-						type: "MemberExpression",
-						object: callee,
-						property: identifier("call"),
-						computed: false,
-					};
+					callee = member(callee, literal("call"));
 				}
 			}
-			return call(callee, args.map(localName => identifier(mangleLocal(localName))));
+			return call(callee, args.map(localName => mangledLocal(localName)));
 		case "partial_apply":
 			throw new Error("partial_apply not supported!");
 		case "alloc_stack":
-			return array(input.localNames.map(localName => identifier(mangleLocal(localName))))
+			return array(input.localNames.map(localName => mangledLocal(localName)))
 		case "alloc_box":
 			return array([{
 				type: "ObjectExpression",
@@ -392,39 +257,52 @@ CodeGen.prototype.rValueExpressionForInput = function(input) {
 		case "alloc_ref":
 			return {
 				type: "NewExpression",
-				callee: identifier(mangleLocal(input.localNames[0])),
+				callee: mangledLocal(input.localNames[0]),
 				arguments: [],
 			};
 		case "project_box":
-			return {
-				type: "ObjectExpression",
-				properties: [{
-					type: "Property",
-					key: identifier("ref"),
-					kind: "init",
-					value: identifier(mangleLocal(input.localNames[0])),
-				}, {
-					type: "Property",
-					key: identifier("field"),
-					kind: "init",
-					value: literal(0),
-				}]
-			};
+			return box(mangledLocal(input.localNames[0]), literal(0));
 		case "struct_element_addr":
+			return box(unbox(mangledLocal(input.localNames[0])), literal(input.fieldName));
+		case "ref_element_addr":
+			return box(mangledLocal(input.localNames[0]), literal(input.fieldName));
+		case "global_addr":
+			return box(identifier(input.globalName), 0);
+		case "load":
+			return unbox(mangledLocal(input.localNames[0]));
+		case "unchecked_enum_data":
 			return {
-				type: "ObjectExpression",
-				properties: [{
-					type: "Property",
-					key: identifier("ref"),
-					kind: "init",
-					value: identifier(mangleLocal(input.localNames[0])),
-				}, {
-					type: "Property",
-					key: identifier("field"),
-					kind: "init",
-					value: literal(input.fieldName),
-				}]
+				type: "MemberExpression",
+				object: mangledLocal(input.localNames[0]),
+				property: literal(1),
+				computed: true,
 			};
+		case "select_enum":
+			throw new Error("select_enum is not supported yet!");
+		case "select_value":
+			if (input.values.length == 2) {
+				var comparison;
+				if ("value" in input.values[0]) {
+					comparison = binary("===", mangledLocal(input.localNames[0]), literal(input.values[0].value));
+				} else {
+					comparison = binary("!==", mangledLocal(input.localNames[0]), literal(input.values[1].value));
+				}
+				return ternary(comparison, mangledLocal(input.localNames[1]), mangledLocal(input.localNames[2]));
+			} else {
+				throw new Error("select_value with more than two arguments is not supported yet!");
+			}
+		case "index_raw_pointer":
+		case "index_addr":
+			var address = mangledLocal(input.localNames[0]);
+			return box(unboxRef(address), binary("+", unboxField(address), mangledLocal(input.localNames[1])));
+		case "metatype":
+			return unary("void", literal(0));
+		case "class_method":
+			return member(mangledLocal(input.localNames[0]), literal(input.entry));
+		case "open_existential_ref":
+			return box(array([]), literal(0));
+		// default:
+		// 	throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 	}
 	return null;
 }
@@ -432,169 +310,195 @@ CodeGen.prototype.rValueExpressionForInput = function(input) {
 CodeGen.prototype.lValueForInput = function (input) {
 	switch (input.interpretation) {
 		case "contents":
-			return unbox(mangleLocal(input.localNames[0]));
+			return unbox(mangledLocal(input.localNames[0]));
 		case "ref_element_addr":
 		case "struct_element_addr":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName]);
+			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "index_raw_pointer":
 		case "index_addr":
-			return unboxRef(mangleLocal(input.localNames[0])) + "[" + unboxField(mangleLocal(input.localNames[0])) + " + " + mangleLocal(input.localNames[1]) + "]";
+			var address = mangledLocal(input.localNames[0]);
+			return member(unboxRef(address), binary("+", unboxField(address), mangledLocal(input.localNames[1])))
 		case "struct_extract":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName]);
+			return member(identifier(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
-			return mangleLocal(input.localNames[0]) + JSON.stringify([input.fieldName | 0]);
-		default:
-			throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
+			return member(identifier(input.localNames[0]), literal(input.fieldName | 0));
+		// default:
+		// 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 	}
 }
-
-CodeGen.prototype.writeSourceMap = function(source) {
-	if (source && source.file && source.line) {
-		this.buffer.write("/* " + source.file + ":" + source.line + " */");
-	}
-};
 
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 	var result = [];
 	for (var j = 0; j < basicBlock.instructions.length; j++) {
 		var instruction = basicBlock.instructions[j];
-		this.writeSourceMap(instruction.source);
-		if (instruction.inputs.length) {
-			this.buffer.write("// " + instruction.operation + " from " + instruction.inputs.map(i => i.interpretation).join(", "));
-		} else {
-			this.buffer.write("// " + instruction.operation);
-		}
-		this.buffer.write("// " + JSON.stringify(instruction));
+		// if (instruction.inputs.length) {
+		// 	this.buffer.write("// " + instruction.operation + " from " + instruction.inputs.map(i => i.interpretation).join(", "));
+		// } else {
+		// 	this.buffer.write("// " + instruction.operation);
+		// }
+		// this.buffer.write("// " + JSON.stringify(instruction));
 		switch (instruction.operation) {
 			case "assignment":
-				this.buffer.write("var " + mangleLocal(instruction.destinationLocalName) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
-				result.push({
+				var init = this.rValueForInput(instruction.inputs[0]);
+				init && result.push({
 					type: "VariableDeclaration",
 					kind: "var",
 					declarations: [{
 						type: "VariableDeclarator",
-						id: {
-							type: "Identifier",
-							name: mangleLocal(instruction.destinationLocalName),
-						},
-						init: this.rValueExpressionForInput(instruction.inputs[0]),
+						id: mangledLocal(instruction.destinationLocalName),
+						init: init,
 					}],
 				});
 				break;
 			case "return":
-				this.buffer.write("return " + this.rValueForInput(instruction.inputs[0]) + ";");
+				result.push({
+					type: "ReturnStatement",
+					argument: this.rValueForInput(instruction.inputs[0]),
+				});
 				break;
 			case "branch":
 				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-				targetBlock.arguments.forEach((arg, index) => {
-					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
-				});
+				if (targetBlock.arguments.length) {
+					result.push({
+						type: "VariableDeclaration",
+						kind: "var",
+						declarations: targetBlock.arguments.map((arg, index) => ({
+							type: "VariableDeclarator",
+							id: mangledLocal(arg.localName),
+							init: this.rValueForInput(instruction.inputs[index]),
+						})),
+					})
+				}
 				result.push.apply(result, this.writeBranchToBlock(instruction.block, siblingBlocks));
 				break;
 			case "conditional_branch":
-				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + ") {");
-				this.buffer.indent(1);
-				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("} else {");
-				this.buffer.indent(1);
-				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("}");
+				result.push({
+					type: "IfStatement",
+					test: this.rValueForInput(instruction.inputs[0]),
+					consequent: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+					},
+					alternate: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					},
+				});
 				break;
 			case "checked_cast_branch":
 				var comparison = instruction.exact ? ".constructor == " : " instanceof ";
-				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + comparison + instruction.type + ") {");
-				this.buffer.indent(1);
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-				targetBlock.arguments.forEach((arg, index) => {
-					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
+				// TODO: Support arguments for the first BlockStatement
+				var value = this.rValueForInput(instruction.inputs[0]);
+				result.push({
+					type: "IfStatement",
+					test: instruction.exact ? binary("instanceof", member(value, literal("constructor")), identifier(instruction.type)) : binary("==", value, identifier(instruction.type)),
+					consequent: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+					},
+					alternate: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					},
 				});
-				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("} else {");
-				this.buffer.indent(1);
-				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("}");
 				break;
 			case "conditional_defined_branch":
-				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + " !== void 0) {");
-				this.buffer.indent(1);
-				findBasicBlock(siblingBlocks, instruction.trueBlock).arguments.forEach((arg, index) => {
-					this.buffer.write("var " + mangleLocal(arg.localName) + " = " + this.rValueForInput(instruction.inputs[index]) + ";");
+				// TODO: Support arguments for the first BlockStatement
+				var value = this.rValueForInput(instruction.inputs[0]);
+				result.push({
+					type: "IfStatement",
+					test: binary("!==", value, literal(undefined)),
+					consequent: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+					},
+					alternate: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					},
 				});
-				result.push.apply(result, this.writeBranchToBlock(instruction.trueBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("} else {");
-				this.buffer.indent(1);
-				result.push.apply(result, this.writeBranchToBlock(instruction.falseBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("}");
 				break;
 			case "store":
-				this.buffer.write(this.lValueForInput(instruction.inputs[1]) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
-				break;
 			case "copy_addr":
-				this.buffer.write(this.lValueForInput(instruction.inputs[1]) + " = " + this.rValueForInput(instruction.inputs[0]) + ";");
+				result.push(expressionStatement(assignment(this.lValueForInput(instruction.inputs[1]), this.rValueForInput(instruction.inputs[0]))));
 				break;
 			case "switch_enum":
-				this.buffer.write("switch (" + this.rValueForInput(instruction.inputs[0]) + ") {")
 				var args = instruction.cases;
 				var enumName = instruction.type;
 				var enumLayout = enums[enumName];
 				if (!enumLayout) {
 					throw "Unable to find enum: " + enumName;
 				}
-				instruction.cases.forEach(enumCase => {
-					var caseName = Parser.caseNameForEnum(enumCase.case);
-					if (caseName) {
-						this.buffer.write("case " + enumLayout.indexOf(caseName) + ":");
-					} else {
-						this.buffer.write("default:");
-					}
-					this.buffer.indent(1);
-					var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
-					if (targetBlock.arguments.length > 0) {
-						this.buffer.write("var " + mangleLocal(targetBlock.arguments[0].localName) + " = " + this.rValueForInput(instruction.inputs[0]) + "[1];");
-					}
-					result.push.apply(result, this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks));
-					this.buffer.indent(-1);
+				var value = this.rValueForInput(instruction.inputs[0]);
+				result.push({
+					type: "SwitchStatement",
+					discriminant: value,
+					cases: instruction.cases.map(enumCase => {
+						var caseName = Parser.caseNameForEnum(enumCase.case);
+						// TODO: Support passing arguments into the branch
+						return {
+							type: "SwitchCase",
+							test: literal(caseName ? enumLayout.indexOf(caseName) : null),
+							consequent: {
+								type: "BlockStatement",
+								body: this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks),
+							},
+						};
+					}),
 				});
-				this.buffer.write("}");
 				break;
 			case "try_apply":
-				this.buffer.write("try {");
-				var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
-				this.buffer.indent(1);
-				this.buffer.write("var " + mangleLocal(normalBasicBlock.arguments[0].localName) + " = " + this.rValueForInput(instruction.inputs[0]) + "(" + instruction.inputs.slice(1).map(input => this.rValueForInput(input)).join(", ") + ");");
-				result.push.apply(result, this.writeBranchToBlock(instruction.normalBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("} catch (e) {");
 				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
-				this.buffer.indent(1);
-				this.buffer.write("var " + mangleLocal(errorBasicBlock.arguments[0].localName) + " = e;");
-				result.push.apply(result, this.writeBranchToBlock(instruction.errorBlock, siblingBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("}");
+				result.push({
+					type: "TryStatement",
+					block: {
+						type: "BlockStatement",
+						body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks),
+					},
+					handler: {
+						type: "CatchClause",
+						param: identifier("e"),
+						body: {
+							type: "BlockStatement",
+							body:[{
+								type: "VariableDeclaration",
+								kind: "var",
+								declarations: [{
+									type: "VariableDeclarator",
+									id: mangledLocal(errorBasicBlock.arguments[0].localName),
+									init: identifier("e"),
+								}],
+							}].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
+						}
+					}
+				});
 				break;
 			case "conditional_fail":
-				this.writeBuiltIn("trap");
-				this.buffer.write("if (" + this.rValueForInput(instruction.inputs[0]) + ") {");
-				this.buffer.write("trap();", 1)
-				this.buffer.write("}");
+				result.push({
+					type: "IfStatement",
+					test: this.rValueForInput(instruction.inputs[0]),
+					consequent: expressionStatement(call(identifier("trap"), []))
+				});
 				break;
 			case "unreachable":
-				this.writeBuiltIn("trap");
-				this.buffer.write("trap();")
+				result.push(expressionStatement(call(identifier("trap"), [])));
 				break;
 			case "throw":
-				this.buffer.write("throw " + this.rValueForInput(instruction.inputs[0]) + ";");
+				result.push({
+					type: "ThrowStatement",
+					argument: this.rValueForInput(instruction.inputs[0]),
+				});
 				break;
 			default:
-				this.buffer.write("// Unhandled instruction type: " + instruction.operation + ": " + JSON.stringify(instruction));
+				// TODO: Add comment
+				result.push({
+					type: "EmptyStatement",
+				});
 				break;
 		}
+		// var test = result[result.length-1];
+		// console.log(JSON.stringify(test))
+		// escodegen.generate(test);
 	}
 	return result;
 }
@@ -614,7 +518,15 @@ CodeGen.prototype.consume = function(declaration) {
 }
 
 CodeGen.prototype.consumeGlobal = function(declaration) {
-	this.buffer.write("var " + declaration.name + " = []");
+	this.body.push({
+		type: "VariableDeclaration",
+		kind: "var",
+		declarations: [{
+			type: "VariableDeclarator",
+			id: identifier(declaration.name),
+			init: array([]),
+		}],
+	});
 }
 
 CodeGen.prototype.consumeFunction = function(declaration) {
@@ -634,22 +546,14 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	var body = [];
 	this.body.push({
 		type: "FunctionDeclaration",
-		id: {
-			type: "Identifier",
-			name: declaration.name,
-		},
-		params: args.map(arg => ({
-			type: "Identifier",
-			name: mangleLocal(arg.localName),
-		})),
+		id: identifier(declaration.name),
+		params: args.map(arg => mangledLocal(arg.localName)),
 		body: {
 			type: "BlockStatement",
 			body: body,
 		},
 		loc: null,
 	});
-	this.buffer.write("function " + declaration.name + "(" + args.map(arg => mangleLocal(arg.localName)).join(", ") + ") {");
-	this.buffer.indent(1);
 	// Convert the this argument to a variable
 	if (useMethodCallingConvention) {
 		body.push({
@@ -657,16 +561,12 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 			kind: "var",
 			declarations: [{
 				type: "VariableDeclarator",
-				id: {
-					type: "Identifier",
-					name: mangleLocal(hiddenThisArg.localName),
-				},
+				id: mangledLocal(hiddenThisArg.localName),
 				init: {
 					type: "ThisExpression",
 				},
 			}],
 		});
-		this.buffer.write("var " + mangleLocal(hiddenThisArg.localName) + " = this;");
 		hiddenThisArg.localName = "this";
 	}
 	if (basicBlocks.length == 1) {
@@ -674,60 +574,86 @@ CodeGen.prototype.consumeFunction = function(declaration) {
 	} else {
 		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
 		if (firstBlockHasBackreferences) {
-			this.buffer.write("var state = 0;");
+			body.push({
+				type: "VariableDeclaration",
+				kind: "var",
+				declarations: [{
+					type: "VariableDeclarator",
+					id: identifier(state),
+					init: literal(0),
+				}],
+			});
 		} else {
-			this.buffer.write("var state;");
-			this.buffer.write("// " + basicBlocks[0].name);
+			body.push({
+				type: "VariableDeclaration",
+				kind: "var",
+				declarations: [{
+					type: "VariableDeclarator",
+					id: identifier("state"),
+				}],
+			});
 			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
 			if (basicBlocks[1].hasBackReferences) {
-				this.buffer.write("for (;;) {")
-				this.buffer.indent(1);
-				this.buffer.write("// " + basicBlocks[1].name);
-				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
-				this.buffer.indent(-1);
-				this.buffer.write("}");
+				body.push({
+					type: "ForStatement",
+					body: {
+						type: "BlockStatement",
+						body: this.writeBasicBlock(basicBlocks[1], basicBlocks),
+					}
+				});
 			} else {
-				this.buffer.write("// " + basicBlocks[1].name);
 				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
 			}
 		} else {
-			this.buffer.write("for (;;) switch(state) {")
-			for (var i = firstBlockHasBackreferences ? 0 : 1; i < basicBlocks.length; i++) {
-				var basicBlock = basicBlocks[i];
-				this.buffer.write("case " + i + ": // " + basicBlock.name);
-				this.buffer.indent(1);
-				body.push.apply(body, this.writeBasicBlock(basicBlocks[i], basicBlocks));
-				this.buffer.write("break;");
-				this.buffer.indent(-1);
-			}
-			this.buffer.write("}");
+			body.push({
+				type: "ForStatement",
+				body: {
+					type: "SwitchStatement",
+					discriminant: identifier("state"),
+					cases: basicBlocks.slice(firstBlockHasBackreferences ? 0 : 1).map((basicBlock, i) => ({
+						type: "SwitchCase",
+						test: literal(i),
+						consequent: this.writeBasicBlock(basicBlock, basicBlocks),
+					})),
+				}
+			});
 		}
 	}
-	this.buffer.indent(-1);
-	this.buffer.write("}");
 	var beautifulName = declaration.beautifulName;
 	if (beautifulName) {
-		this.buffer.write("window[\"" + beautifulName + "\"] = " + declaration.name + ";");
+		this.body.push(expressionStatement(assignment(member(identifier("window"), literal(beautifulName)), literal(declaration.name))));
 	}
 }
 
 CodeGen.prototype.consumeVTable = function(declaration) {
 	if (!/^_/.test(declaration.name)) {
-		this.buffer.write("/** @constructor */");
-		this.buffer.write("function " + declaration.name + "() {}");
-		this.buffer.write("window[\"" + declaration.name + "\"] = " + declaration.name + ";");
+		this.body.push({
+			type: "FunctionDeclaration",
+			id: identifier(declaration.name),
+			params: [],
+			body: {
+				type: "BlockStatement",
+				body: [],
+			}
+		})
 		for (var key in declaration.entries) {
 			if (declaration.entries.hasOwnProperty(key)) {
-				this.buffer.write(declaration.name + ".prototype" + JSON.stringify([key]) + " = " + declaration.entries[key] + ";");
+				// this.body.push(expressionStatement(assignment(member(member(identifier(declaration.name), literal("prototype")), key), declaration.entries[key])));
 			}
 		}
 	}
 }
 
 CodeGen.prototype.end = function() {
-	console.log(escodegen.generate(this.program));
+	//console.log(JSON.stringify(this.program, null, 2));
+	this.buffer.write(escodegen.generate(this.program, {
+		format: {
+			json: true,
+			quotes: "double",
+		},
+	}));
 }
 
 module.exports = CodeGen;
