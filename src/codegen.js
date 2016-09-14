@@ -398,12 +398,11 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 				});
 				break;
 			case "checked_cast_branch":
-				var comparison = instruction.exact ? ".constructor == " : " instanceof ";
 				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 				var value = this.rValueForInput(instruction.inputs[0]);
 				result.push({
 					type: "IfStatement",
-					test: instruction.exact ? binary("instanceof", member(value, literal("constructor")), identifier(instruction.type)) : binary("==", value, identifier(instruction.type)),
+					test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
 					consequent: {
 						type: "BlockStatement",
 						body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
