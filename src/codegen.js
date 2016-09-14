@@ -245,9 +245,9 @@ CodeGen.prototype.rValueForInput = function(input) {
 			}
 			return array(input.localNames.map(localName => mangledLocal(localName)));
 		case "struct_extract":
-			return member(identifier(input.localNames[0]), literal(input.fieldName));
+			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
-			return member(identifier(input.localNames[0]), literal(input.fieldName | 0));
+			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		case "builtin":
 			var builtinName = input.builtinName;
 			if (!this.writeBuiltIn(builtinName)) {
@@ -345,9 +345,9 @@ CodeGen.prototype.lValueForInput = function (input) {
 			var address = mangledLocal(input.localNames[0]);
 			return member(unboxRef(address), binary("+", unboxField(address), mangledLocal(input.localNames[1])))
 		case "struct_extract":
-			return member(identifier(input.localNames[0]), literal(input.fieldName));
+			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
-			return member(identifier(input.localNames[0]), literal(input.fieldName | 0));
+			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		// default:
 		// 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 	}
