@@ -111,16 +111,27 @@ const assignment = (left, right) => ({
 	right: right,
 });
 
+const withAddedComment = (node, comment, isTrailing, isMultiLine) => {
+	var key = isTrailing ? "trailingComments" : "leadingComments";
+	var value = [{
+		type: isMultiLine ? "Multiline" : "Line",
+		value: comment,
+	}];
+	if (node[key]) {
+		node[key] = node[key].concat(value);
+	} else {
+		node[key] = value;
+	}
+	return node;
+}
+
 const withSource = (node, source) => {
 	if (source) {
 		var comment = " sil:" + source.sil;
 		if (source.file) {
 			comment = " " + source.file + ":" + source.line + comment;
 		}
-		node.leadingComments = [{
-			type: "Line",
-			value: comment,
-		}];
+		withAddedComment(comment);
 	}
 	return node;
 };
@@ -341,10 +352,8 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return member(mangledLocal(input.localNames[0]), literal(input.entry));
 		case "open_existential_ref":
 			return box(array([]), literal(0));
-		// default:
-		// 	throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 	}
-	return null;
+	throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 }
 
 CodeGen.prototype.lValueForInput = function (input) {
@@ -362,161 +371,143 @@ CodeGen.prototype.lValueForInput = function (input) {
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
-		// default:
-		// 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 	}
+	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
+}
+
+CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks) {
+	switch (instruction.operation) {
+		case "assignment":
+			var init = this.rValueForInput(instruction.inputs[0]);
+			return [declaration(mangledLocal(instruction.destinationLocalName), init)];
+		case "return":
+			return [{
+				type: "ReturnStatement",
+				argument: this.rValueForInput(instruction.inputs[0]),
+			}];
+		case "branch":
+			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
+			var result = declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]));
+			return result.concat(this.writeBranchToBlock(instruction.block, siblingBlocks));
+		case "conditional_branch":
+			return [{
+				type: "IfStatement",
+				test: this.rValueForInput(instruction.inputs[0]),
+				consequent: {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+				},
+				alternate: {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+				},
+			}];
+		case "checked_cast_branch":
+			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
+			var value = this.rValueForInput(instruction.inputs[0]);
+			return[{
+				type: "IfStatement",
+				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
+				consequent: {
+					type: "BlockStatement",
+					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
+				},
+				alternate: {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+				},
+			}];
+		case "conditional_defined_branch":
+			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
+			var value = this.rValueForInput(instruction.inputs[0]);
+			return [{
+				type: "IfStatement",
+				test: binary("!==", value, literal(undefined)),
+				consequent: {
+					type: "BlockStatement",
+					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
+				},
+				alternate: {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+				},
+			}];
+		case "store":
+		case "copy_addr":
+			return [expressionStatement(assignment(this.lValueForInput(instruction.inputs[1]), this.rValueForInput(instruction.inputs[0])))];
+		case "switch_enum":
+			var args = instruction.cases;
+			var enumName = instruction.type;
+			var enumLayout = enums[enumName];
+			if (!enumLayout) {
+				throw "Unable to find enum: " + enumName;
+			}
+			var value = this.rValueForInput(instruction.inputs[0]);
+			return [{
+				type: "SwitchStatement",
+				discriminant: value,
+				cases: instruction.cases.map(enumCase => {
+					var caseName = Parser.caseNameForEnum(enumCase.case);
+					var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
+					return switchCase(
+						literal(caseName.enumLayout ? enumLayout.indexOf(caseName) : null),
+						declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]))
+							.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks))
+					);
+				}),
+			}];
+		case "try_apply":
+			var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
+			return [{
+				type: "TryStatement",
+				block: {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks),
+				},
+				handler: {
+					type: "CatchClause",
+					param: identifier("e"),
+					body: {
+						type: "BlockStatement",
+						body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
+					}
+				}
+			}];
+			break;
+		case "conditional_fail":
+			this.writeBuiltIn("trap");
+			return [{
+				type: "IfStatement",
+				test: this.rValueForInput(instruction.inputs[0]),
+				consequent: expressionStatement(call(identifier("trap"), [])),
+			}];
+		case "unreachable":
+			this.writeBuiltIn("trap");
+			return [expressionStatement(call(identifier("trap"), []))];
+		case "throw":
+			return [{
+				type: "ThrowStatement",
+				argument: this.rValueForInput(instruction.inputs[0]),
+			}];
+		// default:
+		// 	// TODO: Add comment
+		// 	result.push({
+		// 		type: "EmptyStatement",
+		// 	});
+		// 	break;
+	}
+	throw new Error("Unknown instruction operation: " + instruction.operation);
 }
 
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
-	var result = [];
-	for (var j = 0; j < basicBlock.instructions.length; j++) {
-		var instruction = basicBlock.instructions[j];
-		// if (instruction.inputs.length) {
-		// 	this.buffer.write("// " + instruction.operation + " from " + instruction.inputs.map(i => i.interpretation).join(", "));
-		// } else {
-		// 	this.buffer.write("// " + instruction.operation);
-		// }
-		// this.buffer.write("// " + JSON.stringify(instruction));
-		switch (instruction.operation) {
-			case "assignment":
-				var init = this.rValueForInput(instruction.inputs[0]);
-				if (init) {
-					result.push(withSource(declaration(mangledLocal(instruction.destinationLocalName), init), instruction.source));
-				}
-				break;
-			case "return":
-				result.push({
-					type: "ReturnStatement",
-					argument: this.rValueForInput(instruction.inputs[0]),
-				});
-				break;
-			case "branch":
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-				if (targetBlock.arguments.length) {
-					result = result.concat(declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])))
-				}
-				result.push.apply(result, this.writeBranchToBlock(instruction.block, siblingBlocks));
-				break;
-			case "conditional_branch":
-				result.push({
-					type: "IfStatement",
-					test: this.rValueForInput(instruction.inputs[0]),
-					consequent: {
-						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
-					},
-					alternate: {
-						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
-					},
-				});
-				break;
-			case "checked_cast_branch":
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-				var value = this.rValueForInput(instruction.inputs[0]);
-				result.push({
-					type: "IfStatement",
-					test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
-					consequent: {
-						type: "BlockStatement",
-						body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
-					},
-					alternate: {
-						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
-					},
-				});
-				break;
-			case "conditional_defined_branch":
-				var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-				var value = this.rValueForInput(instruction.inputs[0]);
-				result.push({
-					type: "IfStatement",
-					test: binary("!==", value, literal(undefined)),
-					consequent: {
-						type: "BlockStatement",
-						body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
-					},
-					alternate: {
-						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
-					},
-				});
-				break;
-			case "store":
-			case "copy_addr":
-				result.push(expressionStatement(assignment(this.lValueForInput(instruction.inputs[1]), this.rValueForInput(instruction.inputs[0]))));
-				break;
-			case "switch_enum":
-				var args = instruction.cases;
-				var enumName = instruction.type;
-				var enumLayout = enums[enumName];
-				if (!enumLayout) {
-					throw "Unable to find enum: " + enumName;
-				}
-				var value = this.rValueForInput(instruction.inputs[0]);
-				result.push({
-					type: "SwitchStatement",
-					discriminant: value,
-					cases: instruction.cases.map(enumCase => {
-						var caseName = Parser.caseNameForEnum(enumCase.case);
-						var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
-						return switchCase(
-							literal(caseName.enumLayout ? enumLayout.indexOf(caseName) : null),
-							declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]))
-								.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks))
-						);
-					}),
-				});
-				break;
-			case "try_apply":
-				var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
-				result.push({
-					type: "TryStatement",
-					block: {
-						type: "BlockStatement",
-						body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks),
-					},
-					handler: {
-						type: "CatchClause",
-						param: identifier("e"),
-						body: {
-							type: "BlockStatement",
-							body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
-						}
-					}
-				});
-				break;
-			case "conditional_fail":
-				this.writeBuiltIn("trap");
-				result.push({
-					type: "IfStatement",
-					test: this.rValueForInput(instruction.inputs[0]),
-					consequent: expressionStatement(call(identifier("trap"), [])),
-				});
-				break;
-			case "unreachable":
-				this.writeBuiltIn("trap");
-				result.push(expressionStatement(call(identifier("trap"), [])));
-				break;
-			case "throw":
-				result.push({
-					type: "ThrowStatement",
-					argument: this.rValueForInput(instruction.inputs[0]),
-				});
-				break;
-			default:
-				// TODO: Add comment
-				result.push({
-					type: "EmptyStatement",
-				});
-				break;
+	return basicBlock.instructions.reduce((nodes, instruction) => {
+		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks);
+		if (newNodes.length > 0) {
+			withSource(newNodes[0], instruction.source);
 		}
-		// var test = result[result.length-1];
-		// console.log(JSON.stringify(test))
-		// escodegen.generate(test);
-	}
-	return result;
+		// newNodes.forEach(node => { console.log(JSON.stringify(node)), escodegen.generate(node) });
+		return nodes.concat(newNodes);
+	}, []);
 }
 
 CodeGen.prototype.consume = function(declaration) {
