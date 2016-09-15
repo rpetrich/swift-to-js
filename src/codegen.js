@@ -131,7 +131,7 @@ const withSource = (node, source) => {
 		if (source.file) {
 			comment = " " + source.file + ":" + source.line + comment;
 		}
-		withAddedComment(comment);
+		withAddedComment(node, comment);
 	}
 	return node;
 };
