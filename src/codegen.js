@@ -162,9 +162,7 @@ const declarations = declarations => declarations.length == 0 ? [] : [{
 const switchCase = (test, consequents) => ({
 	type: "SwitchCase",
 	test: test,
-	consequent: consequents.concat([{
-		type: "BreakStatement",
-	}]),
+	consequent: consequents,
 });
 
 const assignPrototype = (type, key, value) => expressionStatement(assignment(member(member(type, literal("prototype")), key), value));
@@ -195,17 +193,21 @@ CodeGen.prototype.writeBuiltIn = function (name) {
 	return true;
 }
 
-CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks) {
+CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks, switchContext) {
 	if (descriptor.reference) {
 		for (var i = 0; i < siblingBlocks.length; i++) {
 			if (siblingBlocks[i].name == descriptor.reference) {
-				return [expressionStatement(assignment(identifier("state"), literal(i)))]
+				if (switchContext.nextBlock == siblingBlocks[i]) {
+					return [];
+				}
+				var jump = expressionStatement(assignment(identifier("state"), literal(i)));
+				return switchContext.insideSwitch ? [jump, { type: "BreakStatement" }] : [jump];
 			}
 		}
 		throw new Error("Unable to find block with name: " + descriptor.reference);
 	}
 	if (descriptor.inline) {
-		return this.writeBasicBlock(descriptor.inline, siblingBlocks);
+		return this.writeBasicBlock(descriptor.inline, siblingBlocks, switchContext);
 	} else {
 		throw new Error("Neither a reference to a basic block nor inline!");
 	}
@@ -377,7 +379,7 @@ CodeGen.prototype.lValueForInput = function (input) {
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
 
-CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks) {
+CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks, switchContext) {
 	switch (instruction.operation) {
 		case "assignment":
 			var init = this.rValueForInput(instruction.inputs[0]);
@@ -390,18 +392,18 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
 			var result = declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]));
-			return result.concat(this.writeBranchToBlock(instruction.block, siblingBlocks));
+			return result.concat(this.writeBranchToBlock(instruction.block, siblingBlocks, switchContext));
 		case "conditional_branch":
 			return [{
 				type: "IfStatement",
 				test: this.rValueForInput(instruction.inputs[0]),
 				consequent: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks),
+					body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
 				},
 			}];
 		case "checked_cast_branch":
@@ -412,11 +414,11 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
 				consequent: {
 					type: "BlockStatement",
-					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
+					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
 				},
 			}];
 		case "conditional_defined_branch":
@@ -427,11 +429,11 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				test: binary("!==", value, literal(undefined)),
 				consequent: {
 					type: "BlockStatement",
-					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks)),
+					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks),
+					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
 				},
 			}];
 		case "store":
@@ -454,7 +456,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 					return switchCase(
 						literal(caseName.enumLayout ? enumLayout.indexOf(caseName) : null),
 						declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]))
-							.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks))
+							.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks, switchContext))
 					);
 				}),
 			}];
@@ -464,14 +466,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				type: "TryStatement",
 				block: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks),
+					body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks, switchContext),
 				},
 				handler: {
 					type: "CatchClause",
 					param: identifier("e"),
 					body: {
 						type: "BlockStatement",
-						body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks)),
+						body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks, switchContext)),
 					}
 				}
 			}];
@@ -501,9 +503,9 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 	throw new Error("Unknown instruction operation: " + instruction.operation);
 }
 
-CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
+CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks, switchContext) {
 	return basicBlock.instructions.reduce((nodes, instruction) => {
-		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks);
+		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks, switchContext);
 		if (newNodes.length > 0) {
 			withSource(newNodes[0], instruction.source);
 		}
@@ -561,14 +563,14 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		hiddenThisArg.localName = "this";
 	}
 	if (basicBlocks.length == 1) {
-		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
+		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, {}));
 	} else {
 		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
 		if (firstBlockHasBackreferences) {
 			body.push(declaration(identifier("state"), literal(0)));
 		} else {
 			body.push(declaration(identifier("state")));
-			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks));
+			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, {}));
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
 			if (basicBlocks[1].hasBackReferences) {
@@ -576,20 +578,29 @@ CodeGen.prototype.consumeFunction = function(fn) {
 					type: "ForStatement",
 					body: {
 						type: "BlockStatement",
-						body: this.writeBasicBlock(basicBlocks[1], basicBlocks),
+						body: this.writeBasicBlock(basicBlocks[1], basicBlocks, {}),
 					}
 				});
 			} else {
-				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
+				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks, {}));
 			}
 		} else {
 			var offset = firstBlockHasBackreferences ? 0 : 1;
+			var remainingBlocks = basicBlocks.slice(offset);
 			body.push({
 				type: "ForStatement",
 				body: {
 					type: "SwitchStatement",
 					discriminant: identifier("state"),
-					cases: basicBlocks.slice(offset).map((basicBlock, i) => switchCase(literal(i + offset), this.writeBasicBlock(basicBlock, basicBlocks))),
+					cases: remainingBlocks.map((basicBlock, i) => {
+						return switchCase(
+							literal(i + offset),
+							this.writeBasicBlock(basicBlock, basicBlocks, {
+								nextBlock: remainingBlocks[i+1],
+								insideSwitch: true
+							})
+						);
+					}),
 				}
 			});
 		}
