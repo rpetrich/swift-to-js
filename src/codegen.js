@@ -111,6 +111,20 @@ const assignment = (left, right) => ({
 	right: right,
 });
 
+const withSource = (node, source) => {
+	if (source) {
+		var comment = " sil:" + source.sil;
+		if (source.file) {
+			comment = " " + source.file + ":" + source.line + comment;
+		}
+		node.leadingComments = [{
+			type: "Line",
+			value: comment,
+		}];
+	}
+	return node;
+};
+
 const expressionStatement = expression => ({
 	type: "ExpressionStatement",
 	expression: expression,
@@ -367,7 +381,7 @@ CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks) {
 			case "assignment":
 				var init = this.rValueForInput(instruction.inputs[0]);
 				if (init) {
-					result.push(declaration(mangledLocal(instruction.destinationLocalName), init));
+					result.push(withSource(declaration(mangledLocal(instruction.destinationLocalName), init), instruction.source));
 				}
 				break;
 			case "return":
@@ -618,6 +632,7 @@ CodeGen.prototype.end = function() {
 			json: true,
 			quotes: "double",
 		},
+		comment: true,
 	}));
 }
 
