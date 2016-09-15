@@ -167,6 +167,8 @@ const switchCase = (test, consequents) => ({
 	}]),
 });
 
+const assignPrototype = (type, key, value) => expressionStatement(assignment(member(member(type, literal("prototype")), key), value));
+
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
@@ -610,7 +612,7 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 		}, "* @constructor", false, true));
 		for (var key in declaration.entries) {
 			if (declaration.entries.hasOwnProperty(key)) {
-				// this.body.push(expressionStatement(assignment(member(member(identifier(declaration.name), literal("prototype")), key), declaration.entries[key])));
+				this.body.push(assignPrototype(identifier(declaration.name), literal(key), literal(declaration.entries[key])));
 			}
 		}
 	}
