@@ -200,7 +200,13 @@ CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks, swit
 				if (switchContext.nextBlock == siblingBlocks[i]) {
 					return [];
 				}
-				var jump = expressionStatement(assignment(identifier("state"), literal(i)));
+				var jump;
+				if (switchContext.hasStateDeclaration) {
+					jump = expressionStatement(assignment(identifier("state"), literal(i)));
+				} else {
+					jump = declaration(identifier("state"), literal(i));
+					hasStateDeclaration = true;
+				}
 				return switchContext.insideSwitch ? [jump, { type: "BreakStatement" }] : [jump];
 			}
 		}
@@ -562,15 +568,13 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		body.push(declaration(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" }));
 		hiddenThisArg.localName = "this";
 	}
+	var switchContext = {};
 	if (basicBlocks.length == 1) {
-		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, {}));
+		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, switchContext));
 	} else {
 		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
-		if (firstBlockHasBackreferences) {
-			body.push(declaration(identifier("state"), literal(0)));
-		} else {
-			body.push(declaration(identifier("state")));
-			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, {}));
+		if (!firstBlockHasBackreferences) {
+			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, switchContext));
 		}
 		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
 			if (basicBlocks[1].hasBackReferences) {
@@ -582,9 +586,10 @@ CodeGen.prototype.consumeFunction = function(fn) {
 					}
 				});
 			} else {
-				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks, {}));
+				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks, switchContext));
 			}
 		} else {
+			switchContext.insideSwitch = true;
 			var offset = firstBlockHasBackreferences ? 0 : 1;
 			var remainingBlocks = basicBlocks.slice(offset);
 			body.push({
@@ -593,13 +598,8 @@ CodeGen.prototype.consumeFunction = function(fn) {
 					type: "SwitchStatement",
 					discriminant: identifier("state"),
 					cases: remainingBlocks.map((basicBlock, i) => {
-						return switchCase(
-							literal(i + offset),
-							this.writeBasicBlock(basicBlock, basicBlocks, {
-								nextBlock: remainingBlocks[i+1],
-								insideSwitch: true
-							})
-						);
+						switchContext.nextBlock = remainingBlocks[i+1];
+						return switchCase(literal(i + offset), this.writeBasicBlock(basicBlock, basicBlocks, switchContext));
 					}),
 				}
 			});
