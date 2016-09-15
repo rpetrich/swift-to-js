@@ -599,7 +599,7 @@ CodeGen.prototype.consumeFunction = function(fn) {
 
 CodeGen.prototype.consumeVTable = function(declaration) {
 	if (!/^_/.test(declaration.name)) {
-		this.body.push({
+		this.body.push(withAddedComment({
 			type: "FunctionDeclaration",
 			id: identifier(declaration.name),
 			params: [],
@@ -607,7 +607,7 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 				type: "BlockStatement",
 				body: [],
 			}
-		})
+		}, "* @constructor", false, true));
 		for (var key in declaration.entries) {
 			if (declaration.entries.hasOwnProperty(key)) {
 				// this.body.push(expressionStatement(assignment(member(member(identifier(declaration.name), literal("prototype")), key), declaration.entries[key])));
