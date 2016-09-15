@@ -583,12 +583,13 @@ CodeGen.prototype.consumeFunction = function(fn) {
 				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks));
 			}
 		} else {
+			var offset = firstBlockHasBackreferences ? 0 : 1;
 			body.push({
 				type: "ForStatement",
 				body: {
 					type: "SwitchStatement",
 					discriminant: identifier("state"),
-					cases: basicBlocks.slice(firstBlockHasBackreferences ? 0 : 1).map((basicBlock, i) => switchCase(literal(i), this.writeBasicBlock(basicBlock, basicBlocks))),
+					cases: basicBlocks.slice(offset).map((basicBlock, i) => switchCase(literal(i + offset), this.writeBasicBlock(basicBlock, basicBlocks))),
 				}
 			});
 		}
