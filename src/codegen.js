@@ -111,18 +111,20 @@ const assignment = (left, right) => ({
 	right: right,
 });
 
-const withAddedComment = (node, comment, isTrailing, isMultiLine) => {
+const withAddedComment = (nodeOrNodeList, comment, isTrailing, isMultiLine) => {
 	var key = isTrailing ? "trailingComments" : "leadingComments";
 	var value = [{
 		type: isMultiLine ? "Multiline" : "Line",
 		value: comment,
 	}];
-	if (node[key]) {
-		node[key] = node[key].concat(value);
+	var dest = "0" in nodeOrNodeList ? nodeOrNodeList[isTrailing ? nodeOrNodeList.length - 1 : 0] : nodeOrNodeList;
+	if (dest[key]) {
+		console.log(dest);
+		dest[key] = isTrailing ? dest[key].concat(value) : value.concat(dest[key]);
 	} else {
-		node[key] = value;
+		dest[key] = value;
 	}
-	return node;
+	return nodeOrNodeList;
 }
 
 const withSource = (node, source) => {
@@ -510,14 +512,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 }
 
 CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks, switchContext) {
-	return basicBlock.instructions.reduce((nodes, instruction) => {
+	return withAddedComment(basicBlock.instructions.reduce((nodes, instruction) => {
 		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks, switchContext);
 		if (newNodes.length > 0) {
 			withSource(newNodes[0], instruction.source);
 		}
 		// newNodes.forEach(node => { console.log(JSON.stringify(node)), escodegen.generate(node) });
 		return nodes.concat(newNodes);
-	}, []);
+	}, []), " " + basicBlock.name);
 }
 
 CodeGen.prototype.consume = function(declaration) {
