@@ -280,7 +280,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 				type: "ObjectExpression",
 				properties: input.localNames.map((localName, index) => ({
 					type: "Property",
-					key: identifier(structType[index]),
+					key: literal(structType[index]),
 					kind: "init",
 					value: mangledLocal(localName),
 				}))
