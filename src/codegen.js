@@ -593,7 +593,15 @@ CodeGen.prototype.consumeGlobal = function(global) {
 CodeGen.prototype.ensureExports = function() {
 	if (!this.hasWrittenExports) {
 		this.hasWrittenExports = true;
-		this.body.push(declaration(identifier("exports"), ternary(binary("!=", unary("typeof", identifier("module")), literal("undefined")), member(identifier("module"), literal("exports")), identifier("window"))));
+		// Regular declaration isn't well supported by closure compiler
+		//this.body.push(declaration(identifier("exports"), ternary(binary("==", unary("typeof", identifier("module")), literal("undefined")), identifier("window"), member(identifier("module"), literal("exports")))));
+		this.body.push(declaration(identifier("exports")));
+		this.body.push({
+			type: "IfStatement",
+			test: binary("==", unary("typeof", identifier("module")), literal("undefined")),
+			consequent: expressionStatement(assignment(identifier("exports"), identifier("window"))),
+			alternate: expressionStatement(assignment(identifier("exports"), member(identifier("module"), literal("exports")))),
+		})
 	}
 }
 
