@@ -214,6 +214,20 @@ function fuseAssignments(instructions, downstreamInstructions) {
 	}
 }
 
+function deadAssignmentElimination(instructions, downstreamInstructions) {
+	for (var i = 0; i < instructions.length; ) {
+		var instruction = instructions[i];
+		if (instruction.operation == "assignment") {
+			if (!instructions.slice(i+1).concat(downstreamInstructions).some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
+				console.log("Eliminating");
+				console.log(instruction);
+				instructions.splice(i, 1);
+				continue;
+			}
+		}
+		i++;
+	}
+}
 var blockReferencesForInstructionTypes = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
@@ -384,6 +398,7 @@ function optimize(declaration) {
 			var instructions = item.instructions;
 			var downstreamInstructions = item.downstreamInstructions;
 			fuseAssignments(instructions, downstreamInstructions);
+			deadAssignmentElimination(instructions, downstreamInstructions);
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
