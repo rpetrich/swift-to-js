@@ -469,20 +469,38 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			if (!enumLayout) {
 				throw "Unable to find enum: " + enumName;
 			}
-			var value = this.rValueForInput(instruction.inputs[0]);
-			return [{
-				type: "SwitchStatement",
-				discriminant: value,
-				cases: instruction.cases.map(enumCase => {
-					var caseName = Parser.caseNameForEnum(enumCase.case);
-					var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
-					return switchCase(
-						literal(caseName.enumLayout ? enumLayout.indexOf(caseName) : null),
-						declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]))
-							.concat(this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks, switchContext))
-					);
-				}),
-			}];
+			var value = member(this.rValueForInput(instruction.inputs[0]), literal(0));
+			var resultNode;
+			var currentNode;
+			var elseCase;
+			instruction.cases.forEach(enumCase => {
+				var caseName = Parser.caseNameForEnum(enumCase.case);
+				if (typeof caseName == "undefined") {
+					elseCase = caseName;
+				} else {
+					var newNode = {
+						type: "IfStatement",
+						test: binary("==", value, literal(enumLayout.indexOf(caseName))),
+						consequent: {
+							type: "BlockStatement",
+							body: this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks, switchContext),
+						},
+					};
+					if (currentNode) {
+						currentNode.alternate = newNode;
+					} else {
+						resultNode = newNode;
+					}
+					currentNode = newNode;
+				}
+			});
+			if (elseCase) {
+				currentNode.consequent = {
+					type: "BlockStatement",
+					body: this.writeBranchToBlock(elseCase.basicBlock, siblingBlocks, switchContext),
+				};
+			}
+			return [resultNode];
 		case "try_apply":
 			var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
 			return [{
