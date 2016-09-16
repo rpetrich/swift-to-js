@@ -379,6 +379,12 @@ function optimize(declaration) {
 			unwrapOptionalEnums(instructions);
 			fuseAssignments(instructions, downstreamInstructions);
 		});
+		inlineBlocks(declaration.basicBlocks);
+		allInstructionLists(declaration.basicBlocks).forEach(item => {
+			var instructions = item.instructions;
+			var downstreamInstructions = item.downstreamInstructions;
+			fuseAssignments(instructions, downstreamInstructions);
+		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
 	if (declaration.type == "vtable") {
