@@ -111,6 +111,8 @@ const assignment = (left, right) => ({
 	right: right,
 });
 
+const assignments = pairs => pairs.map(pair => expressionStatement(assignment(pair[0], pair[1])));
+
 const withAddedComment = (nodeOrNodeList, comment, isTrailing, isMultiLine) => {
 	var key = isTrailing ? "trailingComments" : "leadingComments";
 	var value = [{
@@ -194,27 +196,35 @@ CodeGen.prototype.writeBuiltIn = function (name) {
 	return true;
 }
 
-CodeGen.prototype.writeBranchToBlock = function (descriptor, siblingBlocks, switchContext) {
+const hasVariable = (functionContext, variable) => {
+	return functionContext.variables.indexOf(variable.name) != -1;
+};
+
+const addVariable = (functionContext, newVariable) => {
+	if (hasVariable(functionContext, newVariable)) {
+		return false;
+	}
+	functionContext.variables.push(newVariable.name);
+	return true;
+}
+
+CodeGen.prototype.branchToBlockNodes = function (descriptor, siblingBlocks, functionContext) {
 	if (descriptor.reference) {
 		for (var i = 0; i < siblingBlocks.length; i++) {
 			if (siblingBlocks[i].name == descriptor.reference) {
-				if (switchContext.nextBlock == siblingBlocks[i]) {
+				if (functionContext.nextBlock == siblingBlocks[i]) {
+					// Optimization to avoid writing a switch = ... and break when we don't have to
 					return [];
 				}
-				var jump;
-				if (switchContext.hasStateDeclaration) {
-					jump = expressionStatement(assignment(identifier("state"), literal(i)));
-				} else {
-					jump = declaration(identifier("state"), literal(i));
-					hasStateDeclaration = true;
-				}
-				return switchContext.insideSwitch ? [jump, { type: "BreakStatement" }] : [jump];
+				addVariable(functionContext, identifier("state"));
+				var jump = expressionStatement(assignment(identifier("state"), literal(i)));
+				return functionContext.insideSwitch ? [jump, { type: "BreakStatement" }] : [jump];
 			}
 		}
 		throw new Error("Unable to find block with name: " + descriptor.reference);
 	}
 	if (descriptor.inline) {
-		return this.writeBasicBlock(descriptor.inline, siblingBlocks, switchContext);
+		return this.nodesForBasicBlock(descriptor.inline, siblingBlocks, functionContext);
 	} else {
 		throw new Error("Neither a reference to a basic block nor inline!");
 	}
@@ -386,11 +396,12 @@ CodeGen.prototype.lValueForInput = function (input) {
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
 
-CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks, switchContext) {
+CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks, functionContext) {
 	switch (instruction.operation) {
 		case "assignment":
 			var init = this.rValueForInput(instruction.inputs[0]);
-			return [declaration(mangledLocal(instruction.destinationLocalName), init)];
+			addVariable(functionContext, mangledLocal(instruction.destinationLocalName));
+			return [expressionStatement(assignment(mangledLocal(instruction.destinationLocalName), init))];
 		case "return":
 			return [{
 				type: "ReturnStatement",
@@ -407,6 +418,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			var nonConflictingArguments = [];
 			var conflictingArguments = [];
 			targetBlock.arguments.forEach((arg, index) => {
+				addVariable(functionContext, mangledLocal(arg.localName));
 				var argumentDeclaration = [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])];
 				if (instruction.inputs.some(input => input.localNames.indexOf(arg.localName) != -1)) {
 					conflictingArguments.push(argumentDeclaration);
@@ -414,49 +426,51 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 					nonConflictingArguments.push(argumentDeclaration);
 				}
 			});
-			var result = declarations(nonConflictingArguments.concat(conflictingArguments));
-			return result.concat(this.writeBranchToBlock(instruction.block, siblingBlocks, switchContext));
+			var result = assignments(nonConflictingArguments.concat(conflictingArguments));
+			return result.concat(this.branchToBlockNodes(instruction.block, siblingBlocks, functionContext));
 		case "conditional_branch":
 			return [{
 				type: "IfStatement",
 				test: this.rValueForInput(instruction.inputs[0]),
 				consequent: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
 		case "checked_cast_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 			var value = this.rValueForInput(instruction.inputs[0]);
-			return[{
+			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
+			return [{
 				type: "IfStatement",
 				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
 				consequent: {
 					type: "BlockStatement",
-					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext)),
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
 		case "conditional_defined_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 			var value = this.rValueForInput(instruction.inputs[0]);
+			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
 				test: binary("!==", value, literal(undefined)),
 				consequent: {
 					type: "BlockStatement",
-					body: declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.writeBranchToBlock(instruction.trueBlock, siblingBlocks, switchContext)),
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.falseBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
 		case "store":
@@ -483,7 +497,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 						test: binary("==", value, literal(enumLayout.indexOf(caseName))),
 						consequent: {
 							type: "BlockStatement",
-							body: this.writeBranchToBlock(enumCase.basicBlock, siblingBlocks, switchContext),
+							body: this.branchToBlockNodes(enumCase.basicBlock, siblingBlocks, functionContext),
 						},
 					};
 					if (currentNode) {
@@ -497,24 +511,25 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			if (elseCase) {
 				currentNode.consequent = {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(elseCase.basicBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(elseCase.basicBlock, siblingBlocks, functionContext),
 				};
 			}
 			return [resultNode];
 		case "try_apply":
 			var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
+			errorBasicBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "TryStatement",
 				block: {
 					type: "BlockStatement",
-					body: this.writeBranchToBlock(instruction.normalBlock, siblingBlocks, switchContext),
+					body: this.branchToBlockNodes(instruction.normalBlock, siblingBlocks, functionContext),
 				},
 				handler: {
 					type: "CatchClause",
 					param: identifier("e"),
 					body: {
 						type: "BlockStatement",
-						body: [declaration(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e"))].concat(this.writeBranchToBlock(instruction.errorBlock, siblingBlocks, switchContext)),
+						body: [expressionStatement(assignment(mangledLocal(errorBasicBlock.arguments[0].localName), identifier("e")))].concat(this.branchToBlockNodes(instruction.errorBlock, siblingBlocks, functionContext)),
 					}
 				}
 			}];
@@ -544,15 +559,17 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 	throw new Error("Unknown instruction operation: " + instruction.operation);
 }
 
-CodeGen.prototype.writeBasicBlock = function (basicBlock, siblingBlocks, switchContext) {
+CodeGen.prototype.nodesForBasicBlock = function (basicBlock, siblingBlocks, functionContext) {
+	var headerNodes = [];
+	//headerNodes.push(expressionStatement(call(member(identifier("console"), literal("log")), [literal(basicBlock.name)].concat(basicBlock.arguments.map(arg => mangledLocal(arg.localName))))))
 	return withAddedComment(basicBlock.instructions.reduce((nodes, instruction) => {
-		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks, switchContext);
+		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks, functionContext);
 		if (newNodes.length > 0) {
 			withSource(newNodes[0], instruction.source);
 		}
 		// newNodes.forEach(node => { console.log(JSON.stringify(node)), escodegen.generate(node) });
 		return nodes.concat(newNodes);
-	}, []), " " + basicBlock.name);
+	}, headerNodes), " " + basicBlock.name);
 }
 
 CodeGen.prototype.consume = function(declaration) {
@@ -593,8 +610,50 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		var hiddenThisArg = args[args.length - 1];
 		args = args.slice(0, args.length - 1);
 	}
+	// Convert the this argument to a variable
+	if (useMethodCallingConvention) {
+		body.push(declaration(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" }));
+		addVariable(functionContext, identifier(hiddenThisArg.localName));
+	}
 	// Setup the JavaScript AST
-	var body = [];
+	var cases;
+	fn.basicBlocks.forEach((basicBlock, index) => {
+		functionContext.nextBlock = fn.basicBlocks[index + 1];
+		if (cases) {
+			cases.push(switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext)));
+		} else if (basicBlock.hasBackReferences) {
+			body.push(expressionStatement(assignment(identifier("state"), literal(index))));
+			functionContext.insideSwitch = true;
+			cases = [switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext))];
+			body.push({
+				type: "ForStatement",
+				body: {
+					type: "SwitchStatement",
+					discriminant: identifier("state"),
+					cases: cases,
+				}
+			});
+		} else if (hasVariable(functionContext, identifier("state"))) {
+			body.push(expressionStatement(assignment(identifier("state"), literal(index + 1))));
+			// Recreate the block with the "insideSwitch" flag set, so that break statements work correctly
+			functionContext.insideSwitch = true;
+			body.push.apply(body, this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext));
+			cases = [];
+			body.push({
+				type: "ForStatement",
+				body: {
+					type: "SwitchStatement",
+					discriminant: identifier("state"),
+					cases: cases,
+				}
+			});
+		} else {
+			body.push.apply(body, this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext));
+		}
+	});
+	// Write the arguments
+	body = declarations(functionContext.variables.map(variableName => [identifier(variableName)])).concat(body);
+	// Create the function
 	this.body.push({
 		type: "FunctionDeclaration",
 		id: identifier(fn.name),
@@ -605,48 +664,7 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		},
 		loc: null,
 	});
-	// Convert the this argument to a variable
-	if (useMethodCallingConvention) {
-		body.push(declaration(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" }));
-		hiddenThisArg.localName = "this";
-	}
-	var switchContext = {};
-	if (basicBlocks.length == 1) {
-		body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, switchContext));
-	} else {
-		var firstBlockHasBackreferences = basicBlocks[0].hasBackReferences;
-		if (!firstBlockHasBackreferences) {
-			body.push.apply(body, this.writeBasicBlock(basicBlocks[0], basicBlocks, switchContext));
-		}
-		if (!firstBlockHasBackreferences && basicBlocks.length == 2) {
-			if (basicBlocks[1].hasBackReferences) {
-				body.push({
-					type: "ForStatement",
-					body: {
-						type: "BlockStatement",
-						body: this.writeBasicBlock(basicBlocks[1], basicBlocks, {}),
-					}
-				});
-			} else {
-				body.push.apply(body, this.writeBasicBlock(basicBlocks[1], basicBlocks, switchContext));
-			}
-		} else {
-			switchContext.insideSwitch = true;
-			var offset = firstBlockHasBackreferences ? 0 : 1;
-			var remainingBlocks = basicBlocks.slice(offset);
-			body.push({
-				type: "ForStatement",
-				body: {
-					type: "SwitchStatement",
-					discriminant: identifier("state"),
-					cases: remainingBlocks.map((basicBlock, i) => {
-						switchContext.nextBlock = remainingBlocks[i+1];
-						return switchCase(literal(i + offset), this.writeBasicBlock(basicBlock, basicBlocks, switchContext));
-					}),
-				}
-			});
-		}
-	}
+	// Assign the public name
 	var beautifulName = fn.beautifulName;
 	if (beautifulName) {
 		this.ensureExports();
