@@ -620,8 +620,8 @@ CodeGen.prototype.consumeFunction = function(fn) {
 	}
 	// Convert the this argument to a variable
 	if (useMethodCallingConvention) {
-		body.push(declaration(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" }));
-		addVariable(functionContext, identifier(hiddenThisArg.localName));
+		body.push(expressionStatement(assignment(mangledLocal(hiddenThisArg.localName), { type: "ThisExpression" })));
+		addVariable(functionContext, mangledLocal(hiddenThisArg.localName));
 	}
 	// Setup the JavaScript AST
 	var cases;
