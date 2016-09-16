@@ -398,7 +398,23 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}];
 		case "branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
-			var result = declarations(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])]));
+			// Branch instruction with arguments expects to be able to thread one argument into another
+			// real world example:
+			//	var _16 = _23, _17 = _32, _18 = _17;
+			// needs to be reordered to:
+			//	var _16 = _23, _18 = _17, _17 = _32;
+			// to avoid clobbering _17 before it gets passed into _18
+			var nonConflictingArguments = [];
+			var conflictingArguments = [];
+			targetBlock.arguments.forEach((arg, index) => {
+				var argumentDeclaration = [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])];
+				if (instruction.inputs.some(input => input.localNames.indexOf(arg.localName) != -1)) {
+					conflictingArguments.push(argumentDeclaration);
+				} else {
+					nonConflictingArguments.push(argumentDeclaration);
+				}
+			});
+			var result = declarations(nonConflictingArguments.concat(conflictingArguments));
 			return result.concat(this.writeBranchToBlock(instruction.block, siblingBlocks, switchContext));
 		case "conditional_branch":
 			return [{
