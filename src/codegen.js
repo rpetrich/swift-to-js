@@ -97,7 +97,7 @@ const binary = (operator, left, right) => ({
 	right: right,
 });
 
-const ternary = (test, alternate, consequent) => ({
+const ternary = (test, consequent, alternate) => ({
 	type: "ConditionalExpression",
 	test: test,
 	alternate: alternate,
