@@ -573,6 +573,13 @@ CodeGen.prototype.consumeGlobal = function(global) {
 	this.body.push(declaration(identifier(global.name), array([])));
 }
 
+CodeGen.prototype.ensureExports = function() {
+	if (!this.hasWrittenExports) {
+		this.hasWrittenExports = true;
+		this.body.push(declaration(identifier("exports"), ternary(binary("!=", unary("typeof", identifier("module")), literal("undefined")), member(identifier("module"), literal("exports")), identifier("window"))));
+	}
+}
+
 CodeGen.prototype.consumeFunction = function(fn) {
 	var basicBlocks = fn.basicBlocks;
 	if (basicBlocks.length == 0) {
@@ -642,7 +649,8 @@ CodeGen.prototype.consumeFunction = function(fn) {
 	}
 	var beautifulName = fn.beautifulName;
 	if (beautifulName) {
-		this.body.push(expressionStatement(assignment(member(identifier("window"), literal(beautifulName)), identifier(fn.name))));
+		this.ensureExports();
+		this.body.push(expressionStatement(assignment(member(identifier("exports"), literal(beautifulName)), identifier(fn.name))));
 	}
 }
 
