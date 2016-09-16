@@ -119,7 +119,6 @@ const withAddedComment = (nodeOrNodeList, comment, isTrailing, isMultiLine) => {
 	}];
 	var dest = "0" in nodeOrNodeList ? nodeOrNodeList[isTrailing ? nodeOrNodeList.length - 1 : 0] : nodeOrNodeList;
 	if (dest[key]) {
-		console.log(dest);
 		dest[key] = isTrailing ? dest[key].concat(value) : value.concat(dest[key]);
 	} else {
 		dest[key] = value;
