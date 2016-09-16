@@ -249,8 +249,6 @@ function deadAssignmentElimination(instructions, downstreamInstructions) {
 		var instruction = instructions[i];
 		if (instruction.operation == "assignment") {
 			if (!instructions.slice(i+1).concat(downstreamInstructions).some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
-				console.log("Eliminating");
-				console.log(instruction);
 				instructions.splice(i, 1);
 				continue;
 			}
