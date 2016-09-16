@@ -255,9 +255,9 @@ CodeGen.prototype.rValueForInput = function(input) {
 			if (index == -1) {
 				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
 			}
-			var elements = [literal(0)];
+			var elements = [literal(index)];
 			if (input.localNames.length) {
-				elements.push(identifier(input.localNames[0]));
+				elements.push(mangledLocal(input.localNames[0]));
 			}
 			return array(elements);
 		case "struct":
