@@ -47,6 +47,36 @@ function unwrapSimpleStructInstructions(instructions) {
 	})
 }
 
+function unwrapStrings(instructions) {
+	instructions.forEach(instruction => {
+		instruction.inputs.forEach(input => {
+			switch (input.interpretation) {
+				case "struct":
+					if (input.type == "_StringCore") {
+						input.interpretation = "contents";
+						input.localNames.splice(1, input.localNames.length - 2);
+					}
+					break;
+				case "struct_extract":
+					if (input.type == "_StringCore") {
+						if (input.fieldName == "_countAndFlags") {
+							input.fieldName = "length";
+						} else if (input.fieldName == "_baseAddress") {
+							input.interpretation = "contents";
+							delete input.fieldName;
+						}
+					}
+					break;
+				case "struct_element_addr":
+					if (input.type == "_StringCore") {
+						throw new Error("Cannot take the address of a _StringCore field!");
+					}
+					break;
+			}
+		});
+	});
+}
+
 function unwrapOptionalEnums(instructions) {
 	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
@@ -391,6 +421,7 @@ function optimize(declaration) {
 			var downstreamInstructions = item.downstreamInstructions;
 			unwrapSimpleStructInstructions(instructions);
 			unwrapOptionalEnums(instructions);
+			unwrapStrings(instructions);
 			fuseAssignments(instructions, downstreamInstructions);
 		});
 		inlineBlocks(declaration.basicBlocks);
