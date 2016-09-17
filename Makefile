@@ -1,14 +1,37 @@
-all: test.min.js
+SWIFT = xcrun swiftc
+#SWIFT = ../swift-source/build/Ninja-RelWithDebInfoAssert/swift-macosx-x86_64/bin/swiftc
+FAKE_TARGET = i386-apple-ios7.0
+FAKE_SDK = ~/Downloads/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
+CLOSURE_FORMATTING = PRETTY_PRINT
+
+all: test.swift-min.js
 
 clean:
-	rm -f *.sil
-	rm -f *.js
+	rm -f *.sil *.sil.ast *.swift.js *.swift-min.js
 
-%.sil: %.swift
-	xcrun -sdk iphonesimulator swiftc -emit-sil -gnone -Ounchecked -parse-as-library --target=i386-apple-ios7.0 -module-name="$*" "$<" -o "$@"
+test: test.swift.js
+	node tests.js
 
-%.js: %.sil src/*.js
-	node src/swift-to-js.js "$@" < "$<"
+.PHONY: all clean test
 
-%.min.js: %.js
-	java -jar closure-compiler.jar --js "$<" --compilation_level ADVANCED_OPTIMIZATIONS --warning_level VERBOSE --js_output_file "$@"
+%.sil: %.swift Makefile
+	$(SWIFT) -emit-sil -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" -o "$@"
+
+%.sil.ast: *.swift Makefile
+	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" > "$@"
+
+%.swift.js: %.sil %.sil.ast src/*.js
+	cat "$<.ast" "$<" | node src/swift-to-js.js "$@"
+
+%.swift-min.js: %.swift.js closure-compiler.jar externs.js
+	java -jar closure-compiler.jar --js "$<" --externs externs.js --compilation_level ADVANCED_OPTIMIZATIONS --warning_level VERBOSE --formatting $(CLOSURE_FORMATTING) --js_output_file "$@"
+
+closure-compiler/compiler-latest.zip:
+	mkdir -p closure-compiler
+	( pushd closure-compiler && curl -O 'https://dl.google.com/closure-compiler/compiler-latest.zip' )
+
+closure-compiler/COPYING: closure-compiler/compiler-latest.zip
+	unzip closure-compiler/compiler-latest.zip -d closure-compiler && touch closure-compiler/COPYING
+
+closure-compiler.jar: closure-compiler/COPYING
+	@ln -sf closure-compiler/closure-compiler-v*.jar closure-compiler.jar

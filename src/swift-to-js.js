@@ -18,9 +18,9 @@ rl.on("line", function(line){
 });
 
 rl.on("close", function() {
-	var codegen = new CodeGen();
+	var codegen = new CodeGen(parser);
 	parser.declarations.forEach(declaration => {
-		Optimizer.optimize(declaration);
+		Optimizer.optimize(declaration, parser.types);
 		codegen.consume(declaration);
 	});
 	codegen.end();

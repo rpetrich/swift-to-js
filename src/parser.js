@@ -1,3 +1,6 @@
+var stdlib = require("./stdlib.js");
+var types = stdlib.types;
+
 function splitNoParens(s) {
 	var parens = /\(|\)|\<|\-?\>/g;
 	var result = s.split(",");
@@ -35,6 +38,7 @@ function basicNameForStruct(structName) {
 
 function Parser() {
 	this.declarations = [];
+	this.types = JSON.parse(JSON.stringify(types));
 	this.currentDeclaration = undefined;
 	this.currentBasicBlock = undefined;
 	// Lookback, to steal some unmangled name information that swiftc sticks in a comment
@@ -647,6 +651,9 @@ Parser.prototype.addLine = function(originalLine) {
 				case "sil_vtable":
 					this.parseSilVTable(line);
 					break;
+				case "struct":
+					this.parseStruct(line);
+					break;
 				default:
 					if (/^\w+(\(.*\))?:$/.test(line)) {
 						// Found basic block!
@@ -675,6 +682,8 @@ Parser.prototype.addLine = function(originalLine) {
 				}
 			} else if (this.currentDeclaration && this.currentDeclaration.type == "vtable") {
 				this.parseVTableMapping(line.match(/^\s*(.*)$/)[1]);
+			} else if (this.currentTypeName) {
+				this.parseStructField(line.match(/^\s*(.*)$/)[1]);
 			} else {
 				// Not inside a declaration or basic block!
 				// Should be an error, but we aren't even close to understanding Swift's protocols/method tables

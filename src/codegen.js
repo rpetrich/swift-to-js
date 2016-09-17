@@ -1,5 +1,4 @@
 var stdlib = require("./stdlib.js");
-var types = stdlib.types;
 var enums = stdlib.enums;
 var builtins = stdlib.builtins;
 
@@ -173,6 +172,7 @@ const assignPrototype = (type, key, value) => expressionStatement(assignment(mem
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
+	this.types = parser.types;
 	this.usedBuiltins = {};
 }
 
@@ -268,9 +268,12 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return array(elements);
 		case "struct":
 			var structName = input.type;
-			var structType = types[structName];
+			var structType = this.types[structName];
 			if (!structType) {
 				throw new Error("No type for " + structName);
+			}
+			if (structType.length != input.localNames.length) {
+				throw new Error("Definition of " + structName + " does specifiy " + input.localNames.length + " fields: " + structType.join(", "));
 			}
 			return {
 				type: "ObjectExpression",

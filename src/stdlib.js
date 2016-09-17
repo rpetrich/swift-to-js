@@ -31,7 +31,6 @@ module.exports = {
 		"_StringBufferIVars": ["usedEnd", "capacityAndElementShift"],
 		"Array": ["_buffer"],
 		"Range": ["startIndex", "endIndex"],
-		"Point": ["x", "y"],
 	},
 	"enums": {
 		"Optional": ["none", "some", "None", "Some"], // Temporary to support both Swift 2 and Swift 3

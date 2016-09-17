@@ -1,6 +1,3 @@
-var stdlib = require("./stdlib.js");
-var types = stdlib.types;
-
 var Parser = require("./parser.js");
 
 function findBasicBlock(blocks, descriptor) {
@@ -18,7 +15,7 @@ function findBasicBlock(blocks, descriptor) {
 	throw new Error("Neither a reference nor an inline block!");
 }
 
-function unwrapSimpleStructInstructions(instructions) {
+function unwrapSimpleStructInstructions(instructions, types) {
 	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
 			switch (input.interpretation) {
@@ -424,13 +421,13 @@ function allInstructionLists(basicBlocks) {
 	});
 }
 
-function optimize(declaration) {
+function optimize(declaration, types) {
 	if (declaration.type == "function") {
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
 			var instructions = item.instructions;
 			var downstreamInstructions = item.downstreamInstructions;
-			unwrapSimpleStructInstructions(instructions);
+			unwrapSimpleStructInstructions(instructions, types);
 			unwrapOptionalEnums(instructions);
 			unwrapStrings(instructions);
 			fuseAssignments(instructions, downstreamInstructions);
