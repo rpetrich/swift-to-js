@@ -1,5 +1,7 @@
 import Darwin
 
+// Basic integer types
+
 func increment(number: Int) -> Int {
     return number + 1
 }
@@ -51,6 +53,8 @@ public func more_silly_math(num: Int) -> Int {
     return result * 1000 + 4;
 }
 
+// Optionals
+
 public func optional_from(num: Int) -> Bool? {
     if (num > 0) {
         return true
@@ -60,47 +64,53 @@ public func optional_from(num: Int) -> Bool? {
     return .none
 }
 
-public func description_of(option: Bool?) -> String {
-    if let unwrapped = option {
-        if unwrapped {
-            return "Greater than zero"
-        }
-        return "Equal to zero"
-    }
-    return "Less than zero"
-}
-
 public func has_value(option: Bool?) -> Bool {
     return option != nil
 }
 
+// Strings
+
 public func hello_world() -> String {
     return "Hello World!"
-}
-
-public func concat(l: String, r: String) -> String {
-    return l + r
 }
 
 public func string_length(str: String) -> Int {
     return str.utf16.count;
 }
 
-public func twoInts(first: Int, second: Int) -> [Int] {
-    return [first, second]
+public func description_of(option: Bool?) -> String {
+    if let unwrapped = option {
+        if unwrapped {
+            return "True"
+        }
+        return "False"
+    }
+    return "None"
 }
 
-public func arrayCount(array: [Int]) -> Int {
-    return array.count
-}
+// public func concat(l: String, r: String) -> String {
+//     return l + r
+// }
 
-public func arrayGet(array: [Int], index: Int) -> Int {
-    return array[index]
-}
+// Arrays
 
-public func oneInt(value: Int) -> [Int] {
-    return [value]
-}
+// public func twoInts(first: Int, second: Int) -> [Int] {
+//     return [first, second]
+// }
+
+// public func arrayCount(array: [Int]) -> Int {
+//     return array.count
+// }
+
+// public func arrayGet(array: [Int], index: Int) -> Int {
+//     return array[index]
+// }
+
+// public func oneInt(value: Int) -> [Int] {
+//     return [value]
+// }
+
+// Enums
 
 // public enum Divisible {
 //     case byNone
@@ -122,6 +132,8 @@ public func oneInt(value: Int) -> [Int] {
 //     }
 // }
 
+// Structs
+
 public struct Point {
     var x: Double
     var y: Double
@@ -133,17 +145,56 @@ public struct Point {
         x = _x
         y = _y
     }
-    var isZero: Bool {
+    var isOrigin: Bool {
         get {
             return x == 0 && y == 0
         }
     }
 }
 
+public var origin = Point()
+
+public func getOrigin() -> Point {
+    return origin
+}
+
 public func distance(first: Point, second: Point) -> Double {
     let delta = Point(x: first.x - second.x, y: first.y - second.y)
     return sqrt(delta.x * delta.x + delta.y * delta.y)
 }
+
+// Compound Structs
+
+public struct Size {
+    var width: Double
+    var height: Double
+    public init() {
+        width = 0
+        height = 0
+    }
+    public init(width _width: Double, height _height: Double) {
+        width = _width
+        height = _height
+    }
+    var isEmpty: Bool {
+        get {
+            return width == 0 && width == 0
+        }
+    }
+}
+
+public struct Rect {
+    var origin: Point
+    var size: Size
+}
+
+public var zeroRect = Rect(origin: Point(), size: Size())
+
+public func getZeroRect() -> Rect {
+    return zeroRect;
+}
+
+// Classes
 
 public class IntHolder {
     var value: Int = 0
