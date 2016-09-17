@@ -697,6 +697,10 @@ Parser.prototype.addLine = function(originalLine) {
 			if (this.currentDeclaration) {
 				this.currentDeclaration = undefined;
 				this.currentBasicBlock = undefined;
+			} else if (this.currentTypeName) {
+				this.types[this.currentTypeName] = this.currentTypeData;
+				this.currentTypeName = undefined;
+				this.currentTypeData = undefined;
 			} else {
 				// Not inside a declaration!
 				// Should be an error, but we aren't even close to understanding Swift's protocols/method tables
