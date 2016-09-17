@@ -128,7 +128,7 @@ function unwrapOptionalEnums(instructions) {
 						delete input.cases;
 						delete input.type;
 						input.interpretation = "select_value";
-						if (trueLocal | defaultLocal < falseLocal | defaultLocal) {
+						if ((trueLocal | defaultLocal) < (falseLocal | defaultLocal)) {
 							input.values = [{}, {value: undefined}];
 						} else {
 							input.values = [{value: undefined}, {}];
