@@ -605,6 +605,11 @@ CodeGen.prototype.ensureExports = function() {
 	}
 }
 
+CodeGen.prototype.export = function(publicName, internalName) {
+	this.ensureExports();
+	this.body.push(expressionStatement(assignment(member(identifier("exports"), literal(publicName)), identifier(internalName))));	
+}
+
 CodeGen.prototype.consumeFunction = function(fn) {
 	var basicBlocks = fn.basicBlocks;
 	if (basicBlocks.length == 0) {
@@ -675,8 +680,7 @@ CodeGen.prototype.consumeFunction = function(fn) {
 	// Assign the public name
 	var beautifulName = fn.beautifulName;
 	if (beautifulName) {
-		this.ensureExports();
-		this.body.push(expressionStatement(assignment(member(identifier("exports"), literal(beautifulName)), identifier(fn.name))));
+		this.export(beautifulName, fn.name);
 	}
 }
 
@@ -691,6 +695,7 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 				body: [],
 			}
 		}, "* @constructor", false, true));
+		this.export(declaration.name, declaration.name);
 		for (var key in declaration.entries) {
 			if (declaration.entries.hasOwnProperty(key)) {
 				this.body.push(assignPrototype(identifier(declaration.name), literal(key), literal(declaration.entries[key])));
