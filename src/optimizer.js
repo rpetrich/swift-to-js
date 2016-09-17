@@ -52,7 +52,7 @@ function unwrapStrings(instructions) {
 		instruction.inputs.forEach(input => {
 			switch (input.interpretation) {
 				case "struct":
-					if (input.type == "_StringCore") {
+					if (input.type == "_StringCore" || input.type == "StaticString") {
 						input.interpretation = "contents";
 						input.localNames.splice(1, input.localNames.length - 2);
 					}
@@ -65,13 +65,26 @@ function unwrapStrings(instructions) {
 							input.interpretation = "contents";
 							delete input.fieldName;
 						}
+					} else if (input.type == "StaticString") {
+						if (input.fieldName == "_utf8CodeUnitCount") {
+							input.fieldName = "length";
+						} else if (input.fieldName == "_startPtrOrData") {
+							input.interpretation = "contents";
+							delete input.fieldName;
+						}
 					}
 					break;
 				case "struct_element_addr":
-					if (input.type == "_StringCore") {
-						throw new Error("Cannot take the address of a _StringCore field!");
+					if (input.type == "_StringCore" || input.type == "StaticString") {
+						throw new Error("Cannot take the address of a " + input.type + " field!");
 					}
 					break;
+				case "global_addr":
+					if (input.globalName == "_Tvs19_emptyStringStorageVs6UInt32") {
+						input.interpretation = "string_literal";
+						input.value = "";
+						delete input.globalName;
+					}
 			}
 		});
 	});
