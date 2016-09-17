@@ -149,6 +149,9 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (/^bind_memory\s+/.test(line)) {
 		return;
 	}
+	if (/^alloc_global\s+/.test(line)) {
+		return;
+	}
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
@@ -304,11 +307,12 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[1];
 				break;
 			case "project_box":
-				var match = args.match(/^%(\w+)\s+:/);
+				var match = args.match(/^%(\w+)\s+:\s+\$(.*)/);
 				// assignment.inputs = [{
 				// 	localName: match[1]
 				// }];
 				input.localNames = [match[1]];
+				input.type = match[1];
 				break;
 			case "is_unique":
 				input.value = "false";
@@ -452,6 +456,8 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[1];
 				break;
 			case "upcast":
+			case "ref_to_unmanaged":
+			case "unmanaged_to_ref":
 				var match = args.match(/^%(\d+)\s+:\s+\$(.*) to \$(.*)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
@@ -607,9 +613,12 @@ Parser.prototype.parseInstruction = function (line, source) {
 }
 
 Parser.prototype.parseSilGlobal = function (line) {
+	var match = line.match(/\@(\w+)\s+:\s+\$(.*?)(, \@(.*)\s+:\s+\$.*?)?$/)
 	var declaration = {
-		name: line.match(/\@(\w+)/)[1],
+		name: match[1],
 		type: "global",
+		globalType: match[2],
+		initializer: match[4] || undefined,
 	};
 	this.declarations.push(declaration);
 }
