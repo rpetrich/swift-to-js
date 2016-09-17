@@ -95,7 +95,7 @@ function unwrapOptionalEnums(instructions) {
 		instruction.inputs.forEach(input => {
 			switch (input.interpretation) {
 				case "enum":
-					if (input.type == "Optional") {
+					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
 						if (input.caseName.toLowerCase() == "some") {
 							input.interpretation = "contents";
 						} else {
@@ -106,13 +106,13 @@ function unwrapOptionalEnums(instructions) {
 					}
 					break;
 				case "unchecked_enum_data":
-					if (input.type == "Optional") {
+					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
 						input.interpretation = "contents";
 						delete input.type;
 					}
 					break;
 				case "select_enum":
-					if (input.type == "Optional") {
+					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
 						var defaultLocal;
 						var trueLocal;
 						var falseLocal;
@@ -142,7 +142,7 @@ function unwrapOptionalEnums(instructions) {
 		});
 		switch (instruction.operation) {
 			case "switch_enum":
-				if (instruction.type == "Optional") {
+				if (instruction.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
 					instruction.operation = "conditional_defined_branch";
 					var defaultBlock;
 					var trueBlock;
