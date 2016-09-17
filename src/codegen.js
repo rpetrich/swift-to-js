@@ -404,9 +404,17 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			addVariable(functionContext, mangledLocal(instruction.destinationLocalName));
 			return [expressionStatement(assignment(mangledLocal(instruction.destinationLocalName), init))];
 		case "return":
+			var input = instruction.inputs[0];
+			console.log(input);
+			if (input.interpretation == "tuple" && input.localNames.length == 0) {
+				console.log(input);
+				return [{
+					type: "ReturnStatement",
+				}];
+			}
 			return [{
 				type: "ReturnStatement",
-				argument: this.rValueForInput(instruction.inputs[0]),
+				argument: this.rValueForInput(input),
 			}];
 		case "branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
