@@ -21,20 +21,20 @@ function unwrapSimpleStructInstructions(instructions, types) {
 			switch (input.interpretation) {
 				case "struct":
 					var structType = types[input.type];
-					if (structType && structType.length == 1) {
+					if (structType && structType.fields.length == 1) {
 						input.interpretation = "contents";
 					}
 					break;
 				case "struct_extract":
 					var structType = types[input.type];
-					if (structType && structType.length == 1) {
+					if (structType && structType.fields.length == 1) {
 						input.interpretation = "contents";
 						delete input.fieldName;
 					}
 					break;
 				case "struct_element_addr":
 					var structType = types[input.type];
-					if (structType && structType.length == 1) {
+					if (structType && structType.fields.length == 1) {
 						input.interpretation = "contents";
 						delete input.fieldName;
 					}

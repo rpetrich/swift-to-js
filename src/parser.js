@@ -629,12 +629,41 @@ Parser.prototype.parseVTableMapping = function (line) {
 	this.currentDeclaration.entries[match[1]] = match[2];
 }
 
+Parser.prototype.parseStruct = function (line) {
+	var match = line.match(/^(public\s+)?(final\s+)?(\w+)\s+(\w+)/);
+	this.currentTypeName = match[4];
+	this.currentTypeData = {
+		semantics: "struct",
+		fields: [],
+	};
+};
+
+Parser.prototype.parseClass = function (line) {
+	var match = line.match(/^(public\s+)?(final\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
+	this.currentTypeName = match[4];
+	this.currentTypeData = {
+		semantics: "class",
+		superclass: match[6] || undefined,
+		fields: [],
+	};
+};
+
+Parser.prototype.parseTypeData = function (line) {
+	if (!/\{$/.test(line)) {
+		var match = line.match(/\bvar\s+(\w+):/);
+		if (match) {
+			var fieldName = match[1];
+			this.currentTypeData.fields.push(fieldName);
+		}
+	}
+}
+
 Parser.prototype.addLine = function(originalLine) {
 	line = originalLine.replace(/\s*\/\/.*/, "");
 	if (line.length != 0) {
-		var directive = line.match(/^\w+\b/);
+		var directive = line.match(/^(public\s+)?(final\s+)?(\w+)\b/);
 		if (directive) {
-			directive = directive[0];
+			directive = directive[3];
 			switch (directive) {
 				case "sil_stage":
 					// Do nothing with sil_stage directives
@@ -653,6 +682,9 @@ Parser.prototype.addLine = function(originalLine) {
 					break;
 				case "struct":
 					this.parseStruct(line);
+					break;
+				case "class":
+					this.parseClass(line);
 					break;
 				default:
 					if (/^\w+(\(.*\))?:$/.test(line)) {
@@ -683,7 +715,7 @@ Parser.prototype.addLine = function(originalLine) {
 			} else if (this.currentDeclaration && this.currentDeclaration.type == "vtable") {
 				this.parseVTableMapping(line.match(/^\s*(.*)$/)[1]);
 			} else if (this.currentTypeName) {
-				this.parseStructField(line.match(/^\s*(.*)$/)[1]);
+				this.parseTypeData(line.match(/^\s*(.*)$/)[1]);
 			} else {
 				// Not inside a declaration or basic block!
 				// Should be an error, but we aren't even close to understanding Swift's protocols/method tables

@@ -112,6 +112,12 @@ const assignment = (left, right) => ({
 
 const assignments = pairs => pairs.map(pair => expressionStatement(assignment(pair[0], pair[1])));
 
+const newExpression = (type, arguments) => ({
+	type: "NewExpression",
+	callee: type,
+	arguments: arguments || [],
+});
+
 const withAddedComment = (nodeOrNodeList, comment, isTrailing, isMultiLine) => {
 	var key = isTrailing ? "trailingComments" : "leadingComments";
 	var value = [{
@@ -272,14 +278,14 @@ CodeGen.prototype.rValueForInput = function(input) {
 			if (!structType) {
 				throw new Error("No type for " + structName);
 			}
-			if (structType.length != input.localNames.length) {
-				throw new Error("Definition of " + structName + " does specifiy " + input.localNames.length + " fields: " + structType.join(", "));
+			if (structType.fields.length != input.localNames.length) {
+				throw new Error("Definition of " + structName + " does specify " + input.localNames.length + " fields: " + structType.fields.join(", "));
 			}
 			return {
 				type: "ObjectExpression",
 				properties: input.localNames.map((localName, index) => ({
 					type: "Property",
-					key: literal(structType[index]),
+					key: literal(structType.fields[index]),
 					kind: "init",
 					value: mangledLocal(localName),
 				}))
@@ -326,11 +332,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 				properties: []
 			}]);
 		case "alloc_ref":
-			return {
-				type: "NewExpression",
-				callee: identifier(input.type),
-				arguments: [],
-			};
+			return newExpression(identifier(input.type), []);
 		case "project_box":
 			return box(mangledLocal(input.localNames[0]), literal(0));
 		case "struct_element_addr":
@@ -405,9 +407,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			return [expressionStatement(assignment(mangledLocal(instruction.destinationLocalName), init))];
 		case "return":
 			var input = instruction.inputs[0];
-			console.log(input);
 			if (input.interpretation == "tuple" && input.localNames.length == 0) {
-				console.log(input);
 				return [{
 					type: "ReturnStatement",
 				}];
@@ -720,10 +720,14 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 				body: [],
 			}
 		}, "* @constructor", false, true));
+		var type = this.types[declaration.name];
+		if (type && type.superclass) {
+			this.body.push(expressionStatement(assignment(member(identifier(declaration.name), literal("prototype")), newExpression(identifier(type.superclass)))));
+		}
 		this.export(declaration.name, declaration.name);
 		for (var key in declaration.entries) {
 			if (declaration.entries.hasOwnProperty(key)) {
-				this.body.push(assignPrototype(identifier(declaration.name), literal(key), literal(declaration.entries[key])));
+				this.body.push(assignPrototype(identifier(declaration.name), literal(key), identifier(declaration.entries[key])));
 			}
 		}
 	}
