@@ -468,15 +468,15 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.interpretation = "contents";
 				break;
 			case "class_method":
-				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)\s+,\s+\$@convention\((\w+)\)/);
+				var match = args.match(/^(\[volatile\]\s+)?%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)\s+,\s+\$@convention\((\w+)\)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// 	type: match[2],
 				// }]
-				input.localNames = [match[1]];
-				input.type = match[4];
-				input.entry = match[3];
-				input.convention = match[5] || "swift";
+				input.localNames = [match[2]];
+				input.type = match[5];
+				input.entry = match[4];
+				input.convention = match[6] || "swift";
 				break;
 			case "open_existential_ref":
 				input.type = "TODO";
