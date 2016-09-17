@@ -57,7 +57,7 @@ Parser.prototype.parseSil = function(line) {
 		localNames: {},
 		convention: conventionMatch ? conventionMatch[1] : "swift"
 	};
-	if (!/\b(hidden|shared_external)\b/.test(line) && (declaration.convention != "method")) {
+	if (!/\b(hidden|shared_external|private|global_init)\b/.test(line) && (declaration.convention != "method")) {
 		if (!/^\/\/ specialized\s/.test(this.lookbackLine)) {
 			var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
 			if (beautifulMatch) {
