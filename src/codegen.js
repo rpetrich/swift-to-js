@@ -339,7 +339,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "ref_element_addr":
 			return box(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "global_addr":
-			return box(identifier(input.globalName), 0);
+			return box(identifier(input.globalName), literal(0));
 		case "load":
 			return unbox(mangledLocal(input.localNames[0]));
 		case "unchecked_enum_data":
