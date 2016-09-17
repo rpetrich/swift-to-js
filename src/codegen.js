@@ -391,6 +391,8 @@ CodeGen.prototype.lValueForInput = function (input) {
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "tuple_extract":
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
+		case "global_addr":
+			return member(identifier(input.globalName), literal(0))
 	}
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
