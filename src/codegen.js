@@ -314,7 +314,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 			if ("fieldName" in input) {
 				callee = member(callee, literal(input.fieldName));
 			}
-			if (input.convention == "method") {
+			if (input.convention == "method" || input.convention == "objc_method") {
 				var hiddenThisArg = args.pop();
 				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
 					args.unshift(hiddenThisArg);
@@ -631,7 +631,7 @@ CodeGen.prototype.consumeFunction = function(fn) {
 	};
 	// Apply calling convention to the argument list
 	var args = basicBlocks[0].arguments;
-	var useMethodCallingConvention = fn.convention == "method";
+	var useMethodCallingConvention = fn.convention == "method" || fn.convention == "objc_method";
 	if (useMethodCallingConvention) {
 		var hiddenThisArg = args[args.length - 1];
 		args = args.slice(0, args.length - 1);
