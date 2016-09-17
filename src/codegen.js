@@ -320,7 +320,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "partial_apply":
 			throw new Error("partial_apply not supported!");
 		case "alloc_stack":
-			return array(input.localNames.map(localName => mangledLocal(localName)))
+			return box(array(input.localNames.map(localName => mangledLocal(localName))), literal(0));
 		case "alloc_box":
 			return array([{
 				type: "ObjectExpression",
