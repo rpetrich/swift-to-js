@@ -173,10 +173,6 @@ const assignPrototype = (type, key, value) => expressionStatement(assignment(mem
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
-	this.program = {
-		type: "Program",
-		body: this.body,
-	};
 	this.usedBuiltins = {};
 }
 
@@ -705,14 +701,31 @@ CodeGen.prototype.consumeVTable = function(declaration) {
 }
 
 CodeGen.prototype.end = function() {
-	//console.log(JSON.stringify(this.program, null, 2));
-	this.buffer.write(escodegen.generate(this.program, {
-		format: {
-			json: true,
-			quotes: "double",
-		},
-		comment: true,
-	}));
+	var program = {
+		type: "Program",
+		body: this.body,
+	};
+	// console.log(JSON.stringify(program, null, 2));
+	if (false) {
+		this.buffer.write(escodegen.generate(esmangle.mangle(program), {
+			format: {
+				renumber: true,
+				hexadecimal: true,
+				escapeless: true,
+				compact: true,
+				semicolons: false,
+				parentheses: false,
+			},
+		}));
+	} else {
+		this.buffer.write(escodegen.generate(program, {
+			format: {
+				json: true,
+				quotes: "double",
+			},
+			comment: true,
+		}));
+	}
 }
 
 module.exports = CodeGen;
