@@ -640,17 +640,29 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		if (cases) {
 			cases.push(switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext)));
 		} else if (basicBlock.hasBackReferences) {
-			body.push(expressionStatement(assignment(identifier("state"), literal(index))));
-			functionContext.insideSwitch = true;
-			cases = [switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext))];
-			body.push({
-				type: "ForStatement",
-				body: {
-					type: "SwitchStatement",
-					discriminant: identifier("state"),
-					cases: cases,
-				}
-			});
+			if (index == fn.basicBlocks.length - 1) {
+				functionContext.nextBlock = basicBlock;
+				cases = [switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext))];
+				body.push({
+					type: "ForStatement",
+					body: {
+						type: "BlockStatement",
+						body: this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext),
+					}
+				});
+			} else {
+				body.push(expressionStatement(assignment(identifier("state"), literal(index))));
+				functionContext.insideSwitch = true;
+				cases = [switchCase(literal(index), this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext))];
+				body.push({
+					type: "ForStatement",
+					body: {
+						type: "SwitchStatement",
+						discriminant: identifier("state"),
+						cases: cases,
+					}
+				});
+			}
 		} else if (hasVariable(functionContext, identifier("state"))) {
 			body.push(expressionStatement(assignment(identifier("state"), literal(index + 1))));
 			// Recreate the block with the "insideSwitch" flag set, so that break statements work correctly
