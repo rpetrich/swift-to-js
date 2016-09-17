@@ -15,11 +15,13 @@ module.exports = {
 		"_GraphemeClusterBreakPropertyRawValue": ["rawValue"],
 		"_StringCore": ["_baseAddress", "_countAndFlags", "_owner"],
 		"String": ["_core"],
+		"StaticString": ["_startPtrOrData", "_utf8CodeUnitCount", "_flags"],
 		"UnsafePointer": ["_rawValue"],
 		"UnsafeMutablePointer": ["_rawValue"],
 		"UnsafeMutableRawPointer": ["_rawValue"],
 		"UnsafeBufferPointer": ["_position", "_end"],
 		"UnsafeRawPointer": ["_rawValue"],
+		"AutoreleasingUnsafeMutablePointer": ["_rawValue"],
 		"_HeapBuffer": ["_storage"],
 		"_StringBuffer": ["_storage"],
 		"_SwiftArrayBodyStorage": ["count", "_capacityAndFlags"],
@@ -89,7 +91,7 @@ module.exports = {
 		"or_Int8": "(left, right) { return left | right }",
 		// Float64
 		"fcmp_oeq_FPIEEE64": "(left, right) { return left == right }",
-		"fadd_FPIEEE64": "(left, right) { return left - right }",
+		"fadd_FPIEEE64": "(left, right) { return left + right }",
 		"fsub_FPIEEE64": "(left, right) { return left - right }",
 		"fmul_FPIEEE64": "(left, right) { return left * right }",
 		"_TZFsoi2eeFTSdSd_Sb": "(left, right) { return left == right }",
@@ -109,8 +111,9 @@ module.exports = {
 		"int_memcpy_RawPointer_RawPointer_Int64": "(dest, src, size, alignment, volatile) { }",
 		"_swift_stdlib_malloc_size": "(buffer) { return 0 }",
 		// Booleans
-		"xor_Int1": "(left, right) { return left ^ right }",
-		"or_Int1": "(left, right) { return left | right }",
+		"xor_Int1": "(left, right) { return (left ^ right) != 0 }",
+		"or_Int1": "(left, right) { return left || right }",
+		"and_Int1": "(left, right) { return left && right }",
 		"int_expect_Int1": "(value, expected) { return value }",
 		"_TZFsoi2aauRxs11BooleanTyperFzTxKzT_Sb_Sb": "(left, right) { return left && right }",
 		// Words,
@@ -121,6 +124,9 @@ module.exports = {
 		"swift_bufferAllocate": "(bufferType, size, alignMask) { return { \"ref\":[], \"field\":0 } }",
 		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
 		"_TTSfq4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
+		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": "() { return this }",
+		"_TF10ObjectiveC22_convertObjCBoolToBoolFVS_8ObjCBoolSb": "(value) { return this }",
+		"_TF10ObjectiveC22_convertBoolToObjCBoolFSbVS_8ObjCBool": "(value) { return value }",
 		// Int
 		"_TZFsoi1pFTSiSi_Si": "(left, right) { return (left + right) | 0 }",
 		// Generic numeric types
@@ -128,5 +134,8 @@ module.exports = {
 		// Error handling
 		"willThrow": "(error) { throw error }",
 		"trap": "() { throw \"Runtime error!\" }",
+		"swift_convertNSErrorToError": "(error) { return error }",
+		"unexpectedError": "(error) { throw \"Unexpected error: \" + error.toString() }",
+		"_TFs18_fatalErrorMessageFTVs12StaticStringS_S_Su5flagsVs6UInt32_Os5Never": "(prefix, message, file, line, flags) { throw console.log(prefix + message + \" in \" + file + \":\" + line) }",
 	}
 };
