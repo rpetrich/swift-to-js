@@ -612,6 +612,10 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
+	var body = [];
+	var functionContext = {
+		variables: [],
+	};
 	// Apply calling convention to the argument list
 	var args = basicBlocks[0].arguments;
 	var useMethodCallingConvention = fn.convention == "method";
