@@ -184,8 +184,8 @@ var fuseableWithAssignment = instruction => {
 	}
 };
 
-var instructionsWithoutSideEffects = ["assignment", "builtin"];
-var instructionHasSideEffects = instruction => instructionsWithoutSideEffects.indexOf(instruction.operation) == -1;
+var interpretationsWithoutSideEffects = ["contents", "integer_literal", "float_literal", "string_literal", "undefined_literal", "enum", "struct", "tuple", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "ref_element_addr", "global_addr", "select_enum", "select_value", "index_raw_pointer", "index_addr", "metatype", "class_method", "open_existential_ref"];
+var instructionHasSideEffects = instruction => instruction.operation != "assignment" || interpretationsWithoutSideEffects.indexOf(instruction.operation) == -1;
 
 function fuseAssignments(instructions, downstreamInstructions) {
 	fuse_search:
@@ -257,7 +257,7 @@ function fuseAssignments(instructions, downstreamInstructions) {
 function deadAssignmentElimination(instructions, downstreamInstructions) {
 	for (var i = 0; i < instructions.length; ) {
 		var instruction = instructions[i];
-		if (instruction.operation == "assignment") {
+		if (instruction.operation == "assignment" && !instructionHasSideEffects(instruction)) {
 			if (!instructions.slice(i+1).concat(downstreamInstructions).some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
 				instructions.splice(i, 1);
 				continue;
