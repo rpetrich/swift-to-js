@@ -186,7 +186,9 @@ const switchCase = (test, consequents) => ({
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
+	this.deferredBody = [];
 	this.types = parser.types;
+	this.globals = parser.globals;
 	this.usedBuiltins = {};
 }
 
@@ -348,7 +350,12 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "ref_element_addr":
 			return box(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "global_addr":
-			return box(identifier(input.globalName), literal(0));
+			var global = this.globals[input.globalName];
+			if (global.beautifulName) {
+				return box(identifier("exports"), literal(global.beautifulName));
+			} else {
+				return box(identifier(input.globalName), literal(0));
+			}
 		case "load":
 			return unbox(mangledLocal(input.localNames[0]));
 		case "unchecked_enum_data":
@@ -402,7 +409,12 @@ CodeGen.prototype.lValueForInput = function (input) {
 		case "tuple_extract":
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		case "global_addr":
-			return member(identifier(input.globalName), literal(0))
+			var global = this.globals[input.globalName];
+			if (global.beautifulName) {
+				return member(identifier("exports"), literal(global.beautifulName));
+			} else {
+				return member(identifier(input.globalName), literal(0));
+			}
 	}
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
@@ -604,9 +616,13 @@ CodeGen.prototype.consume = function(declaration) {
 }
 
 CodeGen.prototype.consumeGlobal = function(global) {
-	this.body.push(declaration(identifier(global.name), array([])));
+	if (global.beautifulName) {
+		// this.body.push(expressionStatement(assignment(member(identifier("exports"), literal(global.beautifulName)), array([]))));
+	} else {
+		this.body.push(declaration(identifier(global.name), array([])));
+	}
 	if (global.initializer) {
-		this.body.push(expressionStatement(call(identifier(global.initializer), [])))
+		this.deferredBody.push(expressionStatement(call(identifier(global.initializer), [])))
 	}
 }
 
@@ -735,7 +751,9 @@ CodeGen.prototype.consumeVTable = function(classDeclaration) {
 			}
 		}, "* @constructor", false, true));
 		// Expose publicly
-		this.export(classDeclaration.name, classDeclaration.name);
+		if (classDeclaration.beautifulName) {
+			this.export(classDeclaration.name, classDeclaration.beautifulName);
+		}
 		// Declare superclass, if any
 		var type = this.types[classDeclaration.name];
 		var prototypeIdentifier = identifier(classDeclaration.name + "__prototype");
@@ -759,7 +777,7 @@ CodeGen.prototype.consumeVTable = function(classDeclaration) {
 CodeGen.prototype.end = function() {
 	var program = {
 		type: "Program",
-		body: this.body,
+		body: this.body.concat(this.deferredBody),
 	};
 	// console.log(JSON.stringify(program, null, 2));
 	if (false) {

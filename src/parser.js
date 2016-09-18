@@ -38,6 +38,7 @@ function basicNameForStruct(structName) {
 
 function Parser() {
 	this.declarations = [];
+	this.globals = [];
 	this.types = JSON.parse(JSON.stringify(types));
 	this.currentDeclaration = undefined;
 	this.currentBasicBlock = undefined;
@@ -613,14 +614,22 @@ Parser.prototype.parseInstruction = function (line, source) {
 }
 
 Parser.prototype.parseSilGlobal = function (line) {
-	var match = line.match(/\@(\w+)\s+:\s+\$(.*?)(, \@(.*)\s+:\s+\$.*?)?$/)
+	var match = line.match(/(\bhidden\s+)?\@(\w+)\s+:\s+\$(.*?)(, \@(.*)\s+:\s+\$.*?)?$/)
+	var name = match[2];
 	var declaration = {
-		name: match[1],
+		name: name,
 		type: "global",
-		globalType: match[2],
-		initializer: match[4] || undefined,
+		globalType: match[3],
+		initializer: match[5] || undefined,
 	};
+	if (!match[1]) {
+		var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
+		if (beautifulMatch) {
+			declaration.beautifulName = beautifulMatch[2];
+		}
+	}
 	this.declarations.push(declaration);
+	this.globals[name] = declaration;
 }
 
 Parser.prototype.parseSilVTable = function (line) {
@@ -654,6 +663,7 @@ Parser.prototype.parseClass = function (line) {
 		semantics: "class",
 		superclass: match[6] || undefined,
 		fields: [],
+		beautifulName: match[1] ? match[4] : undefined,
 	};
 };
 
