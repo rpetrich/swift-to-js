@@ -67,19 +67,29 @@ const box = (parent, field) => ({
 	type: "ObjectExpression",
 	properties: [{
 		type: "Property",
-		key: literal("ref"),
+		key: identifier("ref"),
 		kind: "init",
 		value: parent,
 	}, {
 		type: "Property",
-		key: literal("field"),
+		key: identifier("field"),
 		kind: "init",
 		value: field,
 	}]
 });
 
-const unboxRef = boxed => member(boxed, literal("ref"));
-const unboxField = boxed => member(boxed, literal("field"));
+const unboxRef = boxed => ({
+	type: "MemberExpression",
+	object: boxed,
+	property: identifier("ref"),
+	computed: false,
+});
+const unboxField = boxed => ({
+	type: "MemberExpression",
+	object: boxed,
+	property: identifier("field"),
+	computed: false,
+});
 const unbox = boxed => member(unboxRef(boxed), unboxField(boxed));
 
 const unary = (operator, value) => ({
