@@ -17,7 +17,7 @@ test: test.swift.js
 %.sil: %.swift Makefile
 	$(SWIFT) -emit-sil -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" -o "$@"
 
-%.sil.ast: *.swift Makefile
+%.sil.ast: %.swift Makefile
 	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" > "$@"
 
 %.swift.js: %.sil %.sil.ast src/*.js
