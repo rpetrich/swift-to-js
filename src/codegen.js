@@ -173,8 +173,6 @@ const switchCase = (test, consequents) => ({
 	consequent: consequents,
 });
 
-const assignPrototype = (type, key, value) => expressionStatement(assignment(member(member(type, literal("prototype")), key), value));
-
 function CodeGen(parser) {
 	this.buffer = new IndentedBuffer();
 	this.body = [];
@@ -709,25 +707,37 @@ CodeGen.prototype.consumeFunction = function(fn) {
 	}
 }
 
-CodeGen.prototype.consumeVTable = function(declaration) {
-	if (!/^_/.test(declaration.name)) {
+CodeGen.prototype.consumeVTable = function(classDeclaration) {
+	if (!/^_/.test(classDeclaration.name)) {
+		var classIdentifier = identifier(classDeclaration.name);
+		var prototypeMember = member(classIdentifier, literal("prototype"));
+		// Declare class
 		this.body.push(withAddedComment({
 			type: "FunctionDeclaration",
-			id: identifier(declaration.name),
+			id: classIdentifier,
 			params: [],
 			body: {
 				type: "BlockStatement",
 				body: [],
 			}
 		}, "* @constructor", false, true));
-		var type = this.types[declaration.name];
+		// Expose publicly
+		this.export(classDeclaration.name, classDeclaration.name);
+		// Declare superclass, if any
+		var type = this.types[classDeclaration.name];
+		var prototypeIdentifier = identifier(classDeclaration.name + "__prototype");
+		var prototypeAssignment;
 		if (type && type.superclass) {
-			this.body.push(expressionStatement(assignment(member(identifier(declaration.name), literal("prototype")), newExpression(identifier(type.superclass)))));
+			var prototypeAssignment = assignment(prototypeMember, newExpression(identifier(type.superclass)));
+			this.body.push(declaration(prototypeIdentifier, prototypeAssignment));
+			this.body.push(expressionStatement(assignment(member(prototypeIdentifier, literal("constructor")), classIdentifier)));
+		} else {
+			this.body.push(declaration(prototypeIdentifier, prototypeMember));
 		}
-		this.export(declaration.name, declaration.name);
-		for (var key in declaration.entries) {
-			if (declaration.entries.hasOwnProperty(key)) {
-				this.body.push(assignPrototype(identifier(declaration.name), literal(key), identifier(declaration.entries[key])));
+		// Write method table
+		for (var key in classDeclaration.entries) {
+			if (classDeclaration.entries.hasOwnProperty(key)) {
+				this.body.push(expressionStatement(assignment(member(prototypeIdentifier, literal(key)), identifier(classDeclaration.entries[key]))));
 			}
 		}
 	}
