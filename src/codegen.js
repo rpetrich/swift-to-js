@@ -595,6 +595,9 @@ CodeGen.prototype.consume = function(declaration) {
 
 CodeGen.prototype.consumeGlobal = function(global) {
 	this.body.push(declaration(identifier(global.name), array([])));
+	if (global.initializer) {
+		this.body.push(expressionStatement(call(identifier(global.initializer), [])))
+	}
 }
 
 CodeGen.prototype.ensureExports = function() {
