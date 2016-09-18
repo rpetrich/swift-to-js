@@ -150,9 +150,6 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (/^bind_memory\s+/.test(line)) {
 		return;
 	}
-	if (/^alloc_global\s+/.test(line)) {
-		return;
-	}
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
@@ -547,12 +544,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 			inputs: [simpleLocalContents(match[1], undefined)],
 		};
 	}
-	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:/);
+	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:\s+\$\*(.*)/);
 	if (match) {
 		return {
 			operation: "store",
 			source: source,
 			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[3])],
+			type: match[5],
 		};
 	}
 	match = line.match(/^copy_addr\s+\%(\w+)(\#\d+)?\s+to\s+(\[initialization\]\s+)?\%(\w+)(\#\d+)?\s+:/);
@@ -561,6 +559,16 @@ Parser.prototype.parseInstruction = function (line, source) {
 			operation: "copy_addr",
 			source: source,
 			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
+		};
+	}
+	match = line.match(/^alloc_global\s+\@(.*)/);
+	if (match) {
+		var name = match[1];
+		return {
+			operation: "alloc_global",
+			name: name,
+			type: this.globals[name].globalType,
+			inputs: [],
 		};
 	}
 	match = line.match(/^switch_enum\s+\%(\d+)\s+:\s+\$(.*?),\s+(case .*?)$/);
@@ -669,10 +677,10 @@ Parser.prototype.parseClass = function (line) {
 
 Parser.prototype.parseTypeData = function (line) {
 	if (!/\{$/.test(line)) {
-		var match = line.match(/\bvar\s+(\w+):/);
+		var match = line.match(/\bvar\s+(\w+):\s+(.*)/);
 		if (match) {
 			var fieldName = match[1];
-			this.currentTypeData.fields.push(fieldName);
+			this.currentTypeData.fields.push({ name: fieldName, type: match[2] });
 		}
 	}
 }

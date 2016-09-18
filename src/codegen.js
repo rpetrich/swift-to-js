@@ -1,5 +1,4 @@
 var stdlib = require("./stdlib.js");
-var enums = stdlib.enums;
 var builtins = stdlib.builtins;
 
 var Parser = require("./parser.js");
@@ -257,6 +256,42 @@ function findBasicBlock(blocks, descriptor) {
 	throw new Error("Neither a reference nor an inline block!");
 }
 
+CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName) {
+	var type = this.types[typeName];
+	if (type) {
+		switch (type.semantics) {
+			case "struct":
+				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type)), []);
+			case "enum":
+				return [expressionStatement(assignment(member(dest, literal(0)), member(source, literal(0))))];
+		}
+	}
+	return [expressionStatement(assignment(dest, source))];
+}
+
+CodeGen.prototype.nodeForAllocDeep = function (type) {
+	if (type) {
+		switch (type.semantics) {
+			case "struct":
+				var properties = [];
+				type.fields.forEach(field => {
+					var subNode = this.nodeForAllocDeep(this.types[field.name]);
+					if (subNode) {
+						properties.push({
+							type: "Property",
+							key: identifier(field.name),
+							kind: init,
+							value: subNode
+						});
+					}
+				});
+				return { type: "ObjectExpression", properties: properties };
+			case "enum":
+				return array([]);
+		}
+	}
+}
+
 CodeGen.prototype.rValueForInput = function(input) {
 	switch (input.interpretation) {
 		case "contents":
@@ -269,7 +304,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return unary("void", literal(0));
 		case "enum":
 			var enumName = input.type;
-			var enumLayout = enums[enumName];
+			var enumLayout = this.types[enumName].cases;
 			if (!enumLayout) {
 				throw new Error("Unable to find enum: " + enumName);
 			}
@@ -289,13 +324,13 @@ CodeGen.prototype.rValueForInput = function(input) {
 				throw new Error("No type for " + structName);
 			}
 			if (structType.fields.length != input.localNames.length) {
-				throw new Error("Definition of " + structName + " does specify " + input.localNames.length + " fields: " + structType.fields.join(", "));
+				throw new Error("Definition of " + structName + " does specify " + input.localNames.length + " fields: " + structType.fields.map(field => field.name).join(", "));
 			}
 			return {
 				type: "ObjectExpression",
 				properties: input.localNames.map((localName, index) => ({
 					type: "Property",
-					key: literal(structType.fields[index]),
+					key: literal(structType.fields[index].name),
 					kind: "init",
 					value: mangledLocal(localName),
 				}))
@@ -335,16 +370,19 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "partial_apply":
 			throw new Error("partial_apply not supported!");
 		case "alloc_stack":
+			console.log(input);
+			var type = this.types[instruction.type];
+			var node = this.nodeForAllocDeep(type);
 			return box(array(input.localNames.map(localName => mangledLocal(localName))), literal(0));
-		case "alloc_box":
-			return array([{
-				type: "ObjectExpression",
-				properties: []
-			}]);
 		case "alloc_ref":
 			return newExpression(identifier(input.type), []);
+		case "alloc_box":
+			console.log(input);
+			var type = this.types[instruction.type];
+			var node = this.nodeForAllocDeep(type);
+			return box(array(node ? [node] : []), literal(0));
 		case "project_box":
-			return box(mangledLocal(input.localNames[0]), literal(0));
+			return mangledLocal(input.localNames[0]);;
 		case "struct_element_addr":
 			return box(unbox(mangledLocal(input.localNames[0])), literal(input.fieldName));
 		case "ref_element_addr":
@@ -393,6 +431,15 @@ CodeGen.prototype.rValueForInput = function(input) {
 	throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 }
 
+CodeGen.prototype.nodeForGlobal = function (globalName) {
+	var global = this.globals[globalName];
+	if (global.beautifulName) {
+		return member(identifier("exports"), literal(global.beautifulName));
+	} else {
+		return member(identifier(globalName), literal(0));
+	}
+}
+
 CodeGen.prototype.lValueForInput = function (input) {
 	switch (input.interpretation) {
 		case "contents":
@@ -409,12 +456,7 @@ CodeGen.prototype.lValueForInput = function (input) {
 		case "tuple_extract":
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		case "global_addr":
-			var global = this.globals[input.globalName];
-			if (global.beautifulName) {
-				return member(identifier("exports"), literal(global.beautifulName));
-			} else {
-				return member(identifier(input.globalName), literal(0));
-			}
+			return this.nodeForGlobal(input.globalName);
 	}
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
@@ -502,13 +544,22 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
+		case "alloc_global":
+			var type = this.types[instruction.type];
+			var node = this.nodeForAllocDeep(type);
+			if (node) {
+				return [expressionStatement(assignment(this.nodeForGlobal(instruction.name), node))]
+			}
+			return [];
 		case "store":
 		case "copy_addr":
-			return [expressionStatement(assignment(this.lValueForInput(instruction.inputs[1]), this.rValueForInput(instruction.inputs[0])))];
+			var lValue = this.lValueForInput(instruction.inputs[1]);
+			var rValue = this.rValueForInput(instruction.inputs[0]);
+			return this.nodesForStoreDeep(lValue, rValue, instruction.type);
 		case "switch_enum":
 			var args = instruction.cases;
 			var enumName = instruction.type;
-			var enumLayout = enums[enumName];
+			var enumLayout = this.types[enumName].cases;
 			if (!enumLayout) {
 				throw "Unable to find enum: " + enumName;
 			}

@@ -450,6 +450,27 @@ function optimize(declaration, types) {
 	}
 }
 
+function optimizeTypes(types) {
+	for (var key in types) {
+		if (types.hasOwnProperty(key)) {
+			var type = types[key];
+			switch (type.personality) {
+				case "struct":
+					if (type.fields.length == 0) {
+						delete types[key];
+					}
+					break;
+				case "enum":
+					if (type.name == "Optional" || type.name == "ImplicitlyUnwrappedOptional") {
+						delete types[key];
+					}
+					break;
+			}
+		}
+	}
+}
+
 module.exports = {
-	"optimize": optimize
+	"optimize": optimize,
+	"optimizeTypes": optimizeTypes,
 }
