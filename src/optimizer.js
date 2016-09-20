@@ -134,6 +134,10 @@ function unwrapOptionalEnums(instructions) {
 							input.values = [{value: undefined}, {}];
 						}
 					}
+				case "init_enum_data_addr":
+					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+						throw new Error("Cannot use init_enum_data_addr on an " + input.type + "!");
+					}
 					break;
 			}
 		});

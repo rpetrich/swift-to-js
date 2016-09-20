@@ -304,11 +304,11 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return unary("void", literal(0));
 		case "enum":
 			var enumName = input.type;
-			var enumLayout = this.types[enumName].cases;
-			if (!enumLayout) {
+			var type = this.types[enumName];
+			if (!type) {
 				throw new Error("Unable to find enum: " + enumName);
 			}
-			var index = enumLayout.indexOf(input.caseName);
+			var index = type.cases.indexOf(input.caseName);
 			if (index == -1) {
 				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
 			}
@@ -387,6 +387,8 @@ CodeGen.prototype.rValueForInput = function(input) {
 			return box(unbox(mangledLocal(input.localNames[0])), literal(input.fieldName));
 		case "ref_element_addr":
 			return box(mangledLocal(input.localNames[0]), literal(input.fieldName));
+		case "init_enum_data_addr":
+			return box(unbox(mangledLocal), literal(1));
 		case "global_addr":
 			var global = this.globals[input.globalName];
 			if (global.beautifulName) {

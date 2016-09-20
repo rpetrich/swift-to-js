@@ -150,6 +150,12 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (/^bind_memory\s+/.test(line)) {
 		return;
 	}
+	if (/^destroy_addr\s+/.test(line)) {
+		return;
+	}
+	if (/^deinit_existential_addr\s+/.test(line)) {
+		return;
+	}
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
@@ -372,7 +378,14 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[2];
 				input.interpretation = "contents";
 				break;
+			case "init_enum_data_addr":
+				var match = args.match(/^%(\d+)\s+:\s+\$\*(.*),\s+\#.*\.(\w+)\!/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "init_enum_data_addr";
+				break;
 			case "unchecked_enum_data":
+			case "unchecked_take_enum_data_addr":
 				var match = args.match(/^%(\w+)\s+:\s*.*#(.*)\..*\!/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
@@ -382,7 +395,8 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[2];
 				break;
 			case "select_enum":
-				var match = args.match(/^%(\d+)\s+:\s+\$(.*?),\s+(case .*?)$/);
+			case "select_enum_addr":
+				var match = args.match(/^%(\d+)\s+:\s+\$\*?(.*?),\s+(case .*?)$/);
 				var localNames = [match[1]];
 				var cases = splitNoParens(match[3]).map(arg => {
 					var match = arg.match(/^case\s+\#(.*):\s+%(\d+)( : .*)?$/);
@@ -401,6 +415,23 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.localNames = localNames;
 				input.type = basicNameForStruct(match[2]);
 				input.cases = cases;
+				break;
+			case "select_value":
+				var match = args.match(/%(\d+)\s:\s\$(.*)?,\s+(.*)\s+:\s+\$(.*)/);
+				input.localNames = [match[1]].concat(splitNoParens(args[3]).reduce((result, arg) => {
+					var match = arg.match(/^case\s+\%(.*):\s+%(\d+)$/);
+					if (match) {
+						return result.concat([match[1], match[2]]);
+					} else {
+						match = arg.match(/default\s+%(\d+)$/);
+						if (match) {
+							return result.concat([match[1]]);
+						} else {
+							return result;
+						}
+					}
+				}, []));
+				input.type = basicNameForStruct(match[2]);
 				break;
 			case "address_to_pointer":
 			case "unchecked_ref_cast":
@@ -465,6 +496,14 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[3];
 				input.interpretation = "contents";
 				break;
+			case "witness_method":
+				var match = args.match(/^.*,\s+\#(.*),\s+%(\d+)\s+:\s+(.*\$\@convention\((\w+)\))?/);
+				input.localNames = [match[2]];
+				input.type = "TODO";
+				input.entry = [match[1]];
+				input.convention = match[4] || "swift";
+				input.interpretation = "class_method";
+				break;
 			case "class_method":
 				var match = args.match(/^(\[volatile\]\s+)?%(\d+)\s+:\s+\$(.*?),\s+#(.*) : (.*)\s+,\s+\$@convention\((\w+)\)/);
 				// assignment.inputs = [{
@@ -476,8 +515,22 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.entry = match[4];
 				input.convention = match[6] || "swift";
 				break;
+			case "open_existential_addr":
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*)\s+to\s+/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
+				break;
 			case "open_existential_ref":
 				input.type = "TODO";
+				break;
+			case "init_existential_addr":
+				var match = args.match(/%(\d+)\s+:\s+\$\*(.*),\s+\$(.*)/);
+				console.log(args);
+				console.log(match);
+				input.localNames = [match[1]];
+				input.type = match[3];
+				input.interpretation = "contents";
 				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
@@ -536,6 +589,25 @@ Parser.prototype.parseInstruction = function (line, source) {
 			exact: !!match[1],
 		};
 	}
+	match = line.match(/^checked_cast_addr_br\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+\%(\d+)\s+:\s+\$\*(.*)\s+to\s+.*\s+in\s+\%(\d+)\s+:\s+\$\*(.*)\,\s+(\w+),\s+(\w+)/);
+	if (match) {
+		return {
+			operation: "checked_cast_addr_br",
+			inputs: [simpleLocalContents(match[2], match[3]), simpleLocalContents(match[4], match[5])],
+			trueBlock: { reference: match[6] },
+			falseBlock: { reference: match[7] },
+			type: match[5],
+		}
+	}
+	match = line.match(/^inject_enum_addr\s+\%(\d+)\s+:\s+\$\*(.*)\,\s+\#.*\.(.*)\!/);
+	if (match) {
+		return {
+			operation: "intect_enum_addr",
+			inputs: [simpleLocalContents(match[1], match[2])],
+			type: match[2],
+			caseName: match[3],
+		}
+	}
 	match = line.match(/^cond_fail\s+\%(\w+)\s+:/);
 	if (match) {
 		return {
@@ -553,12 +625,12 @@ Parser.prototype.parseInstruction = function (line, source) {
 			type: match[5],
 		};
 	}
-	match = line.match(/^copy_addr\s+\%(\w+)(\#\d+)?\s+to\s+(\[initialization\]\s+)?\%(\w+)(\#\d+)?\s+:/);
+	match = line.match(/^copy_addr\s+(\[take\]\s+)?\%(\w+)(\#\d+)?\s+to\s+(\[initialization\]\s+)?\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
 		return {
 			operation: "copy_addr",
 			source: source,
-			inputs: [simpleLocalContents(match[1], undefined), simpleLocalContents(match[4], undefined)],
+			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[5], undefined)],
 		};
 	}
 	match = line.match(/^alloc_global\s+\@(.*)/);
@@ -571,9 +643,9 @@ Parser.prototype.parseInstruction = function (line, source) {
 			inputs: [],
 		};
 	}
-	match = line.match(/^switch_enum\s+\%(\d+)\s+:\s+\$(.*?),\s+(case .*?)$/);
+	match = line.match(/^(switch_enum(_addr)?)\s+\%(\d+)\s+:\s+\$\*?(.*?),\s+(case .*?)$/);
 	if (match) {
-		var cases = splitNoParens(match[3]).map(arg => {
+		var cases = splitNoParens(match[5]).map(arg => {
 			var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);
 			if (match) {
 				return {
@@ -588,11 +660,11 @@ Parser.prototype.parseInstruction = function (line, source) {
 			}
 		})
 		return {
-			operation: "switch_enum",
+			operation: match[1],
 			source: source,
-			inputs: [simpleLocalContents(match[1], undefined)],
+			inputs: [simpleLocalContents(match[3], undefined)],
 			cases: cases,
-			type: basicNameForStruct(match[2]),
+			type: basicNameForStruct(match[4]),
 		};
 	}
 	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
