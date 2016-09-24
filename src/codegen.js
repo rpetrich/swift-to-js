@@ -225,6 +225,14 @@ const addVariable = (functionContext, newVariable) => {
 	return true;
 }
 
+const tempVariable = functionContext => {
+	var i = 0;
+	while (!addVariable(functionContext, identifier("$" + i))) {
+		i++;
+	}
+	return identifier("$" + i);
+}
+
 CodeGen.prototype.branchToBlockNodes = function (descriptor, siblingBlocks, functionContext) {
 	if (descriptor.reference) {
 		for (var i = 0; i < siblingBlocks.length; i++) {
@@ -275,12 +283,25 @@ CodeGen.prototype.findType = function(name, personality) {
 	return type;
 }
 
-CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName) {
+CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName, functionContext) {
 	var type = this.types[typeName];
 	if (type) {
 		switch (type.personality) {
 			case "struct":
-				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type)), []);
+				var nodes = [];
+				if (type.fields.length > 1) {
+					if (source.type != "Identifier") {
+						var temp = tempVariable(functionContext);
+						nodes.push(expressionStatement(assignment(temp, source)));
+						source = temp;
+					}
+					if (dest.type != "Identifier") {
+						var temp = tempVariable(functionContext);
+						nodes.push(expressionStatement(assignment(temp, dest)));
+						dest = temp;
+					}
+				}
+				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type, functionContext)), nodes);
 			case "enum":
 				return [expressionStatement(assignment(member(dest, literal(0)), member(source, literal(0))))];
 		}
@@ -598,7 +619,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "copy_addr":
 			var lValue = this.lValueForInput(instruction.inputs[1]);
 			var rValue = this.rValueForInput(instruction.inputs[0]);
-			var result = this.nodesForStoreDeep(lValue, rValue, instruction.type);
+			var result = this.nodesForStoreDeep(lValue, rValue, instruction.type, functionContext);
 			return result;
 		case "inject_enum_addr":
 			var type = this.findType(instruction.type, "enum");
