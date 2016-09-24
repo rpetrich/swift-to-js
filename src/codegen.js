@@ -29,7 +29,12 @@ const identifier = name => ({
 	name: name,
 });
 
-var mangledLocal = local => identifier("_" + local);
+var mangledLocal = local => {
+	if (typeof local == "undefined") {
+		throw new Error("undefined passed to mangledLocal!");
+	}
+	return identifier("_" + local);
+};
 
 function literal(value) {
 	if (typeof value == "undefined") {
