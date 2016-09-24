@@ -305,7 +305,7 @@ CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName, function
 				}
 				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type, functionContext)), nodes);
 			case "enum":
-				throw new Error("nodesForStoreDeep not implemented for enums!");
+				// TODO: Store the value field of the enum type, based on the tag
 				return [expressionStatement(assignment(member(dest, literal(0)), member(source, literal(0))))];
 		}
 	}
@@ -354,7 +354,8 @@ CodeGen.prototype.nodeForCopyDeep = function (source, type, functionContext) {
 				}
 				return copyFrom(source);
 			case "enum":
-				throw new Error("nodeForCopyDeep not implemented for enums!");
+				// TODO: Copy the value field of the enum type, based on the tag
+				return array([member(source, literal(0))]);
 		}
 	}
 	return source;
@@ -600,28 +601,29 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				},
 			}];
 		case "checked_cast_branch":
-			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-			var value = this.rValueForInput(instruction.inputs[0], functionContext);
-			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
-			return [{
-				type: "IfStatement",
-				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
-				consequent: {
-					type: "BlockStatement",
-					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
-				},
-				alternate: {
-					type: "BlockStatement",
-					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
-				},
-			}];
 		case "checked_cast_addr_br":
+			console.log(instruction.inputs[0]);
+			var value = this.rValueForInput(instruction.inputs[0], functionContext);
+			console.log(value);
+			var typeName = instruction.type;
+			if (instruction.operation == "checked_cast_addr_br") {
+				value = unbox(value);
+				typeName = Parser.removePointer(typeName);
+			}
+			var type = this.findType(typeName);
+			var test;
+			if (type.personality == "protocol") {
+				test = member(value, literal(typeName));
+			} else if (instruction.exact) {
+				test = binary("==", member(value, literal("constructor")), identifier(typeName));
+			} else {
+				test = binary("instanceof", value, identifier(typeName));
+			}
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-			var value = unbox(this.rValueForInput(instruction.inputs[0], functionContext));
 			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
-				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
+				test: test,
 				consequent: {
 					type: "BlockStatement",
 					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),

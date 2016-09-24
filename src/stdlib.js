@@ -1,6 +1,7 @@
 const structType = fields => ({ personality: "struct", fields: fields });
 const enumType = cases => ({ personality: "enum", cases: cases });
 const classType = () => ({ personality: "class" });
+const protocolType = () => ({ personality: "protocol" });
 const field = (name, type) => ({ name: name, type: type });
 module.exports = {
 	"types": {
@@ -36,7 +37,8 @@ module.exports = {
 		"Array": structType([field("_buffer")]),
 		"Range": structType([field("startIndex"), field("endIndex")]),
 		"AnyHashable": structType([field("_box")]),
-		"_AnyHashableBox": classType(), // OMG, a protocol! We don't _really_ support protocols yet
+		"_HasCustomAnyHashableRepresentation": protocolType(),
+		"_AnyHashableBox": protocolType(),
 		"_ConcreteHashableBox": structType([field("_baseHashable")]),
 		"Optional": enumType(["none", "some"]),
 		"ImplicitlyUnwrappedOptional": enumType(["none", "some"]),
@@ -114,7 +116,7 @@ module.exports = {
 		"alignof": "(type) { return 1 }",
 		"ptrtoint_Word": "(pointer) { return 0 }",
 		"cmpxchg_seqcst_seqcst_RawPointer": "(target, expected, desired) { var oldValue = target[0]; var won = oldValue == expected; if (won) { target[0] = desired; } return won }",
-		"cmpxchg_seqcst_seqcst_Word": "(target, expected, desired) { var oldValue = target[\"ref\"][target[\"field\"]]; var success = oldValue === expected; if (success) { target[\"ref\"][target[\"field\"]] = desired; } return [ oldValue, success ]; }",
+		"cmpxchg_seqcst_seqcst_Word": "(target, expected, desired) { var oldValue = target.ref[target.field]; var success = oldValue === expected; if (success) { target.ref[target.field] = desired; } return [ oldValue, success ]; }",
 		"int_memcpy_RawPointer_RawPointer_Int64": "(dest, src, size, alignment, volatile) { }",
 		"_swift_stdlib_malloc_size": "(buffer) { return 0 }",
 		// Booleans
@@ -129,16 +131,17 @@ module.exports = {
 		// Functions
 		"onFastPath": "() {}",
 		"once": "(token, fn) { fn() }",
-		"swift_bufferAllocate": "(bufferType, size, alignMask) { return { \"ref\":[], \"field\":0 } }",
+		"swift_bufferAllocate": "(bufferType, size, alignMask) { return { ref:[], field:0 } }",
 		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
 		"_TTSfq4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": "(source, dest) { }", // TODO
 		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": "() { return this }",
 		"_TF10ObjectiveC22_convertObjCBoolToBoolFVS_8ObjCBoolSb": "(value) { return this }",
 		"_TF10ObjectiveC22_convertBoolToObjCBoolFSbVS_8ObjCBool": "(value) { return value }",
+		"_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType": "(value, result) {}",
 		// Int
 		"_TZFsoi1pFTSiSi_Si": "(left, right) { return (left + right) | 0 }",
 		// Generic numeric types
-		"_TZFsop1suRxs16SignedNumberTyperFxx": "(outNumber, inNumber) { outNumber[\"ref\"][outNumber[\"field\"]] = -inNumber[\"ref\"][inNumber[\"field\"]] }",
+		"_TZFsop1suRxs16SignedNumberTyperFxx": "(outNumber, inNumber) { outNumber.ref[outNumber.field] = -inNumber.ref[inNumber.field] }",
 		// Error handling
 		"willThrow": "(error) { throw error }",
 		"trap": "() { throw \"Runtime error!\" }",

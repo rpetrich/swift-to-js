@@ -87,7 +87,10 @@ function unwrapStrings(instructions) {
 	});
 }
 
-const isOptionalType = typeName => typeName == "Optional" || typeName == "ImplicitlyUnwrappedOptional";
+const isOptionalType = typeName => {
+	typeName = Parser.removePointer(typeName);
+	return typeName == "Optional" || typeName == "ImplicitlyUnwrappedOptional";
+}
 
 function unwrapOptionalEnums(instructions) {
 	instructions.forEach(instruction => {
@@ -152,6 +155,8 @@ function unwrapOptionalEnums(instructions) {
 		});
 		switch (instruction.operation) {
 			case "switch_enum":
+			case "switch_enum_addr":
+				// TODO: Apply proper path for switch_enum_addr
 				if (isOptionalType(instruction.type)) {
 					instruction.operation = "conditional_defined_branch";
 					var defaultBlock;
@@ -521,11 +526,6 @@ function optimizeTypes(types) {
 						type.personality = "class";
 					}
 					break;
-				case "enum":
-					if (isOptionalType(type.name)) {
-						delete types[key];
-					}
-					break;
 			}
 		}
 	}
@@ -533,6 +533,16 @@ function optimizeTypes(types) {
 	if (_StringCore) {
 		_StringCore.fields = [];
 		_StringCore.personality = "class";
+	}
+	var Optional = types["Optional"];
+	if (Optional) {
+		Optional.fields = [];
+		Optional.personality = "class";
+	}
+	var ImplicitlyUnwrappedOptional = types["ImplicitlyUnwrappedOptional"];
+	if (ImplicitlyUnwrappedOptional) {
+		ImplicitlyUnwrappedOptional.fields = [];
+		ImplicitlyUnwrappedOptional.personality = "class";
 	}
 }
 

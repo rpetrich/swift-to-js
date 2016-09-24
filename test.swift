@@ -112,25 +112,25 @@ public func description_of(option: Bool?) -> String {
 
 // Enums
 
-// public enum Divisible {
-//     case byNone
-//     case byThree
-//     case byFive
-//     case byBoth
-// }
+public enum Divisible: Int {
+    case byNone = 0
+    case byThree = 1
+    case byFive = 2
+    case byBoth = 3
+}
 
-// public func select_value(num: Int) -> Divisible {
-//     switch num % 15 {
-//         case 0:
-//             return Divisible.byBoth
-//         case 3, 6, 9, 12:
-//             return Divisible.byThree
-//         case 5, 10:
-//             return Divisible.byFive
-//         default:
-//             return Divisible.byNone
-//     }
-// }
+public func select_value(num: Int) -> Divisible {
+    switch num % 15 {
+        case 0:
+            return Divisible.byBoth
+        case 3, 6, 9, 12:
+            return Divisible.byThree
+        case 5, 10:
+            return Divisible.byFive
+        default:
+            return Divisible.byNone
+    }
+}
 
 // Structs
 

@@ -33,7 +33,7 @@ function splitNoParens(s) {
 }
 
 function basicNameForStruct(structName) {
-	return structName.match(/^\w+/)[0];
+	return structName.match(/^\*?\w+/)[0];
 }
 
 function Parser() {
@@ -47,6 +47,7 @@ function Parser() {
 }
 
 Parser.caseNameForEnum = fullEnumName => fullEnumName.match(/^\w+\.(\w+)\!/)[1];
+Parser.removePointer = typeName => typeName.match(/^\*?(.*)$/)[1];
 
 Parser.prototype.parseSil = function(line) {
 	var name = line.split(/:/)[0].split(/\s+/).filter(part => /^@/.test(part))[0].substring(1);
@@ -59,7 +60,7 @@ Parser.prototype.parseSil = function(line) {
 		convention: conventionMatch ? conventionMatch[1] : "swift"
 	};
 	if (!/\b(hidden|shared_external|private|global_init)\b/.test(line) && (declaration.convention != "method")) {
-		if (!/^\/\/ specialized\s/.test(this.lookbackLine)) {
+		if (!/^\/\/ (specialized|protocol\s witness)\s/.test(this.lookbackLine)) {
 			var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
 			if (beautifulMatch) {
 				declaration.beautifulName = beautifulMatch[2];
@@ -344,7 +345,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[2];
 				break;
 			case "global_addr":
-				var match = args.match(/^@(\w+)\s*:\s*\$\*(.*)/);
+				var match = args.match(/^@(\w+)\s*:\s*\$(.*)/);
 				input.globalName = match[1];
 				input.type = match[2];
 				break;
@@ -380,7 +381,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.interpretation = "contents";
 				break;
 			case "init_enum_data_addr":
-				var match = args.match(/^%(\d+)\s+:\s+\$\*(.*),\s+\#.*\.(\w+)\!/);
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*),\s+\#.*\.(\w+)\!/);
 				input.localNames = [match[1]];
 				input.type = match[2];
 				input.interpretation = "init_enum_data_addr";
@@ -397,7 +398,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				break;
 			case "select_enum":
 			case "select_enum_addr":
-				var match = args.match(/^%(\d+)\s+:\s+\$\*?(.*?),\s+(case .*?)$/);
+				var match = args.match(/^%(\d+)\s+:\s+\$?(.*?),\s+(case .*?)$/);
 				var localNames = [match[1]];
 				var cases = splitNoParens(match[3]).map(arg => {
 					var match = arg.match(/^case\s+\#(.*):\s+%(\d+)( : .*)?$/);
@@ -526,9 +527,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = "TODO";
 				break;
 			case "init_existential_addr":
-				var match = args.match(/%(\d+)\s+:\s+\$\*(.*),\s+\$(.*)/);
-				console.log(args);
-				console.log(match);
+				var match = args.match(/%(\d+)\s+:\s+\$(.*),\s+\$(.*)/);
 				input.localNames = [match[1]];
 				input.type = match[3];
 				input.interpretation = "contents";
@@ -590,20 +589,22 @@ Parser.prototype.parseInstruction = function (line, source) {
 			exact: !!match[1],
 		};
 	}
-	match = line.match(/^checked_cast_addr_br\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+\%(\d+)\s+:\s+\$\*(.*)\s+to\s+.*\s+in\s+\%(\d+)\s+:\s+\$\*(.*)\,\s+(\w+),\s+(\w+)/);
+	match = line.match(/^checked_cast_addr_br\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+\%(\d+)\s+:\s+\$(.*)\s+to\s+.*\s+in\s+\%(\d+)\s+:\s+\$(.*)\,\s+(\w+),\s+(\w+)/);
 	if (match) {
 		return {
 			operation: "checked_cast_addr_br",
+			source: source,
 			inputs: [simpleLocalContents(match[2], match[3], source), simpleLocalContents(match[4], match[5], source)],
 			trueBlock: { reference: match[6] },
 			falseBlock: { reference: match[7] },
 			type: match[5],
 		}
 	}
-	match = line.match(/^inject_enum_addr\s+\%(\d+)\s+:\s+\$\*(.*)\,\s+\#.*\.(.*)\!/);
+	match = line.match(/^inject_enum_addr\s+\%(\d+)\s+:\s+\$(.*)\,\s+\#.*\.(.*)\!/);
 	if (match) {
 		return {
 			operation: "inject_enum_addr",
+			source: source,
 			inputs: [simpleLocalContents(match[1], match[2], source)],
 			type: basicNameForStruct(match[2]),
 			caseName: match[3],
@@ -617,7 +618,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			inputs: [simpleLocalContents(match[1], undefined, source)],
 		};
 	}
-	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:\s+\$\*(.*)/);
+	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:\s+\$(.*)/);
 	if (match) {
 		return {
 			operation: "store",
@@ -639,12 +640,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 		var name = match[1];
 		return {
 			operation: "alloc_global",
+			source: source,
 			name: name,
 			type: this.globals[name].globalType,
 			inputs: [],
 		};
 	}
-	match = line.match(/^(switch_enum(_addr)?)\s+\%(\d+)\s+:\s+\$\*?(.*?),\s+(case .*?)$/);
+	match = line.match(/^(switch_enum(_addr)?)\s+\%(\d+)\s+:\s+\$?(.*?),\s+(case .*?)$/);
 	if (match) {
 		var cases = splitNoParens(match[5]).map(arg => {
 			var match = arg.match(/^case\s+\#(.*):\s+(.*)$/);

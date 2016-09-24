@@ -74,6 +74,14 @@ if (swift.string_length) {
 	assert.ok(swift.string_length("Hello") === 5, "string_length(\"Hello\")");
 }
 
+if (swift.select_value) {
+	assert.ok(swift.select_value(0)[0] == 3, "select_value(0)");
+	assert.ok(swift.select_value(2)[0] == 0, "select_value(2)");
+	assert.ok(swift.select_value(3)[0] == 1, "select_value(3)");
+	assert.ok(swift.select_value(5)[0] == 2, "select_value(5)");
+	assert.ok(swift.select_value(15)[0] == 3, "select_value(15)");
+}
+
 if (swift.getOrigin) {
 	assert.ok(swift.getOrigin().x === 0, "getOrigin().x");
 	assert.ok(swift.getOrigin().y === 0, "getOrigin().y");
