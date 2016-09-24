@@ -87,12 +87,14 @@ function unwrapStrings(instructions) {
 	});
 }
 
+const isOptionalType = typeName => typeName == "Optional" || typeName == "ImplicitlyUnwrappedOptional";
+
 function unwrapOptionalEnums(instructions) {
 	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
 			switch (input.interpretation) {
 				case "enum":
-					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+					if (isOptionalType(input.type)) {
 						if (input.caseName.toLowerCase() == "some") {
 							input.interpretation = "contents";
 						} else {
@@ -103,13 +105,14 @@ function unwrapOptionalEnums(instructions) {
 					}
 					break;
 				case "unchecked_enum_data":
-					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+					if (isOptionalType(input.type)) {
 						input.interpretation = "contents";
 						delete input.type;
 					}
 					break;
 				case "select_enum":
-					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+				case "select_enum_addr":
+					if (isOptionalType(input.type)) {
 						var defaultLocal;
 						var trueLocal;
 						var falseLocal;
@@ -127,23 +130,29 @@ function unwrapOptionalEnums(instructions) {
 						});
 						delete input.cases;
 						delete input.type;
-						input.interpretation = "select_value";
-						if ((trueLocal | defaultLocal) < (falseLocal | defaultLocal)) {
-							input.values = [{}, {value: undefined}];
-						} else {
-							input.values = [{value: undefined}, {}];
+						input.interpretation = input.interpretation == "select_enum" ? "select_defined" : "select_defined_addr";
+						if ((trueLocal | defaultLocal) > (falseLocal | defaultLocal)) {
+							// Shuffle the input local names such that the "some" local is first
+							input.localNames = [input.localNames[0], input.localNames[2], input.localNames[1]];
 						}
 					}
+					break;
 				case "init_enum_data_addr":
-					if (input.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+					if (isOptionalType(input.type)) {
 						throw new Error("Cannot use init_enum_data_addr on an " + input.type + "!");
+					}
+					break;
+				case "unchecked_take_enum_data_addr":
+					if (isOptionalType(input.type)) {
+						input.interpretation = "contents";
+						//throw new Error("Cannot use unchecked_take_enum_data_addr on an " + input.type + "!");
 					}
 					break;
 			}
 		});
 		switch (instruction.operation) {
 			case "switch_enum":
-				if (instruction.type == "Optional" || input.type == "ImplicitlyUnwrappedOptional") {
+				if (isOptionalType(instruction.type)) {
 					instruction.operation = "conditional_defined_branch";
 					var defaultBlock;
 					var trueBlock;
@@ -163,6 +172,24 @@ function unwrapOptionalEnums(instructions) {
 					instruction.trueBlock = trueBlock || defaultBlock;
 					instruction.falseBlock = falseBlock || defaultBlock;
 					delete instruction.cases;
+				}
+				break;
+			case "inject_enum_addr":
+				if (isOptionalType(instruction.type)) {
+					instruction.operation = "store";
+					if (instruction.caseName.toLowerCase() == "some") {
+						// Normally would delete, but since can be immediately followed by select_enum_addr, we need to put _some_ value in
+						instruction.inputs.unshift({
+							localNames: [],
+							interpretation: "integer_literal",
+							value: 0,
+						});
+					} else {
+						instruction.inputs.unshift({
+							localNames: [],
+							interpretation: "undefined_literal",
+						});
+					}
 				}
 				break;
 		}
@@ -276,7 +303,9 @@ var blockReferencesForInstructionTypes = {
 	"conditional_defined_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
+	"switch_enum_addr": ins => ins.cases.map(c => c.basicBlock),
 	"checked_cast_branch": ins => [ins.trueBlock, ins.falseBlock],
+	"checked_cast_addr_br": ins => [ins.trueBlock, ins.falseBlock],
 };
 
 function newLocalName(declaration, basicBlock) {
@@ -460,8 +489,9 @@ function optimizeTypes(types) {
 			var type = types[key];
 			switch (type.personality) {
 				case "struct":
-					if (type.fields.length == 0) {
-						delete types[key];
+					if (type.fields.length == 1) {
+						type.fields = [];
+						type.personality = "class";
 					}
 					break;
 				case "enum":

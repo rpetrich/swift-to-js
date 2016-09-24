@@ -300,15 +300,15 @@ Parser.prototype.parseInstruction = function (line, source) {
 				break;
 			case "alloc_stack":
 				var match = args.match(/^\$(.*)/);
-				input.type = match[1];
+				input.type = basicNameForStruct(match[1]);
 				break;
 			case "alloc_box":
 				var match = args.match(/^\$(.*)?,/);
-				input.type = match[1];
+				input.type = basicNameForStruct(match[1]);
 				break;
 			case "alloc_ref":
 				var match = args.match(/^\$(.*)/)
-				input.type = match[1];
+				input.type = basicNameForStruct(match[1]);
 				break;
 			case "project_box":
 				var match = args.match(/^%(\w+)\s+:\s+\$(.*)/);
@@ -316,7 +316,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				// 	localName: match[1]
 				// }];
 				input.localNames = [match[1]];
-				input.type = match[1];
+				input.type = basicNameForStruct(match[2]);
 				break;
 			case "is_unique":
 				input.value = "false";
@@ -500,7 +500,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				var match = args.match(/^.*,\s+\#(.*),\s+%(\d+)\s+:\s+(.*\$\@convention\((\w+)\))?/);
 				input.localNames = [match[2]];
 				input.type = "TODO";
-				input.entry = [match[1]];
+				input.entry = match[1];
 				input.convention = match[4] || "swift";
 				input.interpretation = "class_method";
 				break;
@@ -602,9 +602,9 @@ Parser.prototype.parseInstruction = function (line, source) {
 	match = line.match(/^inject_enum_addr\s+\%(\d+)\s+:\s+\$\*(.*)\,\s+\#.*\.(.*)\!/);
 	if (match) {
 		return {
-			operation: "intect_enum_addr",
+			operation: "inject_enum_addr",
 			inputs: [simpleLocalContents(match[1], match[2])],
-			type: match[2],
+			type: basicNameForStruct(match[2]),
 			caseName: match[3],
 		}
 	}
@@ -728,24 +728,35 @@ Parser.prototype.parseVTableMapping = function (line) {
 }
 
 Parser.prototype.parseStruct = function (line) {
-	var match = line.match(/^(public\s+)?(final\s+)?(\w+)\s+(\w+)/);
-	this.currentTypeName = match[4];
+	var match = line.match(/^(public\s+)?(final\s+)?(internal\s+)?(\w+)\s+(\w+)/);
+	this.currentTypeName = match[5];
 	this.currentTypeData = {
-		semantics: "struct",
+		personality: "struct",
 		fields: [],
 	};
 };
 
 Parser.prototype.parseClass = function (line) {
-	var match = line.match(/^(public\s+)?(final\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
-	this.currentTypeName = match[4];
+	var match = line.match(/^(public\s+)?(final\s+)?(internal\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
+	this.currentTypeName = match[5];
 	this.currentTypeData = {
-		semantics: "class",
-		superclass: match[6] || undefined,
+		personality: "class",
+		superclass: match[7] || undefined,
 		fields: [],
-		beautifulName: match[1] ? match[4] : undefined,
+		beautifulName: match[1] ? match[5] : undefined,
 	};
 };
+
+Parser.prototype.parseEnum = function (line) {
+	var match = line.match(/^(public\s+)?(final\s+)?(internal\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
+	this.currentTypeName = match[5];
+	this.currentTypeData = {
+		personality: "enum",
+		superclass: match[7] || undefined,
+		cases: [],
+		beautifulName: match[1] ? match[5] : undefined,
+	};
+}
 
 Parser.prototype.parseTypeData = function (line) {
 	if (!/\{$/.test(line)) {
@@ -753,6 +764,12 @@ Parser.prototype.parseTypeData = function (line) {
 		if (match) {
 			var fieldName = match[1];
 			this.currentTypeData.fields.push({ name: fieldName, type: match[2] });
+		} else {
+			match = line.match(/\bcase\s+(\w+)\b/);
+			if (match) {
+				var caseName = match[1];
+				this.currentTypeData.cases.push(caseName);
+			}
 		}
 	}
 }
@@ -760,9 +777,9 @@ Parser.prototype.parseTypeData = function (line) {
 Parser.prototype.addLine = function(originalLine) {
 	line = originalLine.replace(/\s*\/\/.*/, "");
 	if (line.length != 0) {
-		var directive = line.match(/^(public\s+)?(final\s+)?(\w+)\b/);
+		var directive = line.match(/^(public\s+)?(final\s+)?(internal\s)?(\w+)\b/);
 		if (directive) {
-			directive = directive[3];
+			directive = directive[4];
 			switch (directive) {
 				case "sil_stage":
 					// Do nothing with sil_stage directives
@@ -784,6 +801,9 @@ Parser.prototype.addLine = function(originalLine) {
 					break;
 				case "class":
 					this.parseClass(line);
+					break;
+				case "enum":
+					this.parseEnum(line);
 					break;
 				default:
 					if (/^\w+(\(.*\))?:$/.test(line)) {

@@ -95,6 +95,7 @@ const unboxField = boxed => ({
 	computed: false,
 });
 const unbox = boxed => member(unboxRef(boxed), unboxField(boxed));
+const unboxIfAddr = (operation, node) => /_addr$/.test(operation) ? unbox(node) : node;
 
 const unary = (operator, value) => ({
 	type: "UnaryExpression",
@@ -261,10 +262,23 @@ function findBasicBlock(blocks, descriptor) {
 	throw new Error("Neither a reference nor an inline block!");
 }
 
+CodeGen.prototype.findType = function(name, personality) {
+	var type = this.types[name];
+	if (!type) {
+		throw new Error("Unable to find type: " + name);
+	}
+	if (personality) {
+		if (type.personality !== personality) {
+			throw new Error("Expected " + name + " to be a " + personality + ", is a " + type.personality + " instead!");
+		}
+	}
+	return type;
+}
+
 CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName) {
 	var type = this.types[typeName];
 	if (type) {
-		switch (type.semantics) {
+		switch (type.personality) {
 			case "struct":
 				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type)), []);
 			case "enum":
@@ -276,16 +290,16 @@ CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName) {
 
 CodeGen.prototype.nodeForAllocDeep = function (type) {
 	if (type) {
-		switch (type.semantics) {
+		switch (type.personality) {
 			case "struct":
 				var properties = [];
 				type.fields.forEach(field => {
-					var subNode = this.nodeForAllocDeep(this.types[field.name]);
+					var subNode = this.nodeForAllocDeep(this.types[field.type]);
 					if (subNode) {
 						properties.push({
 							type: "Property",
 							key: identifier(field.name),
-							kind: init,
+							kind: "init",
 							value: subNode
 						});
 					}
@@ -308,14 +322,10 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "undefined_literal":
 			return unary("void", literal(0));
 		case "enum":
-			var enumName = input.type;
-			var type = this.types[enumName];
-			if (!type) {
-				throw new Error("Unable to find enum: " + enumName);
-			}
+			var type = this.findType(input.type, "enum");
 			var index = type.cases.indexOf(input.caseName);
 			if (index == -1) {
-				throw new Error("Unable to find case: " + input.caseName + " in " + enumName);
+				throw new Error("Unable to find case: " + input.caseName + " in " + input.type);
 			}
 			var elements = [literal(index)];
 			if (input.localNames.length) {
@@ -323,19 +333,15 @@ CodeGen.prototype.rValueForInput = function(input) {
 			}
 			return array(elements);
 		case "struct":
-			var structName = input.type;
-			var structType = this.types[structName];
-			if (!structType) {
-				throw new Error("No type for " + structName);
-			}
-			if (structType.fields.length != input.localNames.length) {
-				throw new Error("Definition of " + structName + " does specify " + input.localNames.length + " fields: " + structType.fields.map(field => field.name).join(", "));
+			var type = this.findType(input.type, "struct");
+			if (type.fields.length != input.localNames.length) {
+				throw new Error("Definition of " + input.type + " specified " + input.localNames.length + " fields: " + type.fields.map(field => field.name).join(", "));
 			}
 			return {
 				type: "ObjectExpression",
 				properties: input.localNames.map((localName, index) => ({
 					type: "Property",
-					key: literal(structType.fields[index].name),
+					key: literal(type.fields[index].name),
 					kind: "init",
 					value: mangledLocal(localName),
 				}))
@@ -375,15 +381,13 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "partial_apply":
 			throw new Error("partial_apply not supported!");
 		case "alloc_stack":
-			console.log(input);
-			var type = this.types[instruction.type];
+			var type = this.findType(input.type);
 			var node = this.nodeForAllocDeep(type);
 			return box(array(input.localNames.map(localName => mangledLocal(localName))), literal(0));
 		case "alloc_ref":
 			return newExpression(identifier(input.type), []);
 		case "alloc_box":
-			console.log(input);
-			var type = this.types[instruction.type];
+			var type = this.findType(input.type);
 			var node = this.nodeForAllocDeep(type);
 			return box(array(node ? [node] : []), literal(0));
 		case "project_box":
@@ -393,7 +397,8 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "ref_element_addr":
 			return box(mangledLocal(input.localNames[0]), literal(input.fieldName));
 		case "init_enum_data_addr":
-			return box(unbox(mangledLocal), literal(1));
+			// TODO: Call nodeForAllocDeep
+			return box(unbox(mangledLocal(input.localNames[0])), literal(1));
 		case "global_addr":
 			var global = this.globals[input.globalName];
 			if (global.beautifulName) {
@@ -404,26 +409,36 @@ CodeGen.prototype.rValueForInput = function(input) {
 		case "load":
 			return unbox(mangledLocal(input.localNames[0]));
 		case "unchecked_enum_data":
-			return {
-				type: "MemberExpression",
-				object: mangledLocal(input.localNames[0]),
-				property: literal(1),
-				computed: true,
-			};
+			return member(mangledLocal(input.localNames[0]), literal(1));
+		case "unchecked_take_enum_data_addr":
+			return box(unbox(mangledLocal(input.localNames[0])), literal(1));
 		case "select_enum":
-			throw new Error("select_enum is not supported yet!");
-		case "select_value":
-			if (input.values.length == 2) {
-				var comparison;
-				if ("value" in input.values[0]) {
-					comparison = binary("===", mangledLocal(input.localNames[0]), literal(input.values[0].value));
-				} else {
-					comparison = binary("!==", mangledLocal(input.localNames[0]), literal(input.values[1].value));
-				}
-				return ternary(comparison, mangledLocal(input.localNames[1]), mangledLocal(input.localNames[2]));
-			} else {
-				throw new Error("select_value with more than two arguments is not supported yet!");
+		case "select_enum_addr":
+			var value = unboxIfAddr(input.interpretation, mangledLocal(input.localNames[0]));
+			var caseField = member(value, literal(0));
+			var type = this.findType(input.type, "enum");
+			var caseLocals = input.localNames.slice(1);
+			var elseIndex = input.cases.findIndex(descriptor => !"case" in descriptor);
+			if (elseIndex == -1) {
+				elseIndex = input.cases.length - 1;
 			}
+			var elseValue = mangledLocal(caseLocals[elseIndex]);
+			caseLocals.splice(elseIndex, 1);
+			var cases = input.cases.slice();
+			cases.splice(elseIndex, 1);
+			return cases.reduceRight((result, descriptor, index) => ternary(binary("==", caseField, literal(type.cases.indexOf(Parser.caseNameForEnum(descriptor.case)))), mangledLocal(caseLocals[index]), result), elseValue);
+		case "select_value":
+			var valueLocal = mangledLocal(input.localNames[0]);
+			var result = mangledLocal(input.localNames[input.localNames.length - 1]);
+			var localPairs = input.localNames.slice(1, input.localNames.length - 1).reverse();
+			for (var i = 0; i < localPairs.length; i += 2) {
+				result = ternary(binary("===", valueLocal, mangledLocal(localPairs[i + 1])), localPairs[i], result);
+			}
+			return result;
+		case "select_defined":
+		case "select_defined_addr":
+			var value = unboxIfAddr(input.interpretation, mangledLocal(input.localNames[0]));
+			return ternary(binary("!==", value, literal(undefined)), mangledLocal(input.localNames[1]), mangledLocal(input.localNames[2]));
 		case "index_raw_pointer":
 		case "index_addr":
 			var address = mangledLocal(input.localNames[0]);
@@ -464,6 +479,11 @@ CodeGen.prototype.lValueForInput = function (input) {
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		case "global_addr":
 			return this.nodeForGlobal(input.globalName);
+		case "alloc_stack":
+			// Why do we need this?
+			var type = this.findType(input.type);
+			var node = this.nodeForAllocDeep(type);
+			return member(array(input.localNames.map(localName => mangledLocal(localName))), literal(0));
 	}
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
@@ -535,6 +555,22 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
+		case "checked_cast_addr_br":
+			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
+			var value = unbox(this.rValueForInput(instruction.inputs[0]));
+			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
+			return [{
+				type: "IfStatement",
+				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
+				consequent: {
+					type: "BlockStatement",
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
+				},
+				alternate: {
+					type: "BlockStatement",
+					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
+				},
+			}];
 		case "conditional_defined_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 			var value = this.rValueForInput(instruction.inputs[0]);
@@ -552,7 +588,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				},
 			}];
 		case "alloc_global":
-			var type = this.types[instruction.type];
+			var type = this.findType(instruction.type);
 			var node = this.nodeForAllocDeep(type);
 			if (node) {
 				return [expressionStatement(assignment(this.nodeForGlobal(instruction.name), node))]
@@ -562,15 +598,18 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "copy_addr":
 			var lValue = this.lValueForInput(instruction.inputs[1]);
 			var rValue = this.rValueForInput(instruction.inputs[0]);
-			return this.nodesForStoreDeep(lValue, rValue, instruction.type);
+			var result = this.nodesForStoreDeep(lValue, rValue, instruction.type);
+			return result;
+		case "inject_enum_addr":
+			var type = this.findType(instruction.type, "enum");
+			return [expressionStatement(assignment(member(this.lValueForInput(instruction.inputs[0]), literal(0)), literal(type.cases.indexOf(instruction.caseName))))];
 		case "switch_enum":
+		case "switch_enum_addr":
 			var args = instruction.cases;
-			var enumName = instruction.type;
-			var enumLayout = this.types[enumName].cases;
-			if (!enumLayout) {
-				throw "Unable to find enum: " + enumName;
-			}
-			var value = member(this.rValueForInput(instruction.inputs[0]), literal(0));
+			var type = this.findType(instruction.type, "enum");
+			var value = unboxIfAddr(instruction.operation, this.rValueForInput(instruction.inputs[0]));
+			var caseField = member(value, literal(0));
+			var valueField = member(value, literal(1));
 			var resultNode;
 			var currentNode;
 			var elseCase;
@@ -579,12 +618,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 				if (typeof caseName == "undefined") {
 					elseCase = caseName;
 				} else {
+					var targetBlock = findBasicBlock(siblingBlocks, enumCase.basicBlock);
+					targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 					var newNode = {
 						type: "IfStatement",
-						test: binary("==", value, literal(enumLayout.indexOf(caseName))),
+						test: binary("==", caseField, literal(type.cases.indexOf(caseName))),
 						consequent: {
 							type: "BlockStatement",
-							body: this.branchToBlockNodes(enumCase.basicBlock, siblingBlocks, functionContext),
+							body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), valueField])).concat(this.branchToBlockNodes(enumCase.basicBlock, siblingBlocks, functionContext))
 						},
 					};
 					if (currentNode) {
@@ -813,7 +854,7 @@ CodeGen.prototype.consumeVTable = function(classDeclaration) {
 			this.export(classDeclaration.name, classDeclaration.beautifulName);
 		}
 		// Declare superclass, if any
-		var type = this.types[classDeclaration.name];
+		var type = this.findType(classDeclaration.name, "class");
 		var prototypeIdentifier = identifier(classDeclaration.name + "__prototype");
 		var prototypeAssignment;
 		if (type && type.superclass) {

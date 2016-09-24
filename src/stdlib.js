@@ -1,5 +1,6 @@
 const structType = fields => ({ personality: "struct", fields: fields });
 const enumType = cases => ({ personality: "enum", cases: cases });
+const classType = () => ({ personality: "class" });
 const field = (name, type) => ({ name: name, type: type });
 module.exports = {
 	"types": {
@@ -34,6 +35,9 @@ module.exports = {
 		"_StringBufferIVars": structType([field("usedEnd"), field("capacityAndElementShift")]),
 		"Array": structType([field("_buffer")]),
 		"Range": structType([field("startIndex"), field("endIndex")]),
+		"AnyHashable": structType([field("_box")]),
+		"_AnyHashableBox": classType(), // OMG, a protocol! We don't _really_ support protocols yet
+		"_ConcreteHashableBox": structType([field("_baseHashable")]),
 		"Optional": enumType(["none", "some"]),
 		"ImplicitlyUnwrappedOptional": enumType(["none", "some"]),
 	},
@@ -52,6 +56,7 @@ module.exports = {
 		// "usub_with_overflow_Int32": "(left, right, overflow_check) { var result = left - right; var truncated = result | 0; return [truncated, result != truncated] }", // TODO: Implement unsigned
 		// "smul_with_overflow_Int32": "(left, right, overflow_check) { var result = left * right; var truncated = result | 0; return [truncated, result != truncated] }",
 		"sdiv_Int32": "(left, right) { return (left / right) | 0 }",
+		"srem_Int32": "(left, right) { return left % right }", // Returns modulus, not remainder. Close enough for now
 		"cmp_sgt_Int32": "(left, right) { return left > right }",
 		"cmp_sge_Int32": "(left, right) { return left >= right }",
 		"cmp_slt_Int32": "(left, right) { return left < right }",

@@ -158,9 +158,29 @@ public func getOrigin() -> Point {
     return origin
 }
 
+public func getMaskedOrigin() -> Point {
+    var result = origin;
+    result.x = 0
+    return result;
+}
+
+public func setOrigin(newValue: Point) {
+    origin = newValue
+}
+
 public func distance(first: Point, second: Point) -> Double {
     let delta = Point(x: first.x - second.x, y: first.y - second.y)
     return sqrt(delta.x * delta.x + delta.y * delta.y)
+}
+
+public var foo: Double = 0
+
+public func getFoo() -> Double {
+    return foo
+}
+
+public func setFoo(newValue: Double) {
+    foo = newValue
 }
 
 // Compound Structs
@@ -188,7 +208,14 @@ public struct Rect {
     var size: Size
 }
 
-public var zeroRect = Rect(origin: Point(), size: Size())
+public func offset(point: Rect, offset: Size) -> Rect {
+    var result = point
+    result.origin.x += offset.width
+    result.origin.y += offset.height
+    return result
+}
+
+var zeroRect = Rect(origin: Point(), size: Size())
 
 public func getZeroRect() -> Rect {
     return zeroRect;
@@ -214,7 +241,7 @@ public func updateValue(holder: IntHolder, value: Int) {
     holder.value = value;
 }
 
-public final class IntHolderSubclass : IntHolder {
+final class IntHolderSubclass : IntHolder {
     var wasSet: Bool = false
     override var value: Int {
         didSet {
