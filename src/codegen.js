@@ -115,6 +115,11 @@ const ternary = (test, consequent, alternate) => ({
 	consequent: consequent,
 });
 
+const sequence = expressions => ({
+	type: "SequenceExpression",
+	expressions: expressions,
+});
+
 const assignment = (left, right) => ({
 	type: "AssignmentExpression",
 	operator: "=",
@@ -330,16 +335,24 @@ CodeGen.prototype.nodeForAllocDeep = function (type) {
 	}
 }
 
-CodeGen.prototype.nodeForCopyDeep = function (source, type) {
+CodeGen.prototype.nodeForCopyDeep = function (source, type, functionContext) {
 	if (type) {
 		switch (type.personality) {
 			case "struct":
-				return { type: "ObjectExpression", properties: type.fields.map(field => ({
-							type: "Property",
-							key: literal(field.name),
-							kind: "init",
-							value: this.nodeForCopyDeep(member(source, literal(field.name)), this.types[field.type])
-						})) };
+				const copyFrom = source => ({
+					type: "ObjectExpression",
+					properties: type.fields.map(field => ({
+						type: "Property",
+						key: literal(field.name),
+						kind: "init",
+						value: this.nodeForCopyDeep(member(source, literal(field.name)), this.types[field.type], functionContext),
+					}))
+				});
+				if (type.fields.length > 1) {
+					var temp = tempVariable(functionContext);
+					return sequence([assignment(temp, source), copyFrom(temp)]);
+				}
+				return copyFrom(source);
 			case "enum":
 				throw new Error("nodeForCopyDeep not implemented for enums!");
 		}
@@ -347,10 +360,10 @@ CodeGen.prototype.nodeForCopyDeep = function (source, type) {
 	return source;
 }
 
-CodeGen.prototype.rValueForInput = function(input) {
+CodeGen.prototype.rValueForInput = function(input, functionContext) {
 	switch (input.interpretation) {
 		case "contents":
-			return this.nodeForCopyDeep(mangledLocal(input.localNames[0]), this.types[input.type]);
+			return this.nodeForCopyDeep(mangledLocal(input.localNames[0]), this.types[input.type], functionContext);
 		case "integer_literal":
 		case "float_literal":
 		case "string_literal":
@@ -391,9 +404,9 @@ CodeGen.prototype.rValueForInput = function(input) {
 			var fieldName = input.fieldName;
 			var field = this.findType(input.type).fields.find(field => field.name == fieldName);
 			var fieldType = field ? this.types[field.type] : undefined;
-			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(fieldName)), fieldType);
+			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(fieldName)), fieldType, functionContext);
 		case "tuple_extract":
-			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0)), this.types[input.type]);
+			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0)), this.types[input.type], functionContext);
 		case "builtin":
 			var builtinName = input.builtinName;
 			if (!this.writeBuiltIn(builtinName)) {
@@ -446,7 +459,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 				return box(identifier(input.globalName), literal(0));
 			}
 		case "load":
-			return this.nodeForCopyDeep(unbox(mangledLocal(input.localNames[0])), this.types[input.type]);
+			return this.nodeForCopyDeep(unbox(mangledLocal(input.localNames[0])), this.types[input.type], functionContext);
 		case "unchecked_enum_data":
 			return member(mangledLocal(input.localNames[0]), literal(1));
 		case "unchecked_take_enum_data_addr":
@@ -501,7 +514,7 @@ CodeGen.prototype.nodeForGlobal = function (globalName) {
 	}
 }
 
-CodeGen.prototype.lValueForInput = function (input) {
+CodeGen.prototype.lValueForInput = function (input, functionContext) {
 	switch (input.interpretation) {
 		case "contents":
 			return unbox(mangledLocal(input.localNames[0]));
@@ -538,7 +551,7 @@ CodeGen.prototype.lValueForInput = function (input) {
 CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, siblingBlocks, functionContext) {
 	switch (instruction.operation) {
 		case "assignment":
-			var init = this.rValueForInput(instruction.inputs[0]);
+			var init = this.rValueForInput(instruction.inputs[0], functionContext);
 			addVariable(functionContext, mangledLocal(instruction.destinationLocalName));
 			return [expressionStatement(assignment(mangledLocal(instruction.destinationLocalName), init))];
 		case "return":
@@ -550,7 +563,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}
 			return [{
 				type: "ReturnStatement",
-				argument: this.rValueForInput(input),
+				argument: this.rValueForInput(input, functionContext),
 			}];
 		case "branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
@@ -564,7 +577,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			var conflictingArguments = [];
 			targetBlock.arguments.forEach((arg, index) => {
 				addVariable(functionContext, mangledLocal(arg.localName));
-				var argumentDeclaration = [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])];
+				var argumentDeclaration = [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)];
 				if (instruction.inputs.some(input => input.localNames.indexOf(arg.localName) != -1)) {
 					conflictingArguments.push(argumentDeclaration);
 				} else {
@@ -576,7 +589,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "conditional_branch":
 			return [{
 				type: "IfStatement",
-				test: this.rValueForInput(instruction.inputs[0]),
+				test: this.rValueForInput(instruction.inputs[0], functionContext),
 				consequent: {
 					type: "BlockStatement",
 					body: this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext),
@@ -588,14 +601,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}];
 		case "checked_cast_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-			var value = this.rValueForInput(instruction.inputs[0]);
+			var value = this.rValueForInput(instruction.inputs[0], functionContext);
 			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
 				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
 				consequent: {
 					type: "BlockStatement",
-					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
@@ -604,14 +617,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}];
 		case "checked_cast_addr_br":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-			var value = unbox(this.rValueForInput(instruction.inputs[0]));
+			var value = unbox(this.rValueForInput(instruction.inputs[0], functionContext));
 			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
 				test: instruction.exact ? binary("==", member(value, literal("constructor")), identifier(instruction.type)) : binary("instanceof", value, identifier(instruction.type)),
 				consequent: {
 					type: "BlockStatement",
-					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
@@ -620,14 +633,14 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}];
 		case "conditional_defined_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
-			var value = this.rValueForInput(instruction.inputs[0]);
+			var value = this.rValueForInput(instruction.inputs[0], functionContext);
 			targetBlock.arguments.forEach(arg => addVariable(functionContext, mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
 				test: binary("!==", value, literal(undefined)),
 				consequent: {
 					type: "BlockStatement",
-					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index])])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
+					body: assignments(targetBlock.arguments.map((arg, index) => [mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
 				},
 				alternate: {
 					type: "BlockStatement",
@@ -643,21 +656,21 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			return [];
 		case "store":
 		case "copy_addr":
-			var lValue = this.lValueForInput(instruction.inputs[1]);
-			var rValue = this.rValueForInput(instruction.inputs[0]);
+			var lValue = this.lValueForInput(instruction.inputs[1], functionContext);
+			var rValue = this.rValueForInput(instruction.inputs[0], functionContext);
 			if (instruction.initializes) {
-				return [expressionStatement(assignment(lValue, this.nodeForCopyDeep(rValue, instruction.type)))];
+				return [expressionStatement(assignment(lValue, this.nodeForCopyDeep(rValue, instruction.type, functionContext)))];
 			} else {
 				return this.nodesForStoreDeep(lValue, rValue, instruction.type, functionContext);
 			}
 		case "inject_enum_addr":
 			var type = this.findType(instruction.type, "enum");
-			return [expressionStatement(assignment(member(this.lValueForInput(instruction.inputs[0]), literal(0)), literal(type.cases.indexOf(instruction.caseName))))];
+			return [expressionStatement(assignment(member(this.lValueForInput(instruction.inputs[0], functionContext), literal(0)), literal(type.cases.indexOf(instruction.caseName))))];
 		case "switch_enum":
 		case "switch_enum_addr":
 			var args = instruction.cases;
 			var type = this.findType(instruction.type, "enum");
-			var value = unboxIfAddr(instruction.operation, this.rValueForInput(instruction.inputs[0]));
+			var value = unboxIfAddr(instruction.operation, this.rValueForInput(instruction.inputs[0], functionContext));
 			var caseField = member(value, literal(0));
 			var valueField = member(value, literal(1));
 			var resultNode;
@@ -716,7 +729,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			this.writeBuiltIn("trap");
 			return [{
 				type: "IfStatement",
-				test: this.rValueForInput(instruction.inputs[0]),
+				test: this.rValueForInput(instruction.inputs[0], functionContext),
 				consequent: expressionStatement(call(identifier("trap"), [])),
 			}];
 		case "unreachable":
@@ -725,7 +738,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "throw":
 			return [{
 				type: "ThrowStatement",
-				argument: this.rValueForInput(instruction.inputs[0]),
+				argument: this.rValueForInput(instruction.inputs[0], functionContext),
 			}];
 		// default:
 		// 	// TODO: Add comment
