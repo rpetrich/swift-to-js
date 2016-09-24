@@ -303,6 +303,7 @@ CodeGen.prototype.nodesForStoreDeep = function (dest, source, typeName, function
 				}
 				return type.fields.reduce((nodes, field) => nodes.concat(this.nodesForStoreDeep(member(dest, literal(field.name)), member(source, literal(field.name)), field.type, functionContext)), nodes);
 			case "enum":
+				throw new Error("nodesForStoreDeep not implemented for enums!");
 				return [expressionStatement(assignment(member(dest, literal(0)), member(source, literal(0))))];
 		}
 	}
@@ -330,6 +331,23 @@ CodeGen.prototype.nodeForAllocDeep = function (type) {
 				return array([]);
 		}
 	}
+}
+
+CodeGen.prototype.nodeForCopyDeep = function (source, type) {
+	if (type) {
+		switch (type.personality) {
+			case "struct":
+				return { type: "ObjectExpression", properties: type.fields.map(field => ({
+							type: "Property",
+							key: identifier(field.name),
+							kind: "init",
+							value: this.nodeForCopyDeep(member(source, identifier(field.name)))
+						})) };
+			case "enum":
+				throw new Error("nodeForCopyDeep not implemented for enums!");
+		}
+	}
+	return source;
 }
 
 CodeGen.prototype.rValueForInput = function(input) {
@@ -499,7 +517,15 @@ CodeGen.prototype.lValueForInput = function (input) {
 		case "tuple_extract":
 			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
 		case "global_addr":
-			return this.nodeForGlobal(input.globalName);
+			var result = this.nodeForGlobal(input.globalName);
+			if (input.alloc) {
+				var type = this.findType(input.type);
+				var node = this.nodeForAllocDeep(type);
+				if (node) {
+					return assignment(result, node);
+				}
+			}
+			return result;
 		case "alloc_stack":
 			// Why do we need this?
 			var type = this.findType(input.type);
@@ -619,8 +645,11 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "copy_addr":
 			var lValue = this.lValueForInput(instruction.inputs[1]);
 			var rValue = this.rValueForInput(instruction.inputs[0]);
-			var result = this.nodesForStoreDeep(lValue, rValue, instruction.type, functionContext);
-			return result;
+			if (instruction.initializes) {
+				return [expressionStatement(assignment(lValue, this.nodeForCopyDeep(rValue, instruction.type)))];
+			} else {
+				return this.nodesForStoreDeep(lValue, rValue, instruction.type, functionContext);
+			}
 		case "inject_enum_addr":
 			var type = this.findType(instruction.type, "enum");
 			return [expressionStatement(assignment(member(this.lValueForInput(instruction.inputs[0]), literal(0)), literal(type.cases.indexOf(instruction.caseName))))];

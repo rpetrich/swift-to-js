@@ -343,7 +343,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = "TODO";
 				break;
 			case "global_addr":
-				var match = args.match(/^@(\w+)\s*:\s*(.*)/);
+				var match = args.match(/^@(\w+)\s*:\s*\$\*(.*)/);
 				input.globalName = match[1];
 				input.type = match[2];
 				break;

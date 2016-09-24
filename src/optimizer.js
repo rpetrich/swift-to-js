@@ -285,6 +285,32 @@ function fuseAssignments(instructions, downstreamInstructions) {
 	}
 }
 
+function fuseGlobalAllocations(instructions, downstreamInstructions) {
+	var allocIndex = -1;
+	while ((allocIndex = instructions.findIndex((instruction, i) => (i > allocIndex) && instruction.operation == "alloc_global")) != -1) {
+		var allocInstruction = instructions[allocIndex];
+		var assignmentInstruction = instructions.find((instruction, i) => {
+			if (i > allocIndex && instruction.operation == "assignment") {
+				var input = instruction.inputs[0];
+				return input.interpretation == "global_addr" && input.globalName == allocInstruction.name;
+			}
+		});
+		if (assignmentInstruction) {
+			var destinationLocalName = assignmentInstruction.destinationLocalName;
+			var storeInstruction = instructions.find((instruction, i) => {
+				if (i > allocIndex && instruction.operation == "store") {
+					var input = instruction.inputs[1];
+					return input.localNames[0] == destinationLocalName && input.interpretation == "contents";
+				}
+			});
+			if (storeInstruction) {
+				storeInstruction.initializes = true;
+			}
+			instructions.splice(allocIndex, 1);
+		}
+	}
+}
+
 function deadAssignmentElimination(instructions, downstreamInstructions) {
 	for (var i = 0; i < instructions.length; ) {
 		var instruction = instructions[i];
@@ -463,6 +489,7 @@ function optimize(declaration, types) {
 			unwrapSimpleStructInstructions(instructions, types);
 			unwrapOptionalEnums(instructions);
 			unwrapStrings(instructions);
+			fuseGlobalAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions);
 		});
 		inlineBlocks(declaration.basicBlocks);
