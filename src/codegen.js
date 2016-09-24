@@ -67,6 +67,13 @@ const member = (object, property) => ({
 	computed: true,
 });
 
+const internalMember = (object, internalName) => ({
+	type: "MemberExpression",
+	object: object,
+	property: identifier(internalName),
+	computed: false,
+});
+
 const box = (parent, field) => ({
 	type: "ObjectExpression",
 	properties: [{
@@ -82,18 +89,8 @@ const box = (parent, field) => ({
 	}]
 });
 
-const unboxRef = boxed => ({
-	type: "MemberExpression",
-	object: boxed,
-	property: identifier("ref"),
-	computed: false,
-});
-const unboxField = boxed => ({
-	type: "MemberExpression",
-	object: boxed,
-	property: identifier("field"),
-	computed: false,
-});
+const unboxRef = boxed => internalMember(boxed, "ref");
+const unboxField = boxed => internalMember(boxed, "field");
 const unbox = boxed => member(unboxRef(boxed), unboxField(boxed));
 const unboxIfAddr = (operation, node) => /_addr$/.test(operation) ? unbox(node) : node;
 
