@@ -339,9 +339,9 @@ CodeGen.prototype.nodeForCopyDeep = function (source, type) {
 			case "struct":
 				return { type: "ObjectExpression", properties: type.fields.map(field => ({
 							type: "Property",
-							key: identifier(field.name),
+							key: literal(field.name),
 							kind: "init",
-							value: this.nodeForCopyDeep(member(source, identifier(field.name)))
+							value: this.nodeForCopyDeep(member(source, literal(field.name)), this.types[field.type])
 						})) };
 			case "enum":
 				throw new Error("nodeForCopyDeep not implemented for enums!");
@@ -353,7 +353,7 @@ CodeGen.prototype.nodeForCopyDeep = function (source, type) {
 CodeGen.prototype.rValueForInput = function(input) {
 	switch (input.interpretation) {
 		case "contents":
-			return mangledLocal(input.localNames[0]);
+			return this.nodeForCopyDeep(mangledLocal(input.localNames[0]), this.types[input.type]);
 		case "integer_literal":
 		case "float_literal":
 		case "string_literal":
@@ -391,9 +391,12 @@ CodeGen.prototype.rValueForInput = function(input) {
 			}
 			return array(input.localNames.map(localName => mangledLocal(localName)));
 		case "struct_extract":
-			return member(mangledLocal(input.localNames[0]), literal(input.fieldName));
+			var fieldName = input.fieldName;
+			var field = this.findType(input.type).fields.find(field => field.name == fieldName);
+			var fieldType = field ? this.types[field.type] : undefined;
+			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(fieldName)), fieldType);
 		case "tuple_extract":
-			return member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0));
+			return this.nodeForCopyDeep(member(mangledLocal(input.localNames[0]), literal(input.fieldName | 0)), this.types[input.type]);
 		case "builtin":
 			var builtinName = input.builtinName;
 			if (!this.writeBuiltIn(builtinName)) {
@@ -446,7 +449,7 @@ CodeGen.prototype.rValueForInput = function(input) {
 				return box(identifier(input.globalName), literal(0));
 			}
 		case "load":
-			return unbox(mangledLocal(input.localNames[0]));
+			return this.nodeForCopyDeep(unbox(mangledLocal(input.localNames[0])), this.types[input.type]);
 		case "unchecked_enum_data":
 			return member(mangledLocal(input.localNames[0]), literal(1));
 		case "unchecked_take_enum_data_addr":

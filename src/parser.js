@@ -114,11 +114,12 @@ Parser.prototype.parseBasicBlock = function(line) {
 	this.currentBasicBlock.arguments.forEach(arg => this.addLocalName(arg.localName, arg.type, arg));
 }
 
-function simpleLocalContents(name, type) {
+function simpleLocalContents(name, type, source) {
 	return {
 		interpretation: "contents",
 		localNames: [name],
-		type: type
+		type: type,
+		source: source,
 	};
 }
 
@@ -334,13 +335,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[3];
 				break;
 			case "ref_element_addr":
-				var match = args.match(/%(\d+)\s+:.*#.*\.(.*)/)
+				var match = args.match(/%(\d+)\s+:\s+\$(.*),\s+#.*\.(.*)/)
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// }];
 				input.localNames = [match[1]];
-				input.fieldName = match[2];
-				input.type = "TODO";
+				input.fieldName = match[3];
+				input.type = match[2];
 				break;
 			case "global_addr":
 				var match = args.match(/^@(\w+)\s*:\s*\$\*(.*)/);
@@ -550,14 +551,14 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "return",
 			source: source,
-			inputs: [simpleLocalContents(match[1], match[2])],
+			inputs: [simpleLocalContents(match[1], match[2], source)],
 		};
 	}
 	match = line.match(/^br\s+(\w+)\((.*)\)/) || line.match(/^br\s+(\w+)/);
 	if (match) {
 		var inputs = match[2] ? splitNoParens(match[2]).map(arg => {
 			var match = arg.match(/^%(\d+)\s*:\s*\$(.*)/);
-			return simpleLocalContents(match[1], match[2]);
+			return simpleLocalContents(match[1], match[2], source);
 		}) : [];
 		return {
 			operation: "branch",
@@ -571,7 +572,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "conditional_branch",
 			source: source,
-			inputs: [simpleLocalContents(match[1], undefined)],
+			inputs: [simpleLocalContents(match[1], "Builtin.Int1", source)],
 			trueBlock: { reference: match[2] },
 			falseBlock: { reference: match[3] },
 		};
@@ -582,7 +583,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "checked_cast_branch",
 			source: source,
-			inputs: [simpleLocalContents(match[2], undefined)], // No inputs
+			inputs: [simpleLocalContents(match[2], undefined, source)], // No inputs
 			trueBlock: { reference: match[4] },
 			falseBlock: { reference: match[5] },
 			type: match[3],
@@ -593,7 +594,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (match) {
 		return {
 			operation: "checked_cast_addr_br",
-			inputs: [simpleLocalContents(match[2], match[3]), simpleLocalContents(match[4], match[5])],
+			inputs: [simpleLocalContents(match[2], match[3], source), simpleLocalContents(match[4], match[5], source)],
 			trueBlock: { reference: match[6] },
 			falseBlock: { reference: match[7] },
 			type: match[5],
@@ -603,7 +604,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (match) {
 		return {
 			operation: "inject_enum_addr",
-			inputs: [simpleLocalContents(match[1], match[2])],
+			inputs: [simpleLocalContents(match[1], match[2], source)],
 			type: basicNameForStruct(match[2]),
 			caseName: match[3],
 		}
@@ -613,7 +614,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "conditional_fail",
 			source: source,
-			inputs: [simpleLocalContents(match[1], undefined)],
+			inputs: [simpleLocalContents(match[1], undefined, source)],
 		};
 	}
 	match = line.match(/^(store|assign)\s+\%(\w+)\s+to\s+\%(\w+)(\#\d+)?\s+:\s+\$\*(.*)/);
@@ -621,7 +622,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "store",
 			source: source,
-			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[3])],
+			inputs: [simpleLocalContents(match[2], undefined, source), simpleLocalContents(match[3], source)],
 			type: match[5],
 		};
 	}
@@ -630,7 +631,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "copy_addr",
 			source: source,
-			inputs: [simpleLocalContents(match[2], undefined), simpleLocalContents(match[5], undefined)],
+			inputs: [simpleLocalContents(match[2], undefined, source), simpleLocalContents(match[5], undefined, source)],
 		};
 	}
 	match = line.match(/^alloc_global\s+\@(.*)/);
@@ -662,7 +663,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: match[1],
 			source: source,
-			inputs: [simpleLocalContents(match[3], undefined)],
+			inputs: [simpleLocalContents(match[3], undefined, source)],
 			cases: cases,
 			type: basicNameForStruct(match[4]),
 		};
@@ -671,9 +672,9 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (match) {
 		var inputs = splitNoParens(match[3]).map(arg => {
 			var match = arg.match(/^%(\d+)$/)
-			return simpleLocalContents(match[1], undefined);
+			return simpleLocalContents(match[1], undefined, source);
 		});
-		inputs.unshift(simpleLocalContents(match[1], undefined))
+		inputs.unshift(simpleLocalContents(match[1], undefined, source))
 		return {
 			operation: "try_apply",
 			source: source,
@@ -687,7 +688,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "throw",
 			source: source,
-			inputs: [simpleLocalContents(match[1], undefined)],
+			inputs: [simpleLocalContents(match[1], undefined, source)],
 		};
 	}
 	throw "Unknown instruction: " + line;
