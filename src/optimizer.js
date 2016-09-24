@@ -522,12 +522,17 @@ function optimizeTypes(types) {
 					}
 					break;
 				case "enum":
-					if (type.name == "Optional" || type.name == "ImplicitlyUnwrappedOptional") {
+					if (isOptionalType(type.name)) {
 						delete types[key];
 					}
 					break;
 			}
 		}
+	}
+	var _StringCore = types["_StringCore"];
+	if (_StringCore) {
+		_StringCore.fields = [];
+		_StringCore.personality = "class";
 	}
 }
 
