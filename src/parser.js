@@ -777,7 +777,13 @@ Parser.prototype.parseTypeData = function (line) {
 	}
 }
 
+Parser.prototype.beginPath = function(path) {
+	this.currentPath = path;
+	this.currentLineNumber = 0;
+};
+
 Parser.prototype.addLine = function(originalLine) {
+	this.currentLineNumber++;
 	line = originalLine.replace(/\s*\/\/.*/, "");
 	if (line.length != 0) {
 		var directive = line.match(/^(public\s+)?(final\s+)?(internal\s)?(\w+)\b/);
@@ -832,8 +838,8 @@ Parser.prototype.addLine = function(originalLine) {
 				var match = line.match(/^\s*(.*?)\s*(,? loc "([\w\.]+.\w+)":(\d+):\d+)?(,? scope \d+)?\s*$/);
 				var instruction = this.parseInstruction(match[1], {
 					sil: match[1],
-					file: match[3],
-					line: match[4],
+					file: match[3] || this.currentPath,
+					line: match[4] || this.currentLineNumber,
 				});
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);

@@ -21,7 +21,7 @@ test: test.swift.js
 	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" > "$@"
 
 %.swift.js: %.sil %.sil.ast src/*.js
-	cat "$<.ast" "$<" | node src/swift-to-js.js "$@"
+	node src/swift-to-js.js --ast "$<.ast" --sil "$<" --output "$@"
 
 %.swift-min.js: %.swift.js closure-compiler.jar externs.js
 	java -jar closure-compiler.jar --js "$<" --externs externs.js --compilation_level ADVANCED_OPTIMIZATIONS --warning_level VERBOSE --formatting $(CLOSURE_FORMATTING) --js_output_file "$@"
