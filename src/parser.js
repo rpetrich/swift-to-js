@@ -101,7 +101,7 @@ Parser.prototype.parseBasicBlock = function(line) {
 			var match = arg.match(/^%(\d+)\s+:\s+\$(.*)/)
 			return {
 				localName: match[1],
-				type: match[2],
+				type: basicNameForStruct(match[2]),
 			};
 		});
 	}
