@@ -353,27 +353,28 @@ function serializedClone(object) {
 	return JSON.parse(JSON.stringify(object));
 }
 
-function blockReferencesForInstructions(instructions) {
-	var instruction = instructions[instructions.length - 1];
+function blockReferencesForInstruction(instruction) {
 	var blockReferences = blockReferencesForInstructionTypes[instruction.operation];
 	return blockReferences ? blockReferences(instruction) : [];
 }
 
+const blockReferencesForInstructions = instructions => instructions.length > 0 ? blockReferencesForInstruction(instructions[instructions.length - 1]) : [];
+
 function deepBlockReferencesForInstructions(instructions)
 {
-	var result = [];
-	blockReferencesForInstructions(instructions).forEach(descriptor => {
+	return blockReferencesForInstructions(instructions).reduce((result, descriptor) => {
 		if (descriptor.inline) {
-			result = result.concat(result, deepBlockReferencesForInstructions(descriptor.inline.instructions));
-		} else if (descriptor.reference) {
-			result.push({
+			return result.concat(deepBlockReferencesForInstructions(descriptor.inline.instructions));
+		}
+		if (descriptor.reference) {
+			return result.concat([{
 				instructionList: instructions,
 				toBlockName: descriptor.reference,
 				descriptor: descriptor,
-			});
+			}]);
 		}
-	})
-	return result;
+		return result;
+	}, []);
 }
 
 function recursiveReferencesFromBlock(basicBlock, basicBlocks)
@@ -423,9 +424,11 @@ function inlineBlocks(basicBlocks) {
 				if (sourceBlockIndex <= work[i].blockIndex) {
 					return;
 				}
-				var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) > sourceBlockIndex);
-				if (hasBackwardsReference) {
-					return;
+				if (i != work[i].blockIndex) {
+					var hasBackwardsReference = blocksThatReferenceBlock(sourceBlock, basicBlocks).some(otherBlock => basicBlocks.indexOf(otherBlock) < sourceBlockIndex);
+					if (hasBackwardsReference) {
+						return;
+					}
 				}
 			}
 			sourceBlock = serializedClone(sourceBlock);
