@@ -394,6 +394,19 @@ function blocksThatReferenceBlock(basicBlock, basicBlocks)
 	return basicBlocks.filter(otherBlock => recursiveReferencesFromBlock(otherBlock, basicBlocks).some(ref => ref.toBlockName == basicBlock.name));
 }
 
+function reorderedBlocks(basicBlocks) {
+	var result = [];
+	result.push(basicBlocks[0]);
+	for (var i = 0; i < result.length; i++) {
+		blockReferencesForInstructions(result[i].instructions).forEach(descriptor => {
+			if (!result.some(block => block.name == descriptor.reference)) {
+				result.push(findBasicBlock(basicBlocks, descriptor));
+			}
+		});
+	}
+	return result;
+}
+
 function inlineBlocks(basicBlocks) {
 	var work = basicBlocks.map((block, index) => {
 		return {
@@ -487,6 +500,10 @@ function allInstructionLists(basicBlocks) {
 
 function optimize(declaration, types) {
 	if (declaration.type == "function") {
+		if (declaration.basicBlocks.length == 0) {
+			return;
+		}
+		declaration.basicBlocks = reorderedBlocks(declaration.basicBlocks);
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
 			var instructions = item.instructions;
