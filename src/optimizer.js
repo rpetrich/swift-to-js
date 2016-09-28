@@ -58,6 +58,36 @@ function unwrapPassthroughBuiltins(instructions, builtins) {
 	})
 }
 
+const uncheckedVersionOfBuiltin = originalBuiltinName => originalBuiltinName.replace(/_with_overflow_/, "_with_truncate_").replace(/_checked_trunc_/, "_unchecked_trunc_");
+
+function reassignOverflowBuiltins(instructions, downstreamInstructions, builtins) {
+	instructions.forEach((instruction, i) => {
+		if (instruction.operation == "assignment") {
+			var input = instruction.inputs[0];
+			var newBuiltinName;
+			if (input.interpretation == "builtin" && (newBuiltinName = uncheckedVersionOfBuiltin(input.builtinName)) != input.builtinName && builtins[newBuiltinName]) {
+				var targetInstructions = [];
+				for (var k = i + 1; k < instructions.length; k++) {
+					var proposedInstruction = instructions[k];
+					if (countOfUsesOfLocal(proposedInstruction, instruction.destinationLocalName) > 0) {
+						if (proposedInstruction.inputs[0].interpretation != "tuple_extract" || (proposedInstruction.inputs[0].fieldName | 0) != 0) {
+							return;
+						}
+						targetInstructions.push(proposedInstruction);
+					}
+				}
+				if (!downstreamInstructions.some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
+					input.builtinName = newBuiltinName;
+					targetInstructions.forEach(otherInstruction => {
+						otherInstruction.inputs[0].interpretation = "contents";
+						delete otherInstruction.inputs[0].fieldName;
+					});
+				}
+			}
+		}
+	});
+}
+
 function unwrapStrings(instructions) {
 	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
@@ -541,6 +571,7 @@ function optimize(declaration, parser) {
 			var downstreamInstructions = item.downstreamInstructions;
 			unwrapSimpleStructInstructions(instructions, types);
 			unwrapPassthroughBuiltins(instructions, builtins);
+			reassignOverflowBuiltins(instructions, downstreamInstructions, builtins);
 			unwrapOptionalEnums(instructions);
 			unwrapStrings(instructions);
 			fuseGlobalAllocations(instructions);

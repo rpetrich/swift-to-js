@@ -37,6 +37,8 @@ const binaryOperation = operation => (input, functionContext) => js.binary(opera
 
 const checkedForOverflow = (operation, truncate) => (input, functionContext) => wrapInOverflowCheck(operation(input, functionContext), truncate, functionContext);
 
+const truncateOnOverflow = (operation, truncate) => (input, functionContext) => truncate(operation(input, functionContext));
+
 const asPure = builtin => {
 	builtin.pure = true;
 	return builtin;
@@ -90,10 +92,15 @@ module.exports = {
 		"_TFSdCfT22_builtinIntegerLiteralBi2048__Sd": functionBuiltin("(val, metatype) { return val }"),
 		// Int32
 		"sadd_with_overflow_Int32": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt32)),
+		"sadd_with_truncate_Int32": asPure(truncateOnOverflow(binaryOperation("+"), truncateToInt32)),
 		"uadd_with_overflow_Int32": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt32)), // TODO: Implement unsigned
+		"uadd_with_truncate_Int32": asPure(truncateOnOverflow(binaryOperation("+"), truncateToInt32)), // TODO: Implement unsigned
 		"ssub_with_overflow_Int32": asPure(checkedForOverflow(binaryOperation("-"), truncateToInt32)),
+		"ssub_with_truncate_Int32": asPure(truncateOnOverflow(binaryOperation("-"), truncateToInt32)),
 		"usub_with_overflow_Int32": asPure(checkedForOverflow(binaryOperation("-"), truncateToInt32)), // TODO: Implement unsigned
+		"usub_with_truncate_Int32": asPure(truncateOnOverflow(binaryOperation("-"), truncateToInt32)), // TODO: Implement unsigned
 		"smul_with_overflow_Int32": asPure(checkedForOverflow(binaryOperation("*"), truncateToInt32)),
+		"smul_with_truncate_Int32": asPure(truncateOnOverflow(binaryOperation("*"), truncateToInt32)),
 		"sdiv_Int32": asPure(functionBuiltin("(left, right) { return (left / right) | 0 }")),
 		"srem_Int32": asPure(binaryOperation("%")), // Returns modulus, not remainder. Close enough for now
 		"cmp_sgt_Int32": asPure(binaryOperation(">")),
@@ -119,7 +126,9 @@ module.exports = {
 		"zext_Int32_Int64": passthrough,
 		"sext_Int32_Int64": passthrough,
 		"sadd_with_overflow_Int64": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt64)),
+		"sadd_with_truncate_Int64": asPure(truncateOnOverflow(binaryOperation("+"), truncateToInt64)),
 		"s_to_s_checked_trunc_Int64_Int32": asPure(checkedForOverflow(passthrough, truncateToInt32)),
+		"s_to_s_unchecked_trunc_Int64_Int32": asPure(truncateOnOverflow(passthrough, truncateToInt32)),
 		// Int16
 		"zext_Int8_Int16": passthrough,
 		"cmp_ugt_Int16": asPure(binaryOperation(">")),
@@ -128,7 +137,9 @@ module.exports = {
 		"and_Int16": asPure(binaryOperation("&")),
 		"s_to_u_checked_trunc_Int32_Int16": asPure(checkedForOverflow(passthrough, truncateToInt16)),
 		"uadd_with_overflow_Int16": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt16)),
+		"uadd_with_truncate_Int16": asPure(truncateOnOverflow(binaryOperation("+"), truncateToInt16)),
 		"umul_with_overflow_Int16": asPure(checkedForOverflow(binaryOperation("*"), truncateToInt16)),
+		"umul_with_truncate_Int16": asPure(truncateOnOverflow(binaryOperation("*"), truncateToInt16)),
 		// Int8
 		"u_to_u_checked_trunc_Int16_Int8": asPure(checkedForOverflow(passthrough, truncateToInt8)),
 		"cmp_eq_Int8": asPure(binaryOperation("==")),
