@@ -36,7 +36,7 @@ var parseAll = (paths, completion) => {
 parseAll([program.ast, program.sil], () => {
 	var codegen = new CodeGen(parser);
 	parser.declarations.forEach(declaration => {
-		Optimizer.optimize(declaration, parser.types);
+		Optimizer.optimize(declaration, parser);
 	});
 	Optimizer.optimizeTypes(parser.types);
 	parser.declarations.forEach(declaration => {

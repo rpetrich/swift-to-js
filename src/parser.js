@@ -1,5 +1,6 @@
 var stdlib = require("./stdlib.js");
 var types = stdlib.types;
+var builtins = stdlib.builtins;
 
 function splitNoParens(s) {
 	var parens = /\(|\)|\<|\-?\>/g;
@@ -40,6 +41,7 @@ function Parser() {
 	this.declarations = [];
 	this.globals = [];
 	this.types = JSON.parse(JSON.stringify(types));
+	this.builtins = builtins;
 	this.currentDeclaration = undefined;
 	this.currentBasicBlock = undefined;
 	// Lookback, to steal some unmangled name information that swiftc sticks in a comment
@@ -62,7 +64,7 @@ Parser.prototype.parseSil = function(line) {
 	if (!/\b(hidden|shared_external|private|global_init)\b/.test(line) && (declaration.convention != "method")) {
 		if (!/^\/\/ (specialized|protocol\s witness)\s/.test(this.lookbackLine)) {
 			var beautifulMatch = this.lookbackLine.match(/^\/\/ (\w+\.)?(\w+)/);
-			if (beautifulMatch) {
+			if (beautifulMatch && beautifulMatch[2] != "protocol") {
 				declaration.beautifulName = beautifulMatch[2];
 			}
 		}

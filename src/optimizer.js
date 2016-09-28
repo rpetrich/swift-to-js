@@ -44,6 +44,20 @@ function unwrapSimpleStructInstructions(instructions, types) {
 	})
 }
 
+function unwrapPassthroughBuiltins(instructions, builtins) {
+	instructions.forEach(instruction => {
+		instruction.inputs.forEach(input => {
+			switch (input.interpretation) {
+				case "builtin":
+					if (builtins[input.builtinName] == builtins.passthrough) {
+						input.interpretation = "contents";
+						delete input.builtinName;
+					}
+			}
+		});
+	})
+}
+
 function unwrapStrings(instructions) {
 	instructions.forEach(instruction => {
 		instruction.inputs.forEach(input => {
@@ -221,9 +235,21 @@ var fuseableWithAssignment = instruction => {
 };
 
 var interpretationsWithoutSideEffects = ["contents", "integer_literal", "float_literal", "string_literal", "undefined_literal", "enum", "struct", "tuple", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "ref_element_addr", "global_addr", "select_enum", "select_value", "index_raw_pointer", "index_addr", "metatype", "class_method", "open_existential_ref"];
-var instructionHasSideEffects = instruction => instruction.operation != "assignment" || interpretationsWithoutSideEffects.indexOf(instruction.operation) == -1;
+var instructionHasSideEffects = (instruction, builtins) => {
+	if (instruction.operation != "assignment") {
+		return true;
+	}
+	const input = instruction.inputs[0];
+	if (interpretationsWithoutSideEffects.indexOf(input.interpretation) != -1) {
+		return false;
+	}
+	if (instruction.interpretation == "builtin" && builtins[instruction.builtinName].pure) {
+		return false;
+	}
+	return true;
+};
 
-function fuseAssignments(instructions, downstreamInstructions) {
+function fuseAssignments(instructions, downstreamInstructions, builtins) {
 	fuse_search:
 	for (var i = 0; i < instructions.length - 1; ) {
 		var instruction = instructions[i];
@@ -281,7 +307,7 @@ function fuseAssignments(instructions, downstreamInstructions) {
 						continue fuse_search;
 					}
 				}
-				if (instructionHasSideEffects(proposedInstruction)) {
+				if (instructionHasSideEffects(proposedInstruction, builtins)) {
 					break;
 				}
 			}
@@ -316,10 +342,10 @@ function fuseGlobalAllocations(instructions, downstreamInstructions) {
 	}
 }
 
-function deadAssignmentElimination(instructions, downstreamInstructions) {
+function deadAssignmentElimination(instructions, downstreamInstructions, builtins) {
 	for (var i = 0; i < instructions.length; ) {
 		var instruction = instructions[i];
-		if (instruction.operation == "assignment" && !instructionHasSideEffects(instruction)) {
+		if (instruction.operation == "assignment" && !instructionHasSideEffects(instruction, builtins)) {
 			if (!instructions.slice(i+1).concat(downstreamInstructions).some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
 				instructions.splice(i, 1);
 				continue;
@@ -501,7 +527,9 @@ function allInstructionLists(basicBlocks) {
 	});
 }
 
-function optimize(declaration, types) {
+function optimize(declaration, parser) {
+	const types = parser.types;
+	const builtins = parser.builtins;
 	if (declaration.type == "function") {
 		if (declaration.basicBlocks.length == 0) {
 			return;
@@ -512,17 +540,18 @@ function optimize(declaration, types) {
 			var instructions = item.instructions;
 			var downstreamInstructions = item.downstreamInstructions;
 			unwrapSimpleStructInstructions(instructions, types);
+			unwrapPassthroughBuiltins(instructions, builtins);
 			unwrapOptionalEnums(instructions);
 			unwrapStrings(instructions);
 			fuseGlobalAllocations(instructions);
-			fuseAssignments(instructions, downstreamInstructions);
+			fuseAssignments(instructions, downstreamInstructions, builtins);
 		});
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
 			var instructions = item.instructions;
 			var downstreamInstructions = item.downstreamInstructions;
-			fuseAssignments(instructions, downstreamInstructions);
-			deadAssignmentElimination(instructions, downstreamInstructions);
+			fuseAssignments(instructions, downstreamInstructions, builtins);
+			deadAssignmentElimination(instructions, downstreamInstructions, builtins);
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
 	}
