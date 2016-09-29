@@ -1,4 +1,5 @@
 var js = require("./estree.js");
+var esprima = require("esprima");
 
 const structType = fields => ({ personality: "struct", fields: fields });
 const enumType = cases => ({ personality: "enum", cases: cases });
@@ -7,11 +8,11 @@ const protocolType = () => ({ personality: "protocol" });
 const field = (name, type) => ({ name: name, type: type });
 
 const functionBuiltin = definition => {
-	var written = false;
 	return (input, functionContext) => {
-		if (!written) {
-			written = true;
-			functionContext.codegen.buffer.lines.unshift("function " + input.builtinName + definition);
+		var codegen = functionContext.codegen;
+		if (!codegen.emittedFunctions[input.builtinName]) {
+			codegen.emittedFunctions[input.builtinName] = true;
+			codegen.body.push(esprima.parse("function " + input.builtinName + definition).body[0]);
 		}
 		return js.call(js.identifier(input.builtinName), input.localNames.map(js.mangledLocal));
 	};

@@ -4,27 +4,7 @@ var escodegen = require("escodegen");
 var functions = require("./stdlib.js").functions;
 var js = require("./estree.js");
 
-function IndentedBuffer(){
-    this.lines = [];
-    this.indentation = 0;
-}
-
-IndentedBuffer.prototype.indent = function (amount) {
-	this.indentation += amount;
-};
-
-IndentedBuffer.prototype.write = function (line, extra) {
-	if (extra) {
-		this.indent(extra);
-	}
-	this.lines.push(Array(this.indentation + 1).join("\t") + line);
-	if (extra) {
-		this.indent(-extra);
-	}
-};
-
 function CodeGen(parser) {
-	this.buffer = new IndentedBuffer();
 	this.body = [];
 	this.deferredBody = [];
 	this.types = parser.types;
@@ -777,7 +757,7 @@ CodeGen.prototype.end = function() {
 	};
 	// console.log(JSON.stringify(program, null, 2));
 	if (false) {
-		this.buffer.write(escodegen.generate(esmangle.mangle(program), {
+		this.output = escodegen.generate(esmangle.mangle(program), {
 			format: {
 				renumber: true,
 				hexadecimal: true,
@@ -786,15 +766,15 @@ CodeGen.prototype.end = function() {
 				semicolons: false,
 				parentheses: false,
 			},
-		}));
+		});
 	} else {
-		this.buffer.write(escodegen.generate(program, {
+		this.output = escodegen.generate(program, {
 			format: {
 				json: true,
 				quotes: "double",
 			},
 			comment: true,
-		}));
+		});
 	}
 }
 

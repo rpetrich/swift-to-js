@@ -44,6 +44,6 @@ parseAll([program.ast, program.sil], () => {
 	});
 	codegen.end();
 	var out = fs.openSync(program.output, "w");
-	codegen.buffer.lines.forEach(line => fs.write(out, line + "\n"));
+	fs.write(out, codegen.output);
 	//console.log(JSON.stringify(parser.declarations, null, 4));
 });
