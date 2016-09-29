@@ -259,7 +259,6 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 			if ("fieldName" in input) {
 				var fieldName = input.fieldName;
 				if (/\.foreign$/.test(fieldName)) {
-					console.log(input);
 					var match = fieldName.match(/\.(\w+)\!(getter|setter)?/);
 					fieldName = match[1];
 					if (match[2] == "getter") {
