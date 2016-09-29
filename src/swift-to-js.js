@@ -10,8 +10,9 @@ var Optimizer = require("./optimizer.js");
 
 program
 .option("--ast [path]", "Input AST file")
-.option('--sil [path]', "Input SIL file")
-.option('--output [path]', "Output JavaScript file")
+.option("--sil [path]", "Input SIL file")
+.option("--output [path]", "Output JavaScript file")
+.option("--source-map [path]", "Output source map")
 .parse(process.argv);
 
 var parseAll = (paths, completion) => {
@@ -45,5 +46,9 @@ parseAll([program.ast, program.sil], () => {
 	codegen.end();
 	var out = fs.openSync(program.output, "w");
 	fs.write(out, codegen.output);
+	if (program.sourceMap) {
+		var sourceMap = fs.openSync(program.sourceMap, "w");
+		fs.write(sourceMap, codegen.sourceMap);
+	}
 	//console.log(JSON.stringify(parser.declarations, null, 4));
 });

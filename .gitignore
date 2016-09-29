@@ -2,5 +2,6 @@
 *.sil.ast
 *.swift.js
 *.swift-min.js
+*.js.map
 closure-compiler.jar
 closure-compiler

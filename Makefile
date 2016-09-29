@@ -7,7 +7,7 @@ CLOSURE_FORMATTING = PRETTY_PRINT
 all: test.swift-min.js
 
 clean:
-	rm -f *.sil *.sil.ast *.swift.js *.swift-min.js
+	rm -f *.sil *.sil.ast *.swift.js *.swift-min.js *.js.map
 
 test: test.swift.js
 	node tests.js
@@ -21,10 +21,10 @@ test: test.swift.js
 	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" > "$@"
 
 %.swift.js: %.sil %.sil.ast src/*.js
-	node src/swift-to-js.js --ast "$<.ast" --sil "$<" --output "$@"
+	node src/swift-to-js.js --ast "$<.ast" --sil "$<" --output "$@" --source-map "$@.map"
 
 %.swift-min.js: %.swift.js closure-compiler.jar externs.js
-	java -jar closure-compiler.jar --js "$<" --externs externs.js --compilation_level ADVANCED_OPTIMIZATIONS --warning_level VERBOSE --formatting $(CLOSURE_FORMATTING) --js_output_file "$@"
+	java -jar closure-compiler.jar --js "$<" --source_map_input=$<\|$<.map --externs externs.js --compilation_level ADVANCED_OPTIMIZATIONS --warning_level VERBOSE --formatting $(CLOSURE_FORMATTING) --js_output_file "$@" --create_source_map "$@.map"
 
 closure-compiler/compiler-latest.zip:
 	mkdir -p closure-compiler

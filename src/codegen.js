@@ -33,6 +33,7 @@ const withSource = (node, source) => {
 		var comment = " sil:" + source.sil;
 		if (source.file) {
 			comment = " " + source.file + ":" + source.line + comment;
+			node.loc = { start: { line: source.line, column: source.column }, source: source.file };
 		}
 		withAddedComment(node, comment);
 	}
@@ -756,8 +757,9 @@ CodeGen.prototype.end = function() {
 		body: this.body.concat(this.deferredBody),
 	};
 	// console.log(JSON.stringify(program, null, 2));
+	var result;
 	if (false) {
-		this.output = escodegen.generate(esmangle.mangle(program), {
+		result = escodegen.generate(esmangle.mangle(program), {
 			format: {
 				renumber: true,
 				hexadecimal: true,
@@ -766,16 +768,22 @@ CodeGen.prototype.end = function() {
 				semicolons: false,
 				parentheses: false,
 			},
+			sourceMap: true,
+			sourceMapWithCode: true,
 		});
 	} else {
-		this.output = escodegen.generate(program, {
+		result = escodegen.generate(program, {
 			format: {
 				json: true,
 				quotes: "double",
 			},
 			comment: true,
+			sourceMap: true,
+			sourceMapWithCode: true,
 		});
 	}
+	this.output = result.code;
+	this.sourceMap = result.map;
 }
 
 module.exports = CodeGen;

@@ -837,11 +837,12 @@ Parser.prototype.addLine = function(originalLine) {
 			}
 		} else if (/^  /.test(line)) {
 			if (this.currentBasicBlock) {
-				var match = line.match(/^\s*(.*?)\s*(,? loc "([\w\.]+.\w+)":(\d+):\d+)?(,? scope \d+)?\s*$/);
+				var match = line.match(/^\s*(.*?)\s*(,? loc "([\w\.]+.\w+)":(\d+):(\d+))?(,? scope \d+)?\s*$/);
 				var instruction = this.parseInstruction(match[1], {
 					sil: match[1],
 					file: match[3] || this.currentPath,
-					line: match[4] || this.currentLineNumber,
+					line: (match[4] || this.currentLineNumber) | 0,
+					column: (match[5] || 0) | 0,
 				});
 				if (instruction) {
 					this.currentBasicBlock.instructions.push(instruction);
