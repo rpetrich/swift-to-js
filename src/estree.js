@@ -128,5 +128,9 @@ var estree = {
 		},
 		loc: null,
 	}),
+	returnStatement: expression => ({
+		type: "ReturnStatement",
+		argument: expression || null,
+	}),
 };
 module.exports = estree;

@@ -51,19 +51,19 @@ if (swift.more_silly_math) {
 if (swift.optional_from) {
 	assert.ok(swift.optional_from(1) === true, "optional_from(1)");
 	assert.ok(swift.optional_from(0) === false, "optional_from(0)");
-	assert.ok(swift.optional_from(-1) === undefined, "optional_from(-1)");
+	assert.ok(swift.optional_from(-1) === null, "optional_from(-1)");
 }
 
 if (swift.description_of) {
 	assert.ok(swift.description_of(true) == "True", "description_of(true)");
 	assert.ok(swift.description_of(false) == "False", "description_of(false)");
-	assert.ok(swift.description_of(undefined) == "None", "description_of(undefined)");
+	assert.ok(swift.description_of(null) == "None", "description_of(null)");
 }
 
 if (swift.has_value) {
 	assert.ok(swift.has_value(true) === true, "has_value(true)");
 	assert.ok(swift.has_value(false) === true, "has_value(false)");
-	assert.ok(swift.has_value(undefined) === false, "has_value(undefined)");
+	assert.ok(swift.has_value(null) === false, "has_value(null)");
 }
 
 if (swift.hello_world) {

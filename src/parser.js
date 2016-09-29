@@ -526,7 +526,10 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.interpretation = "contents";
 				break;
 			case "open_existential_ref":
-				input.type = "TODO";
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*)\s+to\s+/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
 				break;
 			case "init_existential_addr":
 				var match = args.match(/%(\d+)\s+:\s+\$(.*),\s+\$(.*)/);
@@ -752,6 +755,16 @@ Parser.prototype.parseClass = function (line) {
 	};
 };
 
+Parser.prototype.parseProtocol = function (line) {
+	var match = line.match(/^(public\s+)?(final\s+)?(internal\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
+	this.currentTypeName = match[5];
+	this.currentTypeData = {
+		personality: "protocol",
+		fields: [],
+		beautifulName: match[1] ? match[5] : undefined,
+	};
+};
+
 Parser.prototype.parseEnum = function (line) {
 	var match = line.match(/^(public\s+)?(final\s+)?(internal\s+)?(\w+)\s+(\w+)(\s+:\s+(\w+))?/);
 	this.currentTypeName = match[5];
@@ -813,6 +826,9 @@ Parser.prototype.addLine = function(originalLine) {
 				case "class":
 					this.parseClass(line);
 					break;
+				case "protocol":
+					this.parseProtocol(line);
+					break;
 				case "enum":
 					this.parseEnum(line);
 					break;
@@ -855,8 +871,10 @@ Parser.prototype.addLine = function(originalLine) {
 				// Not inside a declaration or basic block!
 				// Should be an error, but we aren't even close to understanding Swift's protocols/method tables
 			}
+		} else if (/^@_silgen_name\(/.test(line)) {
+			// Ignore @_silgen_name attributes
 		} else {
-			console.log("Unknown: " + line);
+			console.log("Unable to parse line: " + line);
 		}
 	}
 	this.lookbackLine = originalLine;

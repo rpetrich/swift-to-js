@@ -185,7 +185,6 @@ module.exports = {
 		"swift_bufferAllocate": functionBuiltin("(bufferType, size, alignMask) { return { ref:[], field:0 } }"),
 		"_TTSf4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": functionBuiltin("(source, dest) { }"), // TODO
 		"_TTSfq4g_n___TFs19_cocoaStringReadAllFTPs9AnyObject_GSpVs6UInt16__T_": functionBuiltin("(source, dest) { }"), // TODO
-		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": functionBuiltin("() { return this }"),
 		"_TF10ObjectiveC22_convertObjCBoolToBoolFVS_8ObjCBoolSb": functionBuiltin("(value) { return this }"),
 		"_TF10ObjectiveC22_convertBoolToObjCBoolFSbVS_8ObjCBool": functionBuiltin("(value) { return value }"),
 		"_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType": functionBuiltin("(value, result) {}"),
@@ -203,5 +202,8 @@ module.exports = {
 	functions: {
 		"sqrt": js.declaration(js.identifier("sqrt"), js.internalMember(js.identifier("Math"), "sqrt")),
 		"_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType": js.functionDeclaration(js.identifier("_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType"), [js.identifier("value"), js.identifier("result")], []),
+		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": js.functionDeclaration(js.identifier("_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString"), [], [js.returnStatement(js.identifier("this"))]),
+		"_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS": js.functionDeclaration(js.identifier("_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS"), [js.identifier("string")], [js.returnStatement(js.identifier("string"))]),
+		"_getDocument": js.functionDeclaration(js.identifier("_getDocument"), [], [js.returnStatement(js.identifier("document"))]),
 	},
 };

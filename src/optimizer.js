@@ -131,6 +131,28 @@ function unwrapStrings(instructions) {
 	});
 }
 
+function removeStringFoundationBridge(instructions, downstreamInstructions) {
+	instructions.forEach((instruction, i) => {
+		if (instruction.operation == "assignment") {
+			var input = instruction.inputs[0];
+			var newBuiltinName;
+			if (input.interpretation == "function_ref" && (input.functionName == "_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString" || input.functionName == "_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS")) {
+				const eliminateApplies = proposedInstruction => proposedInstruction.inputs.forEach(input => {
+					if (input.interpretation == "apply" && input.localNames[0] == instruction.destinationLocalName) {
+						input.interpretation = "contents";
+						input.localNames.shift();
+					}
+				});
+				var targetInstructions = [];
+				for (var k = i + 1; k < instructions.length; k++) {
+					eliminateApplies(instructions[k]);
+				}
+				downstreamInstructions.forEach(eliminateApplies);
+			}
+		}
+	});
+}
+
 const isOptionalType = typeName => {
 	typeName = Parser.removePointer(typeName);
 	return typeName == "Optional" || typeName == "ImplicitlyUnwrappedOptional";
@@ -145,7 +167,7 @@ function unwrapOptionalEnums(instructions) {
 						if (input.caseName.toLowerCase() == "some") {
 							input.interpretation = "contents";
 						} else {
-							input.interpretation = "undefined_literal";
+							input.interpretation = "null_literal";
 						}
 						delete input.type;
 						delete input.caseName;
@@ -177,7 +199,7 @@ function unwrapOptionalEnums(instructions) {
 						});
 						delete input.cases;
 						delete input.type;
-						input.interpretation = input.interpretation == "select_enum" ? "select_defined" : "select_defined_addr";
+						input.interpretation = input.interpretation == "select_enum" ? "select_nonnull" : "select_nonnull_addr";
 						if ((trueLocal | defaultLocal) > (falseLocal | defaultLocal)) {
 							// Shuffle the input local names such that the "some" local is first
 							input.localNames = [input.localNames[0], input.localNames[2], input.localNames[1]];
@@ -202,7 +224,7 @@ function unwrapOptionalEnums(instructions) {
 			case "switch_enum_addr":
 				// TODO: Apply proper path for switch_enum_addr
 				if (isOptionalType(instruction.type)) {
-					instruction.operation = "conditional_defined_branch";
+					instruction.operation = "conditional_nonnull_branch";
 					var defaultBlock;
 					var trueBlock;
 					var falseBlock;
@@ -236,7 +258,7 @@ function unwrapOptionalEnums(instructions) {
 					} else {
 						instruction.inputs.unshift({
 							localNames: [],
-							interpretation: "undefined_literal",
+							interpretation: "null_literal",
 						});
 					}
 				}
@@ -264,7 +286,7 @@ var fuseableWithAssignment = instruction => {
 	}
 };
 
-var interpretationsWithoutSideEffects = ["contents", "integer_literal", "float_literal", "string_literal", "undefined_literal", "enum", "struct", "tuple", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "ref_element_addr", "global_addr", "select_enum", "select_value", "index_raw_pointer", "index_addr", "metatype", "class_method", "open_existential_ref"];
+var interpretationsWithoutSideEffects = ["contents", "integer_literal", "float_literal", "string_literal", "undefined_literal", "null_literal", "enum", "struct", "tuple", "alloc_stack", "alloc_box", "project_box", "struct_element_addr", "ref_element_addr", "global_addr", "select_enum", "select_value", "index_raw_pointer", "index_addr", "metatype", "class_method", "open_existential_ref", "function_ref"];
 var instructionHasSideEffects = (instruction, builtins) => {
 	if (instruction.operation != "assignment") {
 		return true;
@@ -387,7 +409,7 @@ function deadAssignmentElimination(instructions, downstreamInstructions, builtin
 var blockReferencesForInstructionTypes = {
 	"branch": ins => [ins.block],
 	"conditional_branch": ins => [ins.trueBlock, ins.falseBlock],
-	"conditional_defined_branch": ins => [ins.trueBlock, ins.falseBlock],
+	"conditional_nonnull_branch": ins => [ins.trueBlock, ins.falseBlock],
 	"try_apply": ins => [ins.normalBlock, ins.errorBlock],
 	"switch_enum": ins => ins.cases.map(c => c.basicBlock),
 	"switch_enum_addr": ins => ins.cases.map(c => c.basicBlock),
@@ -574,6 +596,7 @@ function optimize(declaration, parser) {
 			reassignOverflowBuiltins(instructions, downstreamInstructions, builtins);
 			unwrapOptionalEnums(instructions);
 			unwrapStrings(instructions);
+			removeStringFoundationBridge(instructions, downstreamInstructions);
 			fuseGlobalAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions, builtins);
 		});

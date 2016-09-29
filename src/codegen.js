@@ -201,6 +201,8 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 			return js.literal(input.value);
 		case "undefined_literal":
 			return js.unary("void", js.literal(0));
+		case "null_literal":
+			return js.literal(null);
 		case "enum":
 			var type = this.findType(input.type, "enum");
 			var index = type.cases.indexOf(input.caseName);
@@ -255,7 +257,19 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 			var args = input.localNames.slice(1);
 			var callee = js.mangledLocal(input.localNames[0]);
 			if ("fieldName" in input) {
-				callee = js.member(callee, js.literal(input.fieldName));
+				var fieldName = input.fieldName;
+				if (/\.foreign$/.test(fieldName)) {
+					console.log(input);
+					var match = fieldName.match(/\.(\w+)\!(getter|setter)?/);
+					fieldName = match[1];
+					if (match[2] == "getter") {
+						return js.member(js.mangledLocal(args[args.length-1]), js.literal(fieldName));
+					}
+					if (match[2] == "setter") {
+						return js.assignment(js.member(js.mangledLocal(args[args.length-1]), js.literal(fieldName)), callee);
+					}
+				}
+				callee = js.member(callee, js.literal(fieldName));
 			}
 			if (input.convention == "method" || input.convention == "objc_method") {
 				var hiddenThisArg = args.pop();
@@ -264,7 +278,7 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 					callee = js.member(callee, js.literal("call"));
 				}
 			}
-			return js.call(callee, args.map(localName => js.mangledLocal(localName)));
+			return js.call(callee, args.map(js.mangledLocal));
 		case "partial_apply":
 			throw new Error("partial_apply not supported!");
 		case "alloc_stack":
@@ -322,10 +336,10 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 				result = js.ternary(js.binary("===", valueLocal, js.mangledLocal(localPairs[i + 1])), localPairs[i], result);
 			}
 			return result;
-		case "select_defined":
-		case "select_defined_addr":
+		case "select_nonnull":
+		case "select_nonnull_addr":
 			var value = js.unboxIfAddr(input.interpretation, js.mangledLocal(input.localNames[0]));
-			return js.ternary(js.binary("!==", value, js.literal(undefined)), js.mangledLocal(input.localNames[1]), js.mangledLocal(input.localNames[2]));
+			return js.ternary(js.binary("!==", value, js.literal(null)), js.mangledLocal(input.localNames[1]), js.mangledLocal(input.localNames[2]));
 		case "index_raw_pointer":
 		case "index_addr":
 			var address = js.mangledLocal(input.localNames[0]);
@@ -333,9 +347,11 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 		case "metatype":
 			return js.unary("void", js.literal(0));
 		case "class_method":
-			return js.member(js.mangledLocal(input.localNames[0]), js.literal(input.entry));
-		case "open_existential_ref":
-			return js.box(js.array([]), js.literal(0));
+			var fieldName = input.entry;
+			if (input.convention == "objc_method") {
+				fieldName = fieldName.match(/\.(\w+)\!/)[1];
+			}
+			return js.member(js.mangledLocal(input.localNames[0]), js.literal(fieldName));
 	}
 	throw new Error("Unable to interpret rvalue as " + input.interpretation + " from " + input.line);
 }
@@ -392,14 +408,9 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 		case "return":
 			var input = instruction.inputs[0];
 			if (input.interpretation == "tuple" && input.localNames.length == 0) {
-				return [{
-					type: "ReturnStatement",
-				}];
+				return [js.returnStatement()];
 			}
-			return [{
-				type: "ReturnStatement",
-				argument: this.rValueForInput(input, functionContext),
-			}];
+			return [js.returnStatement(this.rValueForInput(input, functionContext))];
 		case "branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.block);
 			// Branch instruction with arguments expects to be able to thread one argument into another
@@ -465,13 +476,13 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 					body: this.branchToBlockNodes(instruction.falseBlock, siblingBlocks, functionContext),
 				},
 			}];
-		case "conditional_defined_branch":
+		case "conditional_nonnull_branch":
 			var targetBlock = findBasicBlock(siblingBlocks, instruction.trueBlock);
 			var value = this.rValueForInput(instruction.inputs[0], functionContext);
 			targetBlock.arguments.forEach(arg => functionContext.addVariable(js.mangledLocal(arg.localName)));
 			return [{
 				type: "IfStatement",
-				test: js.binary("!==", value, js.literal(undefined)),
+				test: js.binary("!==", value, js.literal(null)),
 				consequent: {
 					type: "BlockStatement",
 					body: js.assignments(targetBlock.arguments.map((arg, index) => [js.mangledLocal(arg.localName), this.rValueForInput(instruction.inputs[index], functionContext)])).concat(this.branchToBlockNodes(instruction.trueBlock, siblingBlocks, functionContext)),
