@@ -570,15 +570,16 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}];
 			break;
 		case "conditional_fail":
-			this.builtins.trap(instruction.inputs[0], functionContext);
+			this.builtins.trap({builtinName: "trap", localNames: []}, functionContext);
 			return [{
 				type: "IfStatement",
 				test: this.rValueForInput(instruction.inputs[0], functionContext),
 				consequent: js.expressionStatement(js.call(js.identifier("trap"), [])),
 			}];
 		case "unreachable":
-			this.builtins.trap(instruction.inputs[0], functionContext);
-			return [js.expressionStatement(js.call(js.identifier("trap"), []))];
+			//this.builtins.trap({builtinName: "trap", localNames: []}, functionContext);
+			//return [js.expressionStatement(js.call(js.identifier("trap"), []))];
+			return [];
 		case "throw":
 			return [{
 				type: "ThrowStatement",
