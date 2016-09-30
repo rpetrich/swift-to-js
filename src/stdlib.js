@@ -195,8 +195,7 @@ module.exports = {
 		// Error handling
 		"willThrow": functionBuiltin("(error) { throw error }"),
 		"trap": functionBuiltin("() { throw \"Runtime error!\" }"),
-		"swift_convertNSErrorToError": functionBuiltin("(error) { return error }"),
-		"unexpectedError": functionBuiltin("(error) { throw \"Unexpected error: \" + error.toString() }"),
+		"unexpectedError": functionBuiltin("(error) { throw error }"),
 		"_TFs18_fatalErrorMessageFTVs12StaticStringS_S_Su5flagsVs6UInt32_Os5Never": functionBuiltin("(prefix, message, file, line, flags) { throw console.log(prefix + message + \" in \" + file + \":\" + line) }"),
 	},
 	functions: {
@@ -205,5 +204,6 @@ module.exports = {
 		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": js.functionDeclaration(js.identifier("_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString"), [], [js.returnStatement(js.identifier("this"))]),
 		"_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS": js.functionDeclaration(js.identifier("_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS"), [js.identifier("string")], [js.returnStatement(js.identifier("string"))]),
 		"_getDocument": js.functionDeclaration(js.identifier("_getDocument"), [], [js.returnStatement(js.identifier("document"))]),
+		"swift_convertNSErrorToError": js.functionDeclaration(js.identifier("swift_convertNSErrorToError"), [js.identifier("error")], [js.returnStatement(js.identifier("error"))]),
 	},
 };
