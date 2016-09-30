@@ -551,20 +551,29 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			}
 			return [resultNode];
 		case "try_apply":
+			var rValues = instruction.inputs.map(input => this.rValueForInput(input));
+			var call = js.call(rValues[0], rValues.slice(1));
+			var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
+			normalBasicBlock.arguments.forEach(arg => functionContext.addVariable(js.mangledLocal(arg.localName)));
+			if (normalBasicBlock.arguments.length > 0) {
+				call = js.assignment(js.mangledLocal(normalBasicBlock.arguments[0].localName), call);
+			}
 			var errorBasicBlock = findBasicBlock(siblingBlocks, instruction.errorBlock);
 			errorBasicBlock.arguments.forEach(arg => functionContext.addVariable(js.mangledLocal(arg.localName)));
+			var errorTemp = js.identifier("e");
+			recover = js.assignment(js.mangledLocal(errorBasicBlock.arguments[0].localName), errorTemp);
 			return [{
 				type: "TryStatement",
 				block: {
 					type: "BlockStatement",
-					body: this.branchToBlockNodes(instruction.normalBlock, siblingBlocks, functionContext),
+					body: [js.expressionStatement(call)].concat(this.branchToBlockNodes(instruction.normalBlock, siblingBlocks, functionContext)),
 				},
 				handler: {
 					type: "CatchClause",
-					param: js.identifier("e"),
+					param: errorTemp,
 					body: {
 						type: "BlockStatement",
-						body: [js.expressionStatement(js.assignment(js.mangledLocal(errorBasicBlock.arguments[0].localName), js.identifier("e")))].concat(this.branchToBlockNodes(instruction.errorBlock, siblingBlocks, functionContext)),
+						body: [js.expressionStatement(recover)].concat(this.branchToBlockNodes(instruction.errorBlock, siblingBlocks, functionContext)),
 					}
 				}
 			}];
