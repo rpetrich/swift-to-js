@@ -421,6 +421,32 @@ function fuseGlobalAllocations(instructions, downstreamInstructions) {
 	}
 }
 
+function fuseStackAllocations(instructions) {
+	for (var i = 0; i < instructions.length; i++) {
+		var instruction = instructions[i];
+		if (instruction.operation == "assignment") {
+			var input = instruction.inputs[0];
+			if (input.interpretation == "alloc_stack") {
+				for (var j = i + 1; j < instructions.length; j++) {
+					var otherInstruction = instructions[j];
+					if (countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) > 0) {
+						if (otherInstruction.operation == "store") {
+							otherInstruction.destinationLocalName = instruction.destinationLocalName;
+							otherInstruction.operation = "assignment";
+							otherInstruction.inputs[0].interpretation = "alloc_stack";
+							otherInstruction.inputs[0].type = input.type;
+							otherInstruction.inputs.splice(1, 1);
+							instructions.splice(i, 1);
+							i--;
+						}
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
 function deadAssignmentElimination(instructions, downstreamInstructions, builtins) {
 	for (var i = 0; i < instructions.length; ) {
 		var instruction = instructions[i];
@@ -625,6 +651,7 @@ function optimize(declaration, parser) {
 			unwrapStrings(instructions);
 			removeStringFoundationBridge(instructions, downstreamInstructions);
 			fuseGlobalAllocations(instructions);
+			fuseStackAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions, builtins);
 			eliminateStringCoreFlagsMask(instructions, downstreamInstructions);
 		});
