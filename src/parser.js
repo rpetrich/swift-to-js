@@ -34,7 +34,8 @@ function splitNoParens(s) {
 }
 
 function basicNameForStruct(structName) {
-	return structName.match(/^\*?(@(thin|thick)\s)?\w+/)[0];
+	var match = structName.match(/^(\*)?(@(thin|thick|sil_unmanaged|opened\(.*\))\s)?(\w+|\(\))/);
+	return match[1] ? (match[1] + match[4]) : match[4];
 }
 
 function Parser() {
