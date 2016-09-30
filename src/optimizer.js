@@ -135,6 +135,29 @@ function unwrapStrings(instructions) {
 	});
 }
 
+function eliminateStringCoreFlagsMask(instructions, downstreamInstructions) {
+	instructions.forEach((instruction, i) => {
+		if (instruction.operation == "assignment") {
+			instruction.inputs.forEach(input => {
+				if (input.interpretation == "struct_extract" && input.type == "_StringCore" && input.fieldName == "length") {
+					var constantLocal;
+					var allDownstream = instructions.slice(i + 1).concat(downstreamInstructions);
+					allDownstream.forEach(otherInstruction => otherInstruction.inputs.forEach(input => {
+						if (otherInstruction.operation == "assignment" && input.interpretation == "integer_literal" && input.value == 0x3FFFFFFF) {
+							constantLocal = otherInstruction.destinationLocalName;
+						}
+						if (input.interpretation == "builtin" && input.builtinName == "and_Int32" && input.localNames[0] == instruction.destinationLocalName && input.localNames[1] == constantLocal && constantLocal !== undefined) {
+							input.interpretation = "contents";
+							input.localNames.splice(1);
+							delete input.builtinName;
+						}
+					}));
+				}
+			});
+		}
+	});
+}
+
 function removeStringFoundationBridge(instructions, downstreamInstructions) {
 	instructions.forEach((instruction, i) => {
 		if (instruction.operation == "assignment") {
@@ -603,6 +626,7 @@ function optimize(declaration, parser) {
 			removeStringFoundationBridge(instructions, downstreamInstructions);
 			fuseGlobalAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions, builtins);
+			eliminateStringCoreFlagsMask(instructions, downstreamInstructions);
 		});
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
