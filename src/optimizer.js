@@ -539,6 +539,30 @@ function reorderedBlocks(basicBlocks) {
 	return result;
 }
 
+function dropSimpleRethrows(blocks, instructions) {
+	if (instructions.length > 0) {
+		var instruction = instructions[instructions.length - 1];
+		if (instruction.operation == "try_apply") {
+			var errorBlock = findBasicBlock(blocks, instruction.errorBlock);
+			if (errorBlock.instructions.length == 1) {
+				var otherInstruction = errorBlock.instructions[0];
+				if (otherInstruction.operation == "throw" && otherInstruction.inputs[0].interpretation == "contents" && errorBlock.arguments[0].localName == otherInstruction.inputs[0].localNames[0]) {
+					instruction.operation = "assignment";
+					instruction.inputs = [{
+						interpretation: "apply",
+						localNames: instruction.inputs.map(input => input.localNames[0]),
+					}];
+					var normalBlock = findBasicBlock(blocks, instruction.normalBlock);
+					instruction.destinationLocalName = normalBlock.arguments[0].localName;
+					delete instruction.normalBlock;
+					delete instruction.errorBlock;
+					serializedClone(normalBlock).instructions.forEach(instruction => instructions.push(instruction));
+				}
+			}
+		}
+	}
+}
+
 function inlineBlocks(basicBlocks) {
 	var work = basicBlocks.map((block, index) => {
 		return {
@@ -654,6 +678,7 @@ function optimize(declaration, parser) {
 			fuseStackAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions, builtins);
 			eliminateStringCoreFlagsMask(instructions, downstreamInstructions);
+			dropSimpleRethrows(declaration.basicBlocks, instructions);
 		});
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
