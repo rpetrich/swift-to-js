@@ -265,7 +265,7 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 						return js.member(js.mangledLocal(args[args.length-1]), js.literal(fieldName));
 					}
 					if (match[2] == "setter") {
-						return js.assignment(js.member(callee, js.literal(fieldName)), js.mangledLocal(args[args.length-2]));
+						return js.sequence([js.assignment(js.member(callee, js.literal(fieldName)), js.mangledLocal(args[args.length-2])), js.literal(undefined)]);
 					}
 				}
 				callee = js.member(callee, js.literal(fieldName));
