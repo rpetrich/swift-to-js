@@ -629,9 +629,18 @@ Parser.prototype.parseInstruction = function (line, source) {
 		return {
 			operation: "store",
 			source: source,
-			inputs: [simpleLocalContents(match[2], undefined, source), simpleLocalContents(match[3], source)],
+			inputs: [simpleLocalContents(match[2], undefined, source), simpleLocalContents(match[3], undefined, source)],
 			type: match[5],
 		};
+	}
+	match = line.match(/^(unconditional_checked_cast(_addr)?)\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+%(\d+)\s+:\s+\$(.*)\s+to\s+.*\s+in\s+%(\d+)\s+:\s+\$(.*)/);
+	if (match) {
+		return {
+			operation: "store",
+			source: source,
+			inputs: [simpleLocalContents(match[4], undefined, source), simpleLocalContents(match[6], undefined, source)],
+			type: match[7],
+		}
 	}
 	match = line.match(/^copy_addr\s+(\[take\]\s+)?\%(\w+)(\#\d+)?\s+to\s+(\[initialization\]\s+)?\%(\w+)(\#\d+)?\s+:/);
 	if (match) {
