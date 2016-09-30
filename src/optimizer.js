@@ -105,6 +105,10 @@ function unwrapStrings(instructions) {
 						} else if (input.fieldName == "_baseAddress") {
 							input.interpretation = "contents";
 							delete input.fieldName;
+						} else if (input.fieldName == "_owner") {
+							input.interpretation = "undefined_literal";
+							delete input.fieldName;
+							input.localNames = [];
 						}
 					} else if (input.type == "StaticString") {
 						if (input.fieldName == "_utf8CodeUnitCount") {
