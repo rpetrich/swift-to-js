@@ -126,7 +126,14 @@ var estree = {
 			type: "BlockStatement",
 			body: body,
 		},
-		loc: null,
+	}),
+	functionExpression: (params, body) => ({
+		type: "FunctionExpression",
+		params: params,
+		body: {
+			type: "BlockStatement",
+			body: body,
+		},
 	}),
 	returnStatement: expression => ({
 		type: "ReturnStatement",

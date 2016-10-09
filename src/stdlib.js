@@ -25,11 +25,25 @@ const truncateToInt32 = result => js.binary("|", result, js.literal(0));
 //const truncateToInt64 = result => js.binary("%", result, js.literal(Number.MAX_SAFE_INTEGER)); // 53 bit integers? o_O
 const truncateToInt64 = result => result;
 
+const truncateToFloat32 = (result, functionContext) => {
+	var codegen = functionContext.codegen;
+	if (!codegen.emittedFunctions["fround"]) {
+		codegen.emittedFunctions["fround"] = true;
+		var nativeImplementation = js.member(js.identifier("Math"), js.literal("fround"));
+		var valueIdentifier = js.identifier("value");
+		// Polyfill doesn't technically perform the float truncation, but there's not much we can do about that
+		var polyfillImplementation = js.functionExpression([valueIdentifier], [js.returnStatement(valueIdentifier)]);
+		codegen.body.push(js.declaration(js.identifier("fround"), js.binary("||", nativeImplementation, polyfillImplementation)));
+	}
+	return js.call(js.identifier("fround"), [result]);
+};
+const truncateToFloat64 = result => result;
+
 const wrapInOverflowCheck = (expression, truncate, functionContext) => {
 	const resultVar = functionContext.tempVariable();
 	const truncatedVar = functionContext.tempVariable();
 	const arithmeticOperation = js.assignment(resultVar, expression);
-	const truncateOperation = js.assignment(truncatedVar, truncate(resultVar));
+	const truncateOperation = js.assignment(truncatedVar, truncate(resultVar, functionContext));
 	const checkOperation = js.binary("!=", truncatedVar, resultVar);
 	return js.sequence([arithmeticOperation, truncateOperation, js.array([truncatedVar, checkOperation])]);
 }
@@ -38,7 +52,7 @@ const binaryOperation = operation => (input, functionContext) => js.binary(opera
 
 const checkedForOverflow = (operation, truncate) => (input, functionContext) => wrapInOverflowCheck(operation(input, functionContext), truncate, functionContext);
 
-const truncateOnOverflow = (operation, truncate) => (input, functionContext) => truncate(operation(input, functionContext));
+const truncateOnOverflow = (operation, truncate) => (input, functionContext) => truncate(operation(input, functionContext), functionContext);
 
 const asPure = builtin => {
 	builtin.pure = true;
@@ -147,8 +161,18 @@ module.exports = {
 		"cmp_ne_Int8": asPure(binaryOperation("!=")),
 		"and_Int8": asPure(binaryOperation("&")),
 		"or_Int8": asPure(binaryOperation("|")),
+		// Float32
+		"fcmp_oeq_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("=="), truncateToFloat32)),
+		"fcmp_one_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("!="), truncateToFloat32)),
+		"fadd_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("+"), truncateToFloat32)),
+		"fsub_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("-"), truncateToFloat32)),
+		"fmul_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("*"), truncateToFloat32)),
 		// Float64
-		"fcmp_oeq_FPIEEE64": asPure(binaryOperation("==")),
+		"fcmp_oeq_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("=="), truncateToFloat64)),
+		"fcmp_one_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("!="), truncateToFloat64)),
+		"fadd_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("+"), truncateToFloat64)),
+		"fsub_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("-"), truncateToFloat64)),
+		"fmul_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("*"), truncateToFloat64)),
 		"fadd_FPIEEE64": asPure(binaryOperation("+")),
 		"fsub_FPIEEE64": asPure(binaryOperation("-")),
 		"fmul_FPIEEE64": asPure(binaryOperation("*")),
