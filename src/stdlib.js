@@ -223,7 +223,7 @@ module.exports = {
 		"_TFs18_fatalErrorMessageFTVs12StaticStringS_S_Su5flagsVs6UInt32_Os5Never": functionBuiltin("(prefix, message, file, line, flags) { throw console.log(prefix + message + \" in \" + file + \":\" + line) }"),
 	},
 	functions: {
-		"sqrt": js.declaration(js.identifier("sqrt"), js.internalMember(js.identifier("Math"), "sqrt")),
+		"sqrt": js.declaration(js.identifier("sqrt"), js.property(js.identifier("Math"), "sqrt")),
 		"_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType": js.functionDeclaration(js.identifier("_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType"), [js.identifier("value"), js.identifier("result")], []),
 		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": js.functionDeclaration(js.identifier("_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString"), [], [js.returnStatement(js.identifier("this"))]),
 		"_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS": js.functionDeclaration(js.identifier("_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS"), [js.identifier("string")], [js.returnStatement(js.identifier("string"))]),

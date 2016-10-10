@@ -274,7 +274,7 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 				var hiddenThisArg = args.pop();
 				if ((hiddenThisArg != input.localNames[0]) || !input.fieldName) {
 					args.unshift(hiddenThisArg);
-					callee = js.member(callee, js.literal("call"));
+					callee = js.property(callee, "call");
 				}
 			}
 			return js.call(callee, args.map(js.mangledLocal));
@@ -552,7 +552,13 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			return [resultNode];
 		case "try_apply":
 			var rValues = instruction.inputs.map(input => this.rValueForInput(input));
-			var call = js.call(rValues[0], rValues.slice(1));
+			var callee = rValues[0];
+			var args = rValues.slice(1);
+			if (instruction.convention == "method" || instruction.convention == "objc_method") {
+				callee = js.property(callee, "call");
+				args.unshift(args.pop());
+			}
+			var call = js.call(callee, args);
 			var normalBasicBlock = findBasicBlock(siblingBlocks, instruction.normalBlock);
 			normalBasicBlock.arguments.forEach(arg => functionContext.addVariable(js.mangledLocal(arg.localName)));
 			if (normalBasicBlock.arguments.length > 0) {

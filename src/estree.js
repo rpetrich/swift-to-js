@@ -36,10 +36,10 @@ var estree = {
 		property: property,
 		computed: true,
 	}),
-	internalMember: (object, internalName) => ({
+	property: (object, propertyName) => ({
 		type: "MemberExpression",
 		object: object,
-		property: estree.identifier(internalName),
+		property: estree.identifier(propertyName),
 		computed: false,
 	}),
 	box: (parent, field) => ({
@@ -56,8 +56,8 @@ var estree = {
 			value: field,
 		}]
 	}),
-	unboxRef: boxed => estree.internalMember(boxed, "ref"),
-	unboxField: boxed => estree.internalMember(boxed, "field"),
+	unboxRef: boxed => estree.property(boxed, "ref"),
+	unboxField: boxed => estree.property(boxed, "field"),
 	unbox: boxed => estree.member(estree.unboxRef(boxed), estree.unboxField(boxed)),
 	unboxIfAddr: (operation, node) => /_addr$/.test(operation) ? estree.unbox(node) : node,
 	unary: (operator, value) => ({

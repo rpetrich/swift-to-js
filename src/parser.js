@@ -685,19 +685,22 @@ Parser.prototype.parseInstruction = function (line, source) {
 			type: basicNameForStruct(match[4]),
 		};
 	}
-	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:.*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
+	match = line.match(/^try_apply\s+%(\w+)(<.*>)?\((.*)\)\s+:\s+\$(.*).*,\s+normal\s+(\w+),\s+error\s+(\w+)/);
 	if (match) {
 		var inputs = splitNoParens(match[3]).map(arg => {
 			var match = arg.match(/^%(\d+)$/)
 			return simpleLocalContents(match[1], undefined, source);
 		});
 		inputs.unshift(simpleLocalContents(match[1], undefined, source))
+		var conventionMatch = match[4].match(/^@convention\((\w+)\)\s/);
 		return {
 			operation: "try_apply",
 			source: source,
 			inputs: inputs,
-			normalBlock: { reference: match[4] },
-			errorBlock: { reference: match[5] },
+			type: match[4],
+			convention: conventionMatch[1],
+			normalBlock: { reference: match[5] },
+			errorBlock: { reference: match[6] },
 		};
 	}
 	match = line.match(/^throw\s+%(\w+)\s*:/);

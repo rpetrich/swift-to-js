@@ -550,6 +550,7 @@ function dropSimpleRethrows(blocks, instructions) {
 					instruction.operation = "assignment";
 					instruction.inputs = [{
 						interpretation: "apply",
+						convention: instruction.convention,
 						localNames: instruction.inputs.map(input => input.localNames[0]),
 					}];
 					var normalBlock = findBasicBlock(blocks, instruction.normalBlock);
@@ -668,17 +669,17 @@ function optimize(declaration, parser) {
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
 			var instructions = item.instructions;
 			var downstreamInstructions = item.downstreamInstructions;
+			dropSimpleRethrows(declaration.basicBlocks, instructions);
 			unwrapSimpleStructInstructions(instructions, types);
+			unwrapStrings(instructions);
 			unwrapPassthroughBuiltins(instructions, builtins);
 			reassignOverflowBuiltins(instructions, downstreamInstructions, builtins);
 			unwrapOptionalEnums(instructions);
-			unwrapStrings(instructions);
 			removeStringFoundationBridge(instructions, downstreamInstructions);
 			fuseGlobalAllocations(instructions);
 			fuseStackAllocations(instructions);
 			fuseAssignments(instructions, downstreamInstructions, builtins);
 			eliminateStringCoreFlagsMask(instructions, downstreamInstructions);
-			dropSimpleRethrows(declaration.basicBlocks, instructions);
 		});
 		inlineBlocks(declaration.basicBlocks);
 		allInstructionLists(declaration.basicBlocks).forEach(item => {
