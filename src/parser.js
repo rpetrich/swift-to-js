@@ -503,7 +503,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 				break;
 			case "witness_method":
 				var match = args.match(/^.*?,\s+\#(.*?)(,\s+%(\w+))?\s+:\s+(.*\$\@convention\((\w+)\))?/);
-				input.localNames = [match[3] || "0"]; // TODO: Figure out how to handle calls on $Self
+				if (match[3]) {
+					input.localNames = [match[3]];
+				} else {
+					// Pull the "self" parameter
+					var functionArguments = this.currentDeclaration.basicBlocks[0].arguments;
+					input.localNames = [functionArguments[functionArguments.length - 1].localName];
+				}
 				input.type = "TODO";
 				input.entry = match[1];
 				input.convention = match[5] || "swift";
