@@ -539,26 +539,45 @@ function reorderedBlocks(basicBlocks) {
 	return result;
 }
 
+function isSimpleRethrow(block) {
+	var firstInstruction = block.instructions[0]
+	switch (block.instructions.length) {
+		case 1:
+			if (firstInstruction.operation == "throw") {
+				var input = firstInstruction.inputs[0];
+				if (input.interpretation == "contents" && block.arguments[0].localName == input.localNames[0]) {
+					return true;
+				}
+			}
+			break;
+		case 2:
+			if (block.instructions[1].operation == "unreachable" && firstInstruction.operation == "assignment") {
+				var input = firstInstruction.inputs[0];
+				if (input.interpretation == "builtin" && block.arguments[0].localName == input.localNames[0]) {
+					return true;
+				}
+			}
+			break;
+	}
+	return false;
+}
+
 function dropSimpleRethrows(blocks, instructions) {
 	if (instructions.length > 0) {
 		var instruction = instructions[instructions.length - 1];
 		if (instruction.operation == "try_apply") {
-			var errorBlock = findBasicBlock(blocks, instruction.errorBlock);
-			if (errorBlock.instructions.length == 1) {
-				var otherInstruction = errorBlock.instructions[0];
-				if (otherInstruction.operation == "throw" && otherInstruction.inputs[0].interpretation == "contents" && errorBlock.arguments[0].localName == otherInstruction.inputs[0].localNames[0]) {
-					instruction.operation = "assignment";
-					instruction.inputs = [{
-						interpretation: "apply",
-						convention: instruction.convention,
-						localNames: instruction.inputs.map(input => input.localNames[0]),
-					}];
-					var normalBlock = findBasicBlock(blocks, instruction.normalBlock);
-					instruction.destinationLocalName = normalBlock.arguments[0].localName;
-					delete instruction.normalBlock;
-					delete instruction.errorBlock;
-					serializedClone(normalBlock).instructions.forEach(instruction => instructions.push(instruction));
-				}
+			if (isSimpleRethrow(findBasicBlock(blocks, instruction.errorBlock))) {
+				instruction.operation = "assignment";
+				instruction.inputs = [{
+					interpretation: "apply",
+					convention: instruction.convention,
+					localNames: instruction.inputs.map(input => input.localNames[0]),
+				}];
+				var normalBlock = findBasicBlock(blocks, instruction.normalBlock);
+				instruction.destinationLocalName = normalBlock.arguments[0].localName;
+				delete instruction.normalBlock;
+				delete instruction.errorBlock;
+				serializedClone(normalBlock).instructions.forEach(instruction => instructions.push(instruction));
 			}
 		}
 	}
