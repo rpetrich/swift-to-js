@@ -502,11 +502,11 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.interpretation = "contents";
 				break;
 			case "witness_method":
-				var match = args.match(/^.*,\s+\#(.*),\s+%(\d+)\s+:\s+(.*\$\@convention\((\w+)\))?/);
-				input.localNames = [match[2]];
+				var match = args.match(/^.*?,\s+\#(.*?)(,\s+%(\w+))?\s+:\s+(.*\$\@convention\((\w+)\))?/);
+				input.localNames = [match[3] || "0"]; // TODO: Figure out how to handle calls on $Self
 				input.type = "TODO";
 				input.entry = match[1];
-				input.convention = match[4] || "swift";
+				input.convention = match[5] || "swift";
 				input.interpretation = "class_method";
 				break;
 			case "class_method":
