@@ -538,6 +538,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[3];
 				input.interpretation = "contents";
 				break;
+			case "unconditional_checked_cast":
+				// TODO: Trap if the cast fails, instead of downstream when the value is used
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*)\s+to\s+/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
+				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
 				break;
