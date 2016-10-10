@@ -568,6 +568,7 @@ CodeGen.prototype.nodesForInstruction = function (instruction, basicBlock, sibli
 			errorBasicBlock.arguments.forEach(arg => functionContext.addVariable(js.mangledLocal(arg.localName)));
 			var errorTemp = js.identifier("e");
 			recover = js.assignment(js.mangledLocal(errorBasicBlock.arguments[0].localName), errorTemp);
+			// TODO: Place the normalBlock outside the try, that way throws from inside it will bubble up instead of be caught by our catch clause
 			return [{
 				type: "TryStatement",
 				block: {
