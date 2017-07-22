@@ -28,12 +28,15 @@ const withAddedComment = (nodeOrNodeList, comment, isTrailing, isMultiLine) => {
 	return nodeOrNodeList;
 }
 
-const withSource = (node, source) => {
+const withSource = (node, source, additionalComment) => {
 	if (source) {
 		var comment = " sil:" + source.sil;
 		if (source.file) {
 			comment = " " + source.file + ":" + source.line + comment;
 			node.loc = { start: { line: source.line, column: source.column }, source: source.file };
+		}
+		if (additionalComment) {
+			comment += " " + additionalComment;
 		}
 		withAddedComment(node, comment);
 	}
@@ -617,7 +620,7 @@ CodeGen.prototype.nodesForBasicBlock = function (basicBlock, siblingBlocks, func
 	return withAddedComment(basicBlock.instructions.reduce((nodes, instruction) => {
 		var newNodes = this.nodesForInstruction(instruction, basicBlock, siblingBlocks, functionContext);
 		if (newNodes.length > 0) {
-			withSource(newNodes[0], instruction.source);
+			withSource(newNodes[0], instruction.source, JSON.stringify(instruction));
 		}
 		// newNodes.forEach(node => { console.log(JSON.stringify(node)), escodegen.generate(node) });
 		return nodes.concat(newNodes);
