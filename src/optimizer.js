@@ -194,6 +194,27 @@ function removeStringFoundationBridge(instructions, downstreamInstructions) {
 	});
 }
 
+function simplifyStringConcat(instructions, downstreamInstructions) {
+	// Remove the hidden "this" argument for calls to swiftweb_stringConcat
+	for (var i = 0; i < instructions.length; i++) {
+		var instruction = instructions[i];
+		if (instruction.operation == "assignment") {
+			var input = instruction.inputs[0];
+			if (input.interpretation == "function_ref" && input.functionName == "swiftweb_stringConcat") {
+				for (var j = i + 1; j < instructions.length; j++) {
+					instructions[j].inputs.forEach(input => {
+						if (input.interpretation == "apply" && input.localNames[0] == instruction.destinationLocalName) {
+							input.convention = "swift";
+							input.localNames.splice(input.localNames.length - 1, 1);
+							// console.log(input);
+						}
+					});
+				}
+			}
+		}
+	}
+}
+
 const isOptionalType = typeName => {
 	typeName = Parser.removePointer(typeName);
 	return typeName == "Optional" || typeName == "ImplicitlyUnwrappedOptional";
@@ -705,6 +726,7 @@ function optimize(declaration, parser) {
 			dropSimpleRethrows(declaration.basicBlocks, instructions);
 			unwrapSimpleStructInstructions(instructions, types);
 			unwrapStrings(instructions);
+			simplifyStringConcat(instructions, downstreamInstructions);
 			unwrapPassthroughBuiltins(instructions, builtins);
 			reassignOverflowBuiltins(instructions, downstreamInstructions, builtins);
 			unwrapOptionalEnums(instructions);
