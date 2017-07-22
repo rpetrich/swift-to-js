@@ -250,7 +250,7 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 		case "builtin":
 			var builtinName = input.builtinName;
 			if (!(builtinName in this.builtins)) {
-				throw new Error("No builtin available for " + builtinName + " (expects " + (input.localNames.length - 1) + " arguments)");
+				throw new Error("No builtin available for " + builtinName + " (expects " + input.localNames.length + " arguments)");
 			}
 			return this.builtins[input.builtinName](input, functionContext);
 		case "function_ref":
@@ -401,6 +401,8 @@ CodeGen.prototype.lValueForInput = function (input, functionContext) {
 			var type = this.findType(input.type);
 			var node = this.nodeForAllocDeep(type);
 			return js.member(js.array(input.localNames.map(localName => js.mangledLocal(localName))), js.literal(0));
+		case "ref_to_raw_pointer":
+			return js.member(js.mangledLocal(input.localNames[0]), js.literal(0));
 	}
 	throw new Error("Unable to interpret lvalue as " + input.interpretation + " with " + input.line);
 }
