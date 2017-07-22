@@ -385,7 +385,7 @@ CodeGen.prototype.lValueForInput = function (input, functionContext) {
 		case "struct_extract":
 			return js.member(js.mangledLocal(input.localNames[0]), js.literal(input.fieldName));
 		case "tuple_extract":
-			return js.member(js.mangledLocal(input.localNames[0]), js.literal(input.fieldName | 0));
+			return js.unbox(js.member(js.mangledLocal(input.localNames[0]), js.literal(input.fieldName | 0)));
 		case "global_addr":
 			var result = this.nodeForGlobal(input.globalName);
 			if (input.alloc) {
