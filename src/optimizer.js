@@ -680,6 +680,12 @@ function pruneDeadBlocks(basicBlocks) {
 	});
 }
 
+function removeEmptyReturns(basicBlocks) {
+	basicBlocks.forEach((block, i) => {
+		block.instructions = block.instructions.filter(instruction => true);
+	});
+}
+
 function allInstructionLists(basicBlocks) {
 	var result = [];
 	basicBlocks = basicBlocks.slice();
@@ -744,6 +750,9 @@ function optimize(declaration, parser) {
 			deadAssignmentElimination(instructions, downstreamInstructions, builtins);
 		});
 		pruneDeadBlocks(declaration.basicBlocks);
+		if (declaration.basicBlocks.length == 1) {
+			removeEmptyReturns(declaration.basicBlocks);
+		}
 	}
 	if (declaration.type == "vtable") {
 		for (var key in declaration.entries) {
