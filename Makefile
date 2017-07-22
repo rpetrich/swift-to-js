@@ -1,7 +1,11 @@
 SWIFT = xcrun swiftc
-#SWIFT = ../swift-source/build/Ninja-RelWithDebInfoAssert/swift-macosx-x86_64/bin/swiftc
-FAKE_TARGET = i386-apple-ios7.0
-FAKE_SDK = ~/Downloads/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
+# SWIFT = ../swift-source/build/Ninja-RelWithDebInfo/swift-macosx-x86_64/bin/swiftc
+# FAKE_TARGET = i386-apple-ios7.0
+# FAKE_SDK = ~/Downloads/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk
+# SWIFT = ../swift-source/build/web/swift-macosx-x86_64/bin/swiftc
+FAKE_TARGET = x86_64-apple-macosx10.12
+#FAKE_TARGET = web
+FAKE_SDK = /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 CLOSURE_FORMATTING = PRETTY_PRINT
 
 all: test.swift-min.js
@@ -15,10 +19,12 @@ test: test.swift.js
 .PHONY: all clean test
 
 %.sil: %.swift Makefile
-	$(SWIFT) -emit-sil -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" -o "$@"
+	#$(SWIFT) -emit-sil -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -import-objc-header DOMDocument.h -module-name="$*" "$<" -o "$@"
+	$(SWIFT) -emit-sil -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -import-objc-header DOMDocument.h -module-name="$*" "$<" -o "$@"
 
 %.sil.ast: %.swift Makefile
-	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -module-name="$*" "$<" > "$@"
+	#$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -Xfrontend -disable-objc-interop -import-objc-header DOMDocument.h -module-name="$*" "$<" > "$@"
+	$(SWIFT) -print-ast -g -Ounchecked -parse-as-library --target=$(FAKE_TARGET) -sdk $(FAKE_SDK) -import-objc-header DOMDocument.h -module-name="$*" "$<" > "$@"
 
 %.swift.js: %.sil %.sil.ast src/*.js
 	node src/swift-to-js.js --ast "$<.ast" --sil "$<" --output "$@" --source-map "$@.map"
