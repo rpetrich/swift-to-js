@@ -734,8 +734,8 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		} else if (functionContext.hasVariable(js.identifier("state"))) {
 			body.push(js.expressionStatement(js.assignment(js.identifier("state"), js.literal(index + 1))));
 			// Recreate the block with the "insideSwitch" flag set, so that break statements work correctly
-			functionContext.insideSwitch = true;
 			body.push.apply(body, this.nodesForBasicBlock(basicBlock, basicBlocks, functionContext));
+			functionContext.insideSwitch = true;
 			cases = [];
 			body.push({
 				type: "ForStatement",
