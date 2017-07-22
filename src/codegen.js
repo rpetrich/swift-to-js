@@ -684,6 +684,9 @@ CodeGen.prototype.consumeFunction = function(fn) {
 		// No basic blocks, some kind of weird declaration we don't support yet
 		return;
 	}
+	if (this.emittedFunctions[fn.name]) {
+		return;
+	}
 	var body = [];
 	var functionContext = new FunctionContext(this);
 	// Apply calling convention to the argument list
