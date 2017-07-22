@@ -58,7 +58,7 @@ function unwrapPassthroughBuiltins(instructions, builtins) {
 	})
 }
 
-const uncheckedVersionOfBuiltin = originalBuiltinName => originalBuiltinName.replace(/_with_overflow_/, "_with_truncate_").replace(/_checked_trunc_/, "_unchecked_trunc_");
+const uncheckedVersionOfBuiltin = originalBuiltinName => originalBuiltinName.replace(/_with_overflow_/, "_with_truncate_").replace(/_checked_trunc_/, "_unchecked_trunc_").replace(/_checked_conversion_/, "_unchecked_conversion_");
 
 function reassignOverflowBuiltins(instructions, downstreamInstructions, builtins) {
 	instructions.forEach((instruction, i) => {
@@ -66,22 +66,36 @@ function reassignOverflowBuiltins(instructions, downstreamInstructions, builtins
 			var input = instruction.inputs[0];
 			var newBuiltinName;
 			if (input.interpretation == "builtin" && (newBuiltinName = uncheckedVersionOfBuiltin(input.builtinName)) != input.builtinName && builtins[newBuiltinName]) {
+				var watchedLocals = [instruction.destinationLocalName];
 				var targetInstructions = [];
-				for (var k = i + 1; k < instructions.length; k++) {
-					var proposedInstruction = instructions[k];
-					if (countOfUsesOfLocal(proposedInstruction, instruction.destinationLocalName) > 0) {
-						if (proposedInstruction.inputs[0].interpretation != "tuple_extract" || (proposedInstruction.inputs[0].fieldName | 0) != 0) {
-							return;
+				const attemptRewrite = (proposedInstruction) => {
+					if (countOfUsesOfLocal(proposedInstruction, watchedLocals[0]) > 0) {
+						if (proposedInstruction.inputs[0].interpretation != "contents") {
+							if (proposedInstruction.inputs[0].interpretation != "tuple_extract" || (proposedInstruction.inputs[0].fieldName | 0) != 0) {
+								return false;
+							}
 						}
 						targetInstructions.push(proposedInstruction);
 					}
+					return true;
+				};
+				for (var k = i + 1; k < instructions.length; k++) {
+					if (!attemptRewrite(instructions[k])) {
+						// console.log("Keeping overflow check due to use:\n", instruction, "\n", instructions[k], "\n");
+					}
 				}
-				if (!downstreamInstructions.some(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0)) {
+				if (downstreamInstructions.every(attemptRewrite)) {
+					// console.log("Removing overflow checks:\n", /*instruction, */"\n");
 					input.builtinName = newBuiltinName;
+					input.type = input.type.substr(1).split(",")[0];
+					// console.log(instruction);
+					// console.log("\n");
 					targetInstructions.forEach(otherInstruction => {
 						otherInstruction.inputs[0].interpretation = "contents";
 						delete otherInstruction.inputs[0].fieldName;
 					});
+				} else {
+					// console.log("Keeping overflow check due to use:\n", instruction, "\n", downstreamInstructions.find(otherInstruction => countOfUsesOfLocal(otherInstruction, instruction.destinationLocalName) != 0), "\n");
 				}
 			}
 		}
