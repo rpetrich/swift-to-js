@@ -335,7 +335,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.interpretation = "integer_literal";
 				break;
 			case "struct_element_addr":
-				var match = args.match(/^%(\w+)(\#\d+)?\s+:\s+.*?#(\w+)\.(\w+)$/);
+				var match = args.match(/^%(\w+)(\#\d+)?\s+:\s+.*?#(.*)\.(.*)$/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
 				// 	type: match[3]
@@ -455,10 +455,18 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[3];
 				input.interpretation = "contents";
 				break;
-			case "unchecked_addr_cast":
-			case "pointer_to_address":
 			case "ref_to_raw_pointer":
 			case "raw_pointer_to_ref":
+				var match = args.match(/^%(\d+)\s+:\s*(.*)/);
+				// assignment.inputs = [{
+				// 	localName: match[1],
+				// 	type: match[2],
+				// }];
+				input.localNames = [match[1]];
+				input.type = match[2];
+				break;
+			case "unchecked_addr_cast":
+			case "pointer_to_address":
 				var match = args.match(/^%(\d+)\s+:\s*(.*)/);
 				// assignment.inputs = [{
 				// 	localName: match[1],
@@ -557,6 +565,13 @@ Parser.prototype.parseInstruction = function (line, source) {
 				input.type = match[2];
 				input.interpretation = "contents";
 				break;
+			case "unchecked_trivial_bit_cast":
+				// TODO: Figure out if types are "compatible"
+				var match = args.match(/^%(\d+)\s+:\s+\$(.*)\s+to\s+/);
+				input.localNames = [match[1]];
+				input.type = match[2];
+				input.interpretation = "contents";
+				break;
 			default:
 				throw new Error("Unable to interpret " + input.interpretation + " from line: " + line);
 				break;
@@ -614,7 +629,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			exact: !!match[1],
 		};
 	}
-	match = line.match(/^checked_cast_addr_br\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+\%(\d+)\s+:\s+\$(.*)\s+to\s+.*\s+in\s+\%(\d+)\s+:\s+\$(.*)\,\s+(\w+),\s+(\w+)/);
+	match = line.match(/^checked_cast_addr_br\s+(take_always|take_on_success|copy_on_success)\s+.*\s+in\s+\%(\d+)\s+:\s+\$(.*)\s+to\s+.*\s+in\s+\%(\d+)\s+:\s+\$.*?(\w+).*\,\s+(\w+),\s+(\w+)/);
 	if (match) {
 		return {
 			operation: "checked_cast_addr_br",
@@ -623,7 +638,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			trueBlock: { reference: match[6] },
 			falseBlock: { reference: match[7] },
 			type: match[5],
-		}
+		};
 	}
 	match = line.match(/^inject_enum_addr\s+\%(\d+)\s+:\s+\$(.*)\,\s+\#.*\.(.*)\!/);
 	if (match) {
@@ -633,7 +648,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			inputs: [simpleLocalContents(match[1], match[2], source)],
 			type: basicNameForStruct(match[2]),
 			caseName: match[3],
-		}
+		};
 	}
 	match = line.match(/^cond_fail\s+\%(\w+)\s+:/);
 	if (match) {
@@ -717,7 +732,7 @@ Parser.prototype.parseInstruction = function (line, source) {
 			source: source,
 			inputs: inputs,
 			type: match[4],
-			convention: conventionMatch[1],
+			convention: conventionMatch ? conventionMatch[1] : "swift",
 			normalBlock: { reference: match[5] },
 			errorBlock: { reference: match[6] },
 		};
