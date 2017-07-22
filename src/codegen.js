@@ -198,6 +198,10 @@ CodeGen.prototype.rValueForInput = function(input, functionContext) {
 	switch (input.interpretation) {
 		case "contents":
 			return this.nodeForCopyDeep(js.mangledLocal(input.localNames[0]), this.types[input.type], functionContext);
+		case "ref_to_raw_pointer":
+			return js.box(js.mangledLocal(input.localNames[0]), js.literal(0));
+		case "raw_pointer_to_ref":
+			return js.unboxRef(js.mangledLocal(input.localNames[0]));
 		case "integer_literal":
 		case "float_literal":
 		case "string_literal":
