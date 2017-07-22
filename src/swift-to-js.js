@@ -40,6 +40,7 @@ parseAll([program.ast, program.sil], () => {
 		Optimizer.optimize(declaration, parser);
 	});
 	Optimizer.optimizeTypes(parser.types);
+	parser.declarations = parser.declarations.filter(declaration => !["_TFVs20_ConcreteHashableBox6_unboxuRd__s8HashablerfT_GSqqd___", "_TTWuRxs8HashablerGVs20_ConcreteHashableBoxx_s15_AnyHashableBoxsFS1_6_unboxuRd__S_rfT_GSqqd___"].includes(declaration.name));
 	parser.declarations.forEach(declaration => {
 		codegen.consume(declaration);
 	});
