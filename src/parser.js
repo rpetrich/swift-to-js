@@ -164,6 +164,9 @@ Parser.prototype.parseInstruction = function (line, source) {
 	if (/^deinit_existential_addr\s+/.test(line)) {
 		return;
 	}
+	if (/^fix_lifetime\s+/.test(line)) {
+		return;
+	}
 	if (line == "unreachable") {
 		return {
 			operation: "unreachable",
