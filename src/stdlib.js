@@ -48,6 +48,7 @@ const wrapInOverflowCheck = (expression, truncate, functionContext) => {
 	return js.sequence([arithmeticOperation, truncateOperation, js.array([truncatedVar, checkOperation])]);
 }
 
+const unaryOperation = operation => (input, functionContext) => js.unary(operation, js.mangledLocal(input.localNames[0]));
 const binaryOperation = operation => (input, functionContext) => js.binary(operation, js.mangledLocal(input.localNames[0]), js.mangledLocal(input.localNames[1]));
 
 const checkedForOverflow = (operation, truncate) => (input, functionContext) => wrapInOverflowCheck(operation(input, functionContext), truncate, functionContext);
@@ -64,11 +65,15 @@ const passthrough = asPure((input, functionContext) => js.mangledLocal(input.loc
 module.exports = {
 	"types": {
 		"Int": structType([field("_value")]),
+		"Int8": structType([field("_value")]),
+		"Int16": structType([field("_value")]),
+		"Int32": structType([field("_value")]),
+		"Int64": structType([field("_value")]),
 		"UInt": structType([field("_value")]),
 		"UInt8": structType([field("_value")]),
 		"UInt16": structType([field("_value")]),
 		"UInt32": structType([field("_value")]),
-		"Int32": structType([field("_value")]),
+		"UInt64": structType([field("_value")]),
 		"Bool": structType([field("_value")]),
 		"UTF16": structType([field("_value")]),
 		"Float": structType([field("_value")]),
@@ -85,21 +90,33 @@ module.exports = {
 		"UnsafeBufferPointer": structType([field("_position"), field("_end")]),
 		"UnsafeRawPointer": structType([field("_rawValue")]),
 		"AutoreleasingUnsafeMutablePointer": structType([field("_rawValue")]),
+		"ManagedBufferPointer": structType([field("_nativeBuffer")]),
+		"ContiguousArray": structType([field("_buffer")]),
+		"_ContiguousArrayBuffer": structType([field("__bufferPointer")]),
 		"_HeapBuffer": structType([field("_storage")]),
 		"_StringBuffer": structType([field("_storage")]),
-		"_SwiftArrayBodyStorage": structType([field("count"), field("_capacityAndFlags")]),
+		"_SwiftArrayBodyStorage": structType([field("count")]),
 		"_ArrayBody": structType([field("_storage")]),
 		"_BridgeStorage": structType([field("rawValue")]),
 		"_ArrayBuffer": structType([field("_storage")]),
 		"_StringBufferIVars": structType([field("usedEnd"), field("capacityAndElementShift")]),
 		"Array": structType([field("_buffer")]),
+		"_DependenceToken": structType([]),
 		"Range": structType([field("startIndex"), field("endIndex")]),
 		"AnyHashable": structType([field("_box")]),
 		"_HasCustomAnyHashableRepresentation": protocolType(),
 		"_AnyHashableBox": protocolType(),
+		"Any": protocolType(),
+		"ObjectIdentifier": structType([field("_rawValue")]),
 		"_ConcreteHashableBox": structType([field("_baseHashable")]),
+		"Base": protocolType(), // Generics fail :'(
+		"T": protocolType(), // Generics fail :'(
 		"Optional": enumType(["none", "some"]),
 		"ImplicitlyUnwrappedOptional": enumType(["none", "some"]),
+		"_ClosedRangeIndexRepresentation": enumType(["pastEnd", "inRange"]),
+		"FloatingPointSign": enumType(["minus", "plus"]),
+		"FloatingPointRoundingRule": enumType(["awayFromZero", "down", "toNearestOrAwayFromZero", "toNearestOrEven", "towardZero", "up"]),
+		"FloatingPointClassification": enumType(["negativeInfinity", "negativeNormal", "negativeSubnormal", "negativeZero", "positiveInfinity", "positiveNormal", "positiveSubnormal", "positiveZero", "quietNaN", "signalingNaN"]),
 	},
 	"builtins": {
 		"passthrough": passthrough,
@@ -135,15 +152,38 @@ module.exports = {
 		"zext_Int8_Int32": passthrough,
 		"zext_Int16_Int32": passthrough,
 		"s_to_u_checked_conversion_Int32": asPure(checkedForOverflow(passthrough, truncateToInt32)), // TODO: Implement checked conversions
+		"s_to_u_unchecked_conversion_Int32": asPure(truncateOnOverflow(passthrough, truncateToInt32)),
 		"u_to_s_checked_conversion_Int32": asPure(checkedForOverflow(passthrough, truncateToInt32)), // TODO: Implement checked conversions
+		"u_to_s_unchecked_conversion_Int32": asPure(truncateOnOverflow(passthrough, truncateToInt32)),
+		"truncOrBitCast_Int64_Word": asPure(truncateOnOverflow(passthrough, truncateToInt32)),
 		"assumeNonNegative_Int32": passthrough,
 		// Int64
 		"zext_Int32_Int64": passthrough,
 		"sext_Int32_Int64": passthrough,
 		"sadd_with_overflow_Int64": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt64)),
 		"sadd_with_truncate_Int64": asPure(truncateOnOverflow(binaryOperation("+"), truncateToInt64)),
+		"uadd_with_overflow_Int64": asPure(checkedForOverflow(binaryOperation("+"), truncateToInt64)),
+		"ssub_with_overflow_Int64": asPure(checkedForOverflow(binaryOperation("-"), truncateToInt64)),
+		"ssub_with_truncate_Int64": asPure(truncateOnOverflow(binaryOperation("-"), truncateToInt64)),
+		"usub_with_overflow_Int64": asPure(checkedForOverflow(binaryOperation("-"), truncateToInt64)),
 		"s_to_s_checked_trunc_Int64_Int32": asPure(checkedForOverflow(passthrough, truncateToInt32)),
 		"s_to_s_unchecked_trunc_Int64_Int32": asPure(truncateOnOverflow(passthrough, truncateToInt32)),
+		"bitcast_FPIEEE64_Int64": passthrough, // TODO: Implement bit casts
+		"s_to_u_checked_conversion_Int64": passthrough,
+		"and_Int64": asPure(binaryOperation("&")), // Not 64-bit
+		"or_Int64": asPure(binaryOperation("|")), // Not 64-bit
+		"lshr_Int64": asPure(binaryOperation(">>")), // Not 64-bit
+		"shl_Int64": asPure(binaryOperation("<<")), // Not 64-bit
+		"srem_Int64": asPure(binaryOperation("%")), // Returns modulus, not remainder. Close enough for now
+		"cmp_ugt_Int64": asPure(binaryOperation(">")),
+		"cmp_uge_Int64": asPure(binaryOperation(">=")),
+		"cmp_ult_Int64": asPure(binaryOperation("<")),
+		"cmp_eq_Int64": asPure(binaryOperation("==")),
+		"cmp_ne_Int64": asPure(binaryOperation("!=")),
+		"cmp_slt_Int64": asPure(binaryOperation("<")),
+		"cmp_sge_Int64": asPure(binaryOperation(">=")),
+		"cmp_sgt_Int64": asPure(binaryOperation(">")),
+		"int_ctlz_Int64": passthrough, // TODO: Implement count leading zeros
 		// Int16
 		"zext_Int8_Int16": passthrough,
 		"cmp_ugt_Int16": asPure(binaryOperation(">")),
@@ -162,24 +202,46 @@ module.exports = {
 		"and_Int8": asPure(binaryOperation("&")),
 		"or_Int8": asPure(binaryOperation("|")),
 		// Float32
-		"fcmp_oeq_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("=="), truncateToFloat32)),
-		"fcmp_one_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("!="), truncateToFloat32)),
+		"fcmp_oeq_FPIEEE32": asPure(binaryOperation("==")),
+		"fcmp_one_FPIEEE32": asPure(binaryOperation("!=")),
 		"fadd_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("+"), truncateToFloat32)),
 		"fsub_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("-"), truncateToFloat32)),
 		"fmul_FPIEEE32": asPure(truncateOnOverflow(binaryOperation("*"), truncateToFloat32)),
 		// Float64
-		"fcmp_oeq_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("=="), truncateToFloat64)),
-		"fcmp_one_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("!="), truncateToFloat64)),
+		"fcmp_oeq_FPIEEE64": asPure(binaryOperation("==")),
+		"fcmp_one_FPIEEE64": asPure(binaryOperation("!=")),
+		"fcmp_olt_FPIEEE64": asPure(binaryOperation("<")),
+		"fcmp_ole_FPIEEE64": asPure(binaryOperation("<=")),
+		"fcmp_ogt_FPIEEE64": asPure(binaryOperation(">")),
 		"fadd_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("+"), truncateToFloat64)),
 		"fsub_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("-"), truncateToFloat64)),
 		"fmul_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("*"), truncateToFloat64)),
-		"fadd_FPIEEE64": asPure(binaryOperation("+")),
-		"fsub_FPIEEE64": asPure(binaryOperation("-")),
-		"fmul_FPIEEE64": asPure(binaryOperation("*")),
+		"fadd_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("+"), truncateToFloat64)),
+		"fsub_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("-"), truncateToFloat64)),
+		"fmul_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("*"), truncateToFloat64)),
+		"fneg_FPIEEE64": asPure(unaryOperation("-")),
+		"fdiv_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("/"), truncateToFloat64)),
+		"frem_FPIEEE64": asPure(truncateOnOverflow(binaryOperation("%"), truncateToFloat64)),
+		"int_fma_FPIEEE64": asPure((input, functionContext) => js.binary("+", js.binary("*", js.mangledLocal(input.localNames[0]), js.mangledLocal(input.localNames[1])), js.mangledLocal(input.localNames[2]))),
+		"int_fabs_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "abs"), [js.mangledLocal(input.localNames[0])])),
+		"int_round_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "round"), [js.mangledLocal(input.localNames[0])])),
+		"int_rint_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "round"), [js.mangledLocal(input.localNames[0])])),
+		"int_trunc_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "trunc"), [js.mangledLocal(input.localNames[0])])),
+		"int_floor_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "floor"), [js.mangledLocal(input.localNames[0])])),
+		"int_ceil_FPIEEE64": asPure((input, functionContext) => js.call(js.property(js.identifier("Math"), "ceil"), [js.mangledLocal(input.localNames[0])])),
 		"_TZFsoi2eeFTSdSd_Sb": asPure(binaryOperation("==")),
 		"_TZFsoi1pFTSdSd_Sd": asPure(binaryOperation("+")),
 		"_TZFsoi1sFTSdSd_Sd": asPure(binaryOperation("-")),
 		"_TZFsoi1mFTSdSd_Sd": asPure(binaryOperation("*")),
+		"uitofp_Int8_FPIEEE64": passthrough,
+		"sitofp_Int8_FPIEEE64": passthrough,
+		"uitofp_Int16_FPIEEE64": passthrough,
+		"sitofp_Int16_FPIEEE64": passthrough,
+		"uitofp_Int32_FPIEEE64": passthrough,
+		"sitofp_Int32_FPIEEE64": passthrough,
+		"uitofp_Int64_FPIEEE64": passthrough,
+		"sitofp_Int64_FPIEEE64": passthrough,
+		"bitcast_Int64_FPIEEE64": passthrough, // TODO: Implement bit casts
 		// Pointers (unsound!)
 		"inttoptr_Int8": passthrough,
 		"cmp_eq_RawPointer": asPure(binaryOperation("==")), // TODO: To different pointers derived from the same field of the same object should resolve to equal
@@ -216,6 +278,7 @@ module.exports = {
 		"_TZFsoi1pFTSiSi_Si": functionBuiltin("(left, right) { return (left + right) | 0 }"),
 		// Generic numeric types
 		"_TZFsop1suRxs16SignedNumberTyperFxx": functionBuiltin("(outNumber, inNumber) { outNumber.ref[outNumber.field] = -inNumber.ref[inNumber.field] }"),
+		"copyArray": functionBuiltin("(type, dest, source, count) {}"),
 		// Error handling
 		"willThrow": functionBuiltin("(error) { throw error }"),
 		"trap": functionBuiltin("() { throw \"Runtime error!\" }"),
@@ -223,11 +286,21 @@ module.exports = {
 		"_TFs18_fatalErrorMessageFTVs12StaticStringS_S_Su5flagsVs6UInt32_Os5Never": functionBuiltin("(prefix, message, file, line, flags) { throw console.log(prefix + message + \" in \" + file + \":\" + line) }"),
 	},
 	functions: {
-		"sqrt": js.declaration(js.identifier("sqrt"), js.property(js.identifier("Math"), "sqrt")),
+		"_swift_stdlib_squareRoot": js.declaration(js.identifier("_swift_stdlib_squareRoot"), js.property(js.identifier("Math"), "sqrt")),
+		"_swift_stdlib_remainder": js.functionDeclaration(js.identifier("_swift_stdlib_remainder"), [js.identifier("a"), js.identifier("b")], [js.returnStatement(js.binary("%", js.identifier("a"), js.identifier("b")))]),
 		"_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType": js.functionDeclaration(js.identifier("_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType"), [js.identifier("value"), js.identifier("result")], []),
 		"_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString": js.functionDeclaration(js.identifier("_TFE10FoundationSS19_bridgeToObjectiveCfT_CSo8NSString"), [], [js.returnStatement(js.identifier("this"))]),
 		"_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS": js.functionDeclaration(js.identifier("_TZFE10FoundationSS36_unconditionallyBridgeFromObjectiveCfGSqCSo8NSString_SS"), [js.identifier("string")], [js.returnStatement(js.identifier("string"))]),
 		"_getDocument": js.functionDeclaration(js.identifier("_getDocument"), [], [js.returnStatement(js.identifier("document"))]),
 		"swift_convertNSErrorToError": js.functionDeclaration(js.identifier("swift_convertNSErrorToError"), [js.identifier("error")], [js.returnStatement(js.identifier("error"))]),
+		"swift_bufferAllocate": js.functionDeclaration(js.identifier("swift_bufferAllocate"), [js.identifier("type"), js.identifier("size"), js.identifier("alignmentMask")], [js.returnStatement(js.array([]))]),
+		"_TTSfq4g__swiftweb_bufferSize": js.functionDeclaration(js.identifier("_TTSfq4g__swiftweb_bufferSize"), [js.identifier("buffer")], [js.returnStatement(js.property(js.identifier("buffer"), "length"))]),
+		"swiftweb_stringConcat": js.functionDeclaration(js.identifier("swiftweb_stringConcat"), [js.identifier("left"), js.identifier("right")], [js.returnStatement(js.binary("+", js.identifier("left"), js.identifier("right")))]),
+		"swiftweb_stringToLowerCase": js.functionDeclaration(js.identifier("swiftweb_stringToLowerCase"), [], [js.returnStatement(js.call(js.property(js.identifier("this"), "toLowerCase"), []))]),
+		"swiftweb_stringToUpperCase": js.functionDeclaration(js.identifier("swiftweb_stringToUpperCase"), [], [js.returnStatement(js.call(js.property(js.identifier("this"), "toUpperCase"), []))]),
+		"swiftweb_stringLength": js.functionDeclaration(js.identifier("swiftweb_stringLength"), [], [js.returnStatement(js.property(js.identifier("this"), "length"))]),
+		// "swiftweb_arrayAllocate": js.functionDeclaration(js.identifier("swiftweb_arrayAllocate"), [js.identifier("count")], [js.expressionStatement(js.assignment(js.identifier("count"), js.call(js.identifier("Array"), [js.identifier("count")]))), js.returnStatement(js.array([js.identifier("count"), js.box(js.identifier("count"), js.literal(0))]))]),
+		// "swiftweb_arrayLength": js.functionDeclaration(js.identifier("swiftweb_arrayLength"), [], [js.returnStatement(js.property(js.identifier("this"), "length"))]),
+		"_swift_stdlib_strlen": js.functionDeclaration(js.identifier("_swift_stdlib_strlen"), [js.identifier("string")], [js.returnStatement(js.property(js.identifier("string"), "length"))]),
 	},
 };
