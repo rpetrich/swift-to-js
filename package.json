@@ -1,0 +1,23 @@
+{
+  "name": "swift-to-js",
+  "version": "0.0.1",
+  "description": "JavaScript backend for Swift",
+  "main": "swift-to-js.js",
+  "scripts": {
+    "build": "tsc && pegjs ast.pegjs && pegjs types.pegjs",
+    "test": "swiftc -dump-ast test.swift 2>&1 | node swift-to-js.js"
+  },
+  "author": "Ryan Petrich <rpetrich@gmail.com>",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/babel-core": "^6.25.5",
+    "@types/babel-types": "^7.0.4",
+    "@types/node": "^10.5.8",
+    "pegjs": "^0.10.0",
+    "typescript": "^3.0.1"
+  },
+  "dependencies": {
+    "babel-core": "^6.26.3",
+    "babel-types": "^6.26.0"
+  }
+}
