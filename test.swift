@@ -240,6 +240,10 @@ public func string_length(str: String) -> Int {
     return str.utf16.count;
 }
 
+public func utf8_length(str: String) -> Int {
+    return str.utf8.count;
+}
+
 public func concat(l: String, r: String) -> String {
     return l + r
 }

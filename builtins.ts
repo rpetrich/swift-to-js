@@ -1,7 +1,7 @@
-import { read, unbox, functionize, expr, callable, variable, builtin, tuple, ArgGetter, Value, ExpressionValue } from "./values";
+import { read, unbox, call, functionize, expr, callable, variable, builtin, tuple, ArgGetter, Value, ExpressionValue } from "./values";
 import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { parse, Type } from "./types";
-import { assignmentExpression, binaryExpression, callExpression, variableDeclaration, variableDeclarator, numericLiteral, returnStatement, functionExpression, blockStatement, unaryExpression, identifier, nullLiteral, arrayExpression, memberExpression, thisExpression, Identifier, NullLiteral } from "babel-types";
+import { assignmentExpression, binaryExpression, callExpression, logicalExpression, variableDeclaration, variableDeclarator, numericLiteral, returnStatement, functionExpression, blockStatement, unaryExpression, identifier, nullLiteral, arrayExpression, memberExpression, thisExpression, Identifier, NullLiteral } from "babel-types";
 
 function returnType(type: Type) {
 	if (type.kind === "function") {
@@ -39,7 +39,7 @@ function wrapped(fn: BuiltinFunction): BuiltinFunction {
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==") {
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0), scope), read(arg(1), scope))));
-}
+} 
 
 function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=") {
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(assignmentExpression(operator, read(unbox(arg(0), scope), scope), read(arg(1), scope))));
@@ -71,16 +71,17 @@ export const builtinFunctions: { [name: string]: BuiltinFunction } = {
 	"Swift.(file).Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
 	"Swift.(file).Bool.init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Bool._getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
+	"Swift.(file).Bool.&&": wrapped((scope, arg, type) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), [], scope), scope)))),
+	"Swift.(file).Bool.||": wrapped((scope, arg, type) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), [], scope), scope)))),
 	"Swift.(file).Optional.none": () => expr(nullLiteral()),
 	"Swift.(file).Optional.==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
 	"Swift.(file).Optional.!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
 	"Swift.(file).Optional.flatMap": returnTodo,
-	"Swift.(file)._OptionalNilComparisonType.init(nilLiteral:)": () => expr(nullLiteral()),
+	"Swift.(file)._OptionalNilComparisonType.init(nilLiteral:)": wrapped(() => expr(nullLiteral())),
 	"Swift.(file).Collection.count": returnLength,
 	"Swift.(file).Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
 	"Swift.(file).BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
 	"Swift.(file).String.init": wrapped((scope, arg) => expr(callExpression(identifier("String"), [read(arg(0), scope)]))),
-	"Swift.(file).String.utf16": wrapped(returnOnlyArgument),
 	"Swift.(file).String.+": binaryBuiltin("+"),
 	"Swift.(file).String.lowercased()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(read(arg(0), scope), identifier("toLowerCase")), [])), returnType(type)),
 	"Swift.(file).String.uppercased()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(read(arg(0), scope), identifier("toUpperCase")), [])), returnType(type)),
@@ -127,6 +128,8 @@ export const builtinFunctions: { [name: string]: BuiltinFunction } = {
 	"Swift.(file).Float.-=": assignmentBuiltin("-="),
 	"Swift.(file).Float.*=": assignmentBuiltin("*="),
 	"Swift.(file).Float./=": assignmentBuiltin("/="),
+	"Swift.(file).FloatingPoint.==": binaryBuiltin("==="),
+	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
 	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(arrayExpression([callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])])), returnType(type)),
 };
 

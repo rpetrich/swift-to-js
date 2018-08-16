@@ -12,7 +12,12 @@ export interface ExpressionValue {
 	pointer?: boolean;
 }
 
-export function expr(expression: Expression, pointer: boolean = false): ExpressionValue {
+export function expr(expression: Identifier, pointer?: boolean): VariableValue;
+export function expr(expression: Expression, pointer?: boolean): ExpressionValue | VariableValue;
+export function expr(expression: Expression, pointer: boolean = false): ExpressionValue | VariableValue {
+	if (expression.type === "Identifier" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
+		return variable(expression);
+	}
 	return { kind: "expression", expression, pointer };
 }
 
@@ -89,7 +94,7 @@ export type Value = ExpressionValue | CallableValue | VariableValue | BuiltinVal
 const baseProperty = identifier("base");
 const offsetProperty = identifier("offset");
 
-export function newPointer(base: Expression, offset: Expression): ExpressionValue {
+export function newPointer(base: Expression, offset: Expression): Value {
 	return expr(objectExpression([objectProperty(baseProperty, base), objectProperty(offsetProperty, offset)]), true);
 }
 
@@ -169,7 +174,7 @@ export function read(value: Value, scope: Scope): Expression {
 					return identifier("unboxable$" + ref.name);
 					// throw new Error(`Unable to box ${ref.name} as it's a simple variable (in ${fullPathOfScope(scope)})`);
 				}
-				return newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)).expression;
+				return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
 			// } else if (value.contents.kind === "expression") {
 			// 	if (value.contents.pointer) {
 			// 		return value.contents;
@@ -237,7 +242,7 @@ function expectedMessage(name: string, type: Type) {
 	return `Expected a ${name}, got a ${type.kind}: ${stringifyType(type)}`;
 }
 
-function stringifyType(type: Type): string {
+export function stringifyType(type: Type): string {
 	switch (type.kind) {
 		case "optional":
 			// TODO: Handle multiple levels of optional
