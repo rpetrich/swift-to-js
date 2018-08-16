@@ -115,7 +115,7 @@ function getArgumentPointers(type: Type): boolean[] {
 	if (type.kind === "function") {
 		return type.arguments.types.map((arg) => arg.kind === "modified" && arg.modifier === "inout");
 	}
-	throw new Error(`Expected a function, got a ${type.kind}`);
+	throw new TypeError(expectedMessage("function", type));
 }
 
 export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): Expression {
@@ -230,5 +230,36 @@ export function reuseExpression(expression: Expression, scope: Scope): [Expressi
 	} else {
 		const temp = uniqueIdentifier(scope);
 		return [assignmentExpression("=", temp, expression), temp];
+	}
+}
+
+function expectedMessage(name: string, type: Type) {
+	return `Expected a ${name}, got a ${type.kind}: ${stringifyType(type)}`;
+}
+
+function stringifyType(type: Type): string {
+	switch (type.kind) {
+		case "optional":
+			// TODO: Handle multiple levels of optional
+			return stringifyType(type.type) + "!";
+		case "generic":
+			return stringifyType(type.base) + "<" + type.arguments.map(stringifyType).join(", ") + ">";
+		case "function":
+			// TODO: Handle attributes
+			return stringifyType(type.arguments) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return);
+		case "tuple":
+			return "(" + type.types.map(stringifyType) + ")";
+		case "array":
+			return "[" + stringifyType(type.type) + "]";
+		case "dictionary":
+			return "[" + stringifyType(type.keyType) + ": " + stringifyType(type.valueType) + "]";
+		case "metatype":
+			return stringifyType(type.base) + "." + type.as;
+		case "modified":
+			return type.modifier + " " + stringifyType(type.type);
+		case "namespaced":
+			return stringifyType(type.namespace) + "." + stringifyType(type.type);
+		case "name":
+			return type.name;
 	}
 }

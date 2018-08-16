@@ -1,6 +1,6 @@
 export function parse(text: string): Type;
 
-export type Type = Function | Optional | MetaType | Generic | Dictionary | Array | Tuple | Modified | Name;
+export type Type = Function | Optional | MetaType | Generic | Dictionary | Array | Tuple | Modified | Name | Namespaced;
 
 export interface Optional {
 	kind: "optional";
@@ -11,7 +11,7 @@ export interface Optional {
 export interface Generic {
 	kind: "generic";
 	base: Type;
-	arguments: Type;
+	arguments: Type[];
 }
 
 export interface Function {
@@ -54,4 +54,10 @@ export interface Modified {
 export interface Name {
 	kind: "name";
 	name: string;
+}
+
+export interface Namespaced {
+	kind: "namespaced";
+	namespace: Name;
+	type: Type;
 }

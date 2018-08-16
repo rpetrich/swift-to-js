@@ -117,6 +117,8 @@ function typeRequiresCopy(type: Type): boolean {
 		case "metatype":
 		case "function":
 			return false;
+		case "namespaced":
+			return typeRequiresCopy(type.type);
 		case "optional":
 			return typeRequiresCopy(type.type);
 	}
@@ -187,6 +189,8 @@ function copyValue(value: Expression, type: Type, scope: Scope): Expression {
 				return value;
 			}
 		}
+		case "namespaced":
+			return copyValue(value, type, scope);
 	}
 }
 
@@ -240,6 +244,9 @@ function defaultInstantiateType(type: Type): Expression {
 		}
 		case "optional": {
 			return nullLiteral();
+		}
+		case "namespaced": {
+			return defaultInstantiateType(type.type);
 		}
 	}
 }
