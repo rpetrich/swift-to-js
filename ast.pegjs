@@ -10,7 +10,7 @@ Term
 			props[tokens[i].key] = tokens[i].value;
         }
     }
-    return { name: name, args:args, properties: props, children: children };
+    return { name: name, args:args, properties: props, children: children, location: location() };
   }
 WhitespaceAndTerm
   = _ term:Term { return term; }

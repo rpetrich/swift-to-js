@@ -5,13 +5,15 @@ export type Type = Function | Optional | MetaType | Generic | Dictionary | Array
 export interface Optional {
 	kind: "optional";
 	type: Type;
-	depth: number
+	depth: number;
+	location: Location;
 }
 
 export interface Generic {
 	kind: "generic";
 	base: Type;
 	arguments: Type[];
+	location: Location;
 }
 
 export interface Function {
@@ -21,43 +23,63 @@ export interface Function {
 	throws: boolean;
 	rethrows: boolean;
 	attributes: string[]
+	location: Location;
 }
 
 export interface Tuple {
 	kind: "tuple";
 	types: Type[];
+	location: Location;
 }
 
 export interface Array {
 	kind: "array";
 	type: Type;
+	location: Location;
 }
 
 export interface Dictionary {
 	kind: "dictionary";
 	keyType: Type;
 	valueType: Type;
+	location: Location;
 }
 
 export interface MetaType {
 	kind: "metatype";
 	base: Type;
 	as: "Type" | "Protocol"
+	location: Location;
 }
 
 export interface Modified {
 	kind: "modified";
 	modifier: string;
 	type: Type;
+	location: Location;
 }
 
 export interface Name {
 	kind: "name";
 	name: string;
+	location: Location;
 }
 
 export interface Namespaced {
 	kind: "namespaced";
 	namespace: Name;
 	type: Type;
+	location: Location;
+}
+
+
+export interface Location {
+	start: Position;
+	end: Position;
+}
+
+export interface Position {
+	offset: number;
+	line: number;
+	column: number;
 }
