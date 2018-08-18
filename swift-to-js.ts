@@ -213,15 +213,15 @@ function copyValue(value: Expression, type: Type, scope: Scope): Expression {
 			// TODO: Support dictionary types
 			return value;
 		case "tuple":
-			if (value.type === "ArrayExpression") {
-				return value;
-			}
 			switch (type.types.length) {
 				case 0:
-					return arrayExpression([]);
+					return undefinedLiteral;
 				case 1:
-					return arrayExpression([copyValue(memberExpression(value, numericLiteral(0), true), type.types[0], scope)]);
+					return value;
 				default:
+					if (value.type === "ArrayExpression") {
+						return value;
+					}
 					if (type.types.some(typeRequiresCopy)) {
 						const [first, after] = reuseExpression(value, scope);
 						const head = copyValue(memberExpression(first, numericLiteral(0), true), type.types[0], scope);
@@ -299,7 +299,14 @@ function defaultInstantiateType(type: Type): Expression {
 			return undefinedLiteral;
 		}
 		case "tuple": {
-			return arrayExpression(type.types.map(defaultInstantiateType));
+			switch (type.types.length) {
+				case 0:
+					return undefinedLiteral;
+				case 1:
+					return defaultInstantiateType(type.types[0]);
+				default:
+					return arrayExpression(type.types.map(defaultInstantiateType));
+			}
 		}
 		case "generic": {
 			// TODO: Support generic types
@@ -350,8 +357,19 @@ function translatePattern(term: Term, value: Expression, scope: Scope): Expressi
 			}
 		}
 		case "pattern_tuple": {
-			const [first, second] = reuseExpression(value, scope);
-			return collapseToExpression(term.children.map((child, i) => translatePattern(child, memberExpression(i ? second : first, numericLiteral(i), true), scope)));
+			const type = getType(term);
+			if (type.kind !== "tuple") {
+				throw new TypeError(`Expected a tuple, got a ${stringifyType(type)}`);
+			}
+			switch (type.types.length) {
+				case 0:
+					return undefinedLiteral;
+				case 1:
+					return value;
+				default:
+					const [first, second] = reuseExpression(value, scope);
+					return collapseToExpression(term.children.map((child, i) => translatePattern(child, memberExpression(i ? second : first, numericLiteral(i), true), scope)));
+			}
 		}
 		case "pattern_any": {
 			return booleanLiteral(true);

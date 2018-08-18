@@ -1,2 +1,2 @@
 var emptyInit;
-emptyInit = [];
+emptyInit = undefined;
