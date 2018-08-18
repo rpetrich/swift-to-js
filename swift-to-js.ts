@@ -53,14 +53,24 @@ function structField(name: string, type: Type | string, getter?: (target: Value,
 
 const defaultStructTypes: { [name: string]: Array<StructField> } = {
 	"String": [
+		structField("unicodeScalars", "UTF32View", (value, scope) => expr(callExpression(memberExpression(identifier("Array"), identifier("from")), [read(value, scope)]))),
 		structField("utf16", "UTF16View", (value) => value),
 		structField("utf8", "UTF8View", (value, scope) => expr(callExpression(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode")), [read(value, scope)]))),
 	],
+	"UTF32View": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
 	"UTF16View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
 	],
 	"UTF8View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
 	],
 	"Collection": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
@@ -72,6 +82,7 @@ const defaultStructTypes: { [name: string]: Array<StructField> } = {
 const defaultValues: { [name: string]: Expression } = {
 	"Bool": booleanLiteral(false),
 	"Int": numericLiteral(0),
+	"Int64": numericLiteral(0),
 	"Float": numericLiteral(0),
 	"Double": numericLiteral(0),
 	"String": stringLiteral(""),
