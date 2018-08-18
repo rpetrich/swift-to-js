@@ -5,7 +5,7 @@ import { newPointer, boxed, call, callable, builtin, unbox, tuple, variable, exp
 import { builtinFunctions } from "./builtins";
 
 import { stdin } from "process";
-import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression } from "babel-types";
+import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program } from "babel-types";
 import { transformFromAst } from "babel-core";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
@@ -443,11 +443,14 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			}
 			return variable(id);
 		}
+		case "subscript_expr": {
+			expectLength(term.children, 2);
+			return expr(copyValue(memberExpression(translateExpression(term.children[0], scope), translateExpression(term.children[1], scope), true), getType(term), scope));
+		}
 		case "prefix_unary_expr":
 		case "call_expr":
 		case "constructor_ref_call_expr":
 		case "dot_syntax_call_expr":
-		case "subscript_expr":
 		case "binary_expr": {
 			expectLength(term.children, 2);
 			const target = term.children[0];
@@ -678,17 +681,27 @@ function translateStatement(term: Term, scope: Scope): Statement[] {
 	}
 }
 
-function main() {
-	const input: any[] = [];
-	stdin.setEncoding("utf8");
-	stdin.resume();
-	stdin.on("data", (chunk) => input.push(chunk));
-	stdin.on("end", () => {
-		const parsed = parseAST(input.join(""));
-		const programScope = newScope("global");
-		const mapped = program(emitScope(programScope, translateStatement(parsed, programScope)));
-		console.log(transformFromAst(mapped).code);
+export function compileTermToProgram(root: Term): Program {
+	const programScope = newScope("global");
+	return program(emitScope(programScope, translateStatement(root, programScope)));
+}
+
+export function compileASTSource(astSource: string): string | undefined {
+	const parsed = parseAST(astSource);
+	return transformFromAst(compileTermToProgram(parsed)).code;
+}
+
+export function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		stream.setEncoding("utf8");
+		stream.resume();
+		const input: any[] = [];
+		stream.on("data", (chunk) => input.push(chunk));
+		stream.on("end", () => resolve(input.join("")));
+		stream.on("error", reject);
 	});
 }
 
-main();
+if (require.main === module) {
+	readAsString(stdin).then(compileASTSource).then(console.log);
+}

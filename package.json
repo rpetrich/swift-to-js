@@ -5,14 +5,16 @@
   "main": "swift-to-js.js",
   "scripts": {
     "build": "tsc && pegjs ast.pegjs && pegjs types.pegjs",
-    "test": "swiftc -dump-ast test.swift 2>&1 | node swift-to-js.js"
+    "test": "jest"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/babel-core": "^6.25.5",
     "@types/babel-types": "^7.0.4",
+    "@types/jest": "^23.3.1",
     "@types/node": "^10.5.8",
+    "jest": "^23.5.0",
     "pegjs": "^0.10.0",
     "typescript": "^3.0.1"
   },

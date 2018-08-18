@@ -53,7 +53,7 @@ Identifier
 BareString
   = prefix:BareStringToken remaining:BareStringTail* { return prefix + remaining.join(""); }
 BareStringToken
-  = [a-zA-Z0-9_.:@*<>~$%&,+\-!?]
+  = [a-zA-Z0-9_.:@*<>~$%&,+\-!?/]
 BareStringTail
   = BareStringToken / '=' / BareStringParenPair / BareStringSquarePair
 BareStringTailWhitespace
