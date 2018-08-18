@@ -245,8 +245,7 @@ function expectedMessage(name: string, type: Type) {
 export function stringifyType(type: Type): string {
 	switch (type.kind) {
 		case "optional":
-			// TODO: Handle multiple levels of optional
-			return stringifyType(type.type) + "!";
+			return stringifyType(type.type) + "?";
 		case "generic":
 			return stringifyType(type.base) + "<" + type.arguments.map(stringifyType).join(", ") + ">";
 		case "function":
