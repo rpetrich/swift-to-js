@@ -416,8 +416,16 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "tuple_element_expr": {
 			expectLength(term.children, 1);
+			const child = term.children[0];
+			const tupleType = getType(child);
+			if (tupleType.kind !== "tuple") {
+				throw new TypeError(`Expected a tuple, got a ${stringifyType(tupleType)}`);
+			}
+			if (tupleType.types.length === 1) {
+				return translateTermToValue(child, scope);
+			}
 			return variable(memberExpression(
-				translateExpression(term.children[0], scope),
+				translateExpression(child, scope),
 				numericLiteral(+getProperty(term, "field", isString)),
 				true
 			));
@@ -445,7 +453,8 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			const target = term.children[0];
 			const args = term.children[1];
 			const peekedTarget = translateTermToValue(target, scope);
-			const argsValue = getType(args).kind === "tuple" ? translateTermToValue(args, scope) : tuple([translateTermToValue(args, scope)]);
+			const type = getType(args);
+			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope) : tuple([translateTermToValue(args, scope)]);
 			if (argsValue.kind === "tuple") {
 				return call(peekedTarget, argsValue.values, scope);
 			} else {
@@ -453,6 +462,9 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			}
 		}
 		case "tuple_expr": {
+			if (term.children.length === 1) {
+				return translateTermToValue(term.children[0], scope);
+			}
 			return {
 				kind: "tuple",
 				values: term.children.map((child) => translateTermToValue(child, scope))
@@ -479,7 +491,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "paren_expr": {
 			expectLength(term.children, 1);
-			return tuple([translateTermToValue(term.children[0], scope)]);
+			return translateTermToValue(term.children[0], scope);
 		}
 		case "if_expr": {
 			expectLength(term.children, 3);
