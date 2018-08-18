@@ -1,10 +1,11 @@
-import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Statement } from "babel-types";
+import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Statement, ThisExpression } from "babel-types";
 
 export const undefinedLiteral = identifier("undefined");
 
 export interface Scope {
 	name: string;
 	variables: { [name: string]: Expression | undefined };
+	self: Identifier | ThisExpression | undefined;
 	parent: Scope | undefined;
 };
 
@@ -25,8 +26,19 @@ export function rootScope(scope: Scope) {
 	return result;
 }
 
-export function newScope(name: string, parent?: Scope) {
-	return { name, variables: Object.create(null), parent };
+export function newScope(name: string, self?: Identifier | ThisExpression, parent?: Scope) {
+	return { name, variables: Object.create(null), self, parent };
+}
+
+export function hasNameInScope(scope: Scope, name: string): boolean {
+	let current: Scope | undefined = scope;
+	while (typeof current !== "undefined") {
+		if (Object.hasOwnProperty.call(current.variables, name)) {
+			return true;
+		}
+		current = current.parent;
+	}
+	return false;
 }
 
 export function fullPathOfScope(scope: Scope) {
@@ -82,7 +94,7 @@ export function mangleName(name: string) {
 export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {
 	let i = 0;
 	let name = prefix;
-	while (Object.hasOwnProperty.call(scope.variables, name)) {
+	while (hasNameInScope(scope, name)) {
 		name = prefix + i++;
 	}
 	scope.variables[name] = undefinedLiteral;

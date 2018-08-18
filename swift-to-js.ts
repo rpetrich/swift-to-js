@@ -6,10 +6,20 @@ import { builtinFunctions } from "./builtins";
 
 import { spawn } from "child_process";
 import { argv } from "process";
-import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program } from "babel-types";
+import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program, ThisExpression } from "babel-types";
 import { transformFromAst } from "babel-core";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
+
+function concat<T>(head: Array<T>, tail: Array<T>): Array<T>;
+function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T>;
+function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T> | Array<T> {
+	if (head.length) {
+		return tail.length ? head.concat(tail) : head;
+	} else {
+		return tail;
+	}
+}
 
 type StructField = {
 	name: string;
@@ -76,7 +86,7 @@ function termsWithName(terms: Term[], name: string): Term[] {
 	return terms.filter(term => term.name === name);
 }
 
-function termWithName(terms: Term[], name: string | RegExp): Term {
+function findTermWithName(terms: Term[], name: string | RegExp): Term | undefined {
 	if (typeof name === "string") {
 		for (const term of terms) {
 			if (term.name === name) {
@@ -90,7 +100,15 @@ function termWithName(terms: Term[], name: string | RegExp): Term {
 			}
 		}
 	}
-	throw new Error(`Could not find ${name} term!`);
+	return undefined;
+}
+
+function termWithName(terms: Term[], name: string | RegExp): Term {
+	const result = findTermWithName(terms, name);
+	if (typeof result === "undefined") {
+		throw new Error(`Could not find ${name} term!`);
+	}
+	return result;
 }
 
 function isString(value: any): value is string {
@@ -118,14 +136,14 @@ function extractMember(decl: string): [Type, string] {
 	throw new Error(`Unable to parse member from declaration: ${decl}`);
 }
 
-function extractReference(decl: string): Identifier | string {
+function extractReference(decl: string, scope: Scope): Identifier | ThisExpression | string {
 	// TODO: Parse declarations correctly via PEG
 	const match = decl.match(/\.([^.]+)(@)/);
 	if (match && match.length === 3) {
 		if (match[1] === "$match") {
 			return identifier("$match");
 		}
-		return mangleName(match[1]);
+		return match[1] === "self" && scope.self ? scope.self : mangleName(match[1]);
 	}
 	const specializationStripped = decl.replace(/ .*/, "");
 	if (hasOwnProperty(builtinFunctions, specializationStripped)) {
@@ -134,11 +152,14 @@ function extractReference(decl: string): Identifier | string {
 	throw new Error(`Unable to parse declaration: ${decl}`);
 }
 
-function expectLength<T extends any[]>(array: T, length: number) {
-	if (array.length !== length) {
-		console.error(array);
-		throw new Error(`Expected ${length} items, but got ${array.length}`);
+function expectLength<T extends any[]>(array: T, ...lengths: number[]) {
+	for (let i = 0; i < lengths.length; i++) {
+		if (array.length === lengths[i]) {
+			return;
+		}
 	}
+	console.error(array);
+	throw new Error(`Expected ${lengths.join(" or ")} items, but got ${array.length}`);
 }
 
 function isOptionalOfOptional(type: Type): boolean {
@@ -174,7 +195,7 @@ function collapseToExpression(expressions: Expression[]): Expression {
 }
 
 export function compileTermToProgram(root: Term): Program {
-	const programScope = newScope("global");
+	const programScope = newScope("global", undefined);
 	const structTypes = Object.assign(Object.create(null), defaultStructTypes);
 	const classTypes: { [name: string]: Array<StructField> } = Object.create(null);
 
@@ -253,9 +274,7 @@ export function compileTermToProgram(root: Term): Program {
 						}
 						if (type.types.some(typeRequiresCopy)) {
 							const [first, after] = reuseExpression(value, scope);
-							const head = copyValue(memberExpression(first, numericLiteral(0), true), type.types[0], scope);
-							const tail = type.types.slice(1).map((t, i) => copyValue(memberExpression(after, numericLiteral(i), true), t, scope));
-							return arrayExpression([head].concat(tail));
+							return arrayExpression(type.types.map((t, i) => copyValue(memberExpression(i ? after : first, numericLiteral(i), true), t, scope)));
 						} else {
 							return callExpression(memberExpression(value, identifier("slice")), []); 
 						}
@@ -297,7 +316,7 @@ export function compileTermToProgram(root: Term): Program {
 						let usedFirst = false;
 						return onlyStored.reduce((existing, fieldLayout) => {
 							const identifier = usedFirst ? after : (usedFirst = true, first);
-							return existing.concat(storeValue(mangleName(fieldLayout.name), read(getField(expr(identifier), fieldLayout, scope), scope), fieldLayout.type, scope));
+							return concat(existing, storeValue(mangleName(fieldLayout.name), read(getField(expr(identifier), fieldLayout, scope), scope), fieldLayout.type, scope));
 						}, [] as Expression[]);
 					}
 				}
@@ -478,7 +497,7 @@ export function compileTermToProgram(root: Term): Program {
 			case "declref_expr": {
 				expectLength(term.children, 0);
 				const name = nameForDeclRefExpr(term);
-				const id = extractReference(name);
+				const id = extractReference(name, scope);
 				if (typeof id === "string") {
 					return builtin(id, getType(term));
 				}
@@ -592,8 +611,7 @@ export function compileTermToProgram(root: Term): Program {
 
 	function translateAllStatements(terms: Term[], scope: Scope): Statement[] {
 		return terms.reduce((statements: Statement[], term: Term) => {
-			const translated = translateStatement(term, scope);
-			return translated.length ? statements.concat(translated) : statements;
+			return concat(statements, translateStatement(term, scope));
 		}, emptyStatements);
 	}
 
@@ -602,22 +620,43 @@ export function compileTermToProgram(root: Term): Program {
 			case "source_file": {
 				return translateAllStatements(term.children, scope);
 			}
+			case "constructor_decl":
 			case "func_decl": {
 				expectLength(term.args, 1);
+				const braceStatement = findTermWithName(term.children, "brace_stmt");
+				if (typeof braceStatement === "undefined") {
+					return emptyStatements;
+				}
 				const params: LVal[] = [];
-				const parameter_list = termWithName(term.children, "parameter_list");
-				for (const param of termsWithName(parameter_list.children, "parameter")) {
+				const parameterLists = termsWithName(term.children, "parameter_list");
+				let selfParameterList: Term | undefined;
+				let parameterList: Term;
+				expectLength(parameterLists, 1, 2);
+				switch (parameterLists.length) {
+					case 1:
+						parameterList = parameterLists[0];
+						break;
+					default:
+						selfParameterList = parameterLists[0];
+						parameterList = parameterLists[1];
+						break;
+				}
+				for (const param of termsWithName(parameterList.children, "parameter")) {
 					params.push(mangleName(param.args[0]));
 				}
-				const childScope = newScope(term.args[0], scope);
-				const statements = translateStatement(termWithName(term.children, "brace_stmt"), childScope);
+				const childScope = newScope(term.args[0], selfParameterList ? thisExpression() : undefined, scope);
+				const statements = translateStatement(braceStatement, childScope);
 				return [functionDeclaration(mangleName(term.args[0]), params, blockStatement(emitScope(childScope, statements)))];
 			}
 			case "return_stmt": {
-				expectLength(term.children, 1);
-				const expression = translateExpression(term.children[0], scope);
-				const expressionCopy = copyValue(expression, getType(term.children[0]), scope);
-				return [returnStatement(expressionCopy)];
+				expectLength(term.children, 0, 1);
+				if (term.children.length) {
+					const expression = translateExpression(term.children[0], scope);
+					const expressionCopy = copyValue(expression, getType(term.children[0]), scope);
+					return [returnStatement(expressionCopy)];
+				} else {
+					return [returnStatement()];
+				}
 			}
 			case "top_level_code_decl": {
 				return translateAllStatements(term.children, scope);
@@ -687,8 +726,10 @@ export function compileTermToProgram(root: Term): Program {
 								console.log("computedStruct invoked", child.children[0]);
 								return value;
 							}));
-							statements = statements.concat(translateStatement(child.children[0], scope));
+							statements = concat(statements, translateStatement(child.children[0], scope));
 						}
+					} else {
+						statements = concat(statements, translateStatement(child, scope));
 					}
 				}
 				return statements;

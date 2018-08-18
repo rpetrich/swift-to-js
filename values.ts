@@ -1,4 +1,4 @@
-import { assignmentExpression, objectExpression, callExpression, objectProperty, functionExpression, thisExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, memberExpression, Expression, Identifier, MemberExpression } from "babel-types";
+import { assignmentExpression, objectExpression, callExpression, objectProperty, functionExpression, thisExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, memberExpression, Expression, Identifier, MemberExpression, ThisExpression } from "babel-types";
 
 import { builtinFunctions, insertBuiltin } from "./builtins";
 import { undefinedLiteral, uniqueIdentifier, emitScope, newScope, fullPathOfScope, Scope } from "./scope";
@@ -12,10 +12,10 @@ export interface ExpressionValue {
 	pointer?: boolean;
 }
 
-export function expr(expression: Identifier, pointer?: boolean): VariableValue;
+export function expr(expression: Identifier | ThisExpression, pointer?: boolean): VariableValue;
 export function expr(expression: Expression, pointer?: boolean): ExpressionValue | VariableValue;
 export function expr(expression: Expression, pointer: boolean = false): ExpressionValue | VariableValue {
-	if (expression.type === "Identifier" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
+	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
 		return variable(expression);
 	}
 	return { kind: "expression", expression, pointer };
@@ -47,10 +47,10 @@ export function callable(call: (scope: Scope, arg: ArgGetter) => Value, type: Ty
 
 export interface VariableValue {
 	kind: "direct";
-	ref: Identifier | MemberExpression;
+	ref: Identifier | MemberExpression | ThisExpression;
 }
 
-export function variable(ref: Identifier | MemberExpression): VariableValue {
+export function variable(ref: Identifier | MemberExpression | ThisExpression): VariableValue {
 	return { kind: "direct", ref };
 }
 
@@ -124,7 +124,7 @@ function getArgumentPointers(type: Type): boolean[] {
 }
 
 export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): Expression {
-	const inner: Scope = newScope("anonymous", scope);
+	const inner: Scope = newScope("anonymous", thisExpression(), scope);
 	let usedCount = 0;
 	const pointers = getArgumentPointers(type);
 	const newValue = expression(inner, (i) => {
@@ -170,11 +170,14 @@ export function read(value: Value, scope: Scope): Expression {
 		case "boxed":
 			if (value.contents.kind === "direct") {
 				const ref = value.contents.ref;
-				if (ref.type === "Identifier") {
-					return identifier("unboxable$" + ref.name);
-					// throw new Error(`Unable to box ${ref.name} as it's a simple variable (in ${fullPathOfScope(scope)})`);
+				switch (ref.type) {
+					case "Identifier":
+						return identifier("unboxable$" + ref.name);
+					case "ThisExpression":
+						return identifier("unboxable$this");
+					case "MemberExpression":
+						return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);					
 				}
-				return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
 			// } else if (value.contents.kind === "expression") {
 			// 	if (value.contents.pointer) {
 			// 		return value.contents;
@@ -197,7 +200,8 @@ export function call(target: Value, args: Value[], scope: Scope): Value {
 	}
 	switch (target.kind) {
 		case "builtin":
-			return builtinFunctions[target.name](scope, getter, target.type, target.name);
+			return call(expr(insertBuiltin(target.name, scope, target.type)), args, scope);
+			// return builtinFunctions[target.name](scope, getter, target.type, target.name);
 		case "callable":
 			return target.call(scope, getter);
 		default:
@@ -212,6 +216,7 @@ function isPure(expression: Expression): boolean {
 		case "BooleanLiteral":
 		case "NumericLiteral":
 		case "NullLiteral":
+		case "ThisExpression":
 			return true;
 		case "MemberExpression":
 			return isPure(expression.property) && (!expression.computed || isPure(expression.property));
