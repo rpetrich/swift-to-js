@@ -1,12 +1,12 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { parse as parseType, Type } from "./types";
-import { undefinedLiteral, addVariable, emitScope, newScope, rootScope, mangleName, Scope } from "./scope";
-import { newPointer, boxed, call, callable, builtin, unbox, tuple, variable, expr, read, reuseExpression, stringifyType, ExpressionValue, VariableValue, BuiltinValue, TupleValue, Value } from "./values";
-import { builtinFunctions } from "./builtins";
+import { undefinedLiteral, addVariable, emitScope, newScope, newRootScope, rootScope, lookup, mangleName, Scope } from "./scope";
+import { newPointer, insertFunction, statements, boxed, call, callable, functionValue, unbox, tuple, variable, expr, read, structField, reuseExpression, hoistToIdentifier, stringifyType, ExpressionValue, VariableValue, FunctionValue, StructField, TupleValue, Value } from "./values";
+import { functions as builtinFunctions, structTypes as builtinStructTypes, defaultValues as builtinDefaultValues } from "./builtins";
 
 import { spawn } from "child_process";
 import { argv } from "process";
-import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program, ThisExpression } from "babel-types";
+import { switchStatement, switchCase, directive, exportSpecifier, exportNamedDeclaration, directiveLiteral, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program, ThisExpression } from "babel-types";
 import { transformFromAst } from "babel-core";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
@@ -21,11 +21,6 @@ function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArra
 	}
 }
 
-type StructField = {
-	name: string;
-	type: Type;
-} & ({ stored: true } | { stored: false; getter: (target: Value, scope: Scope) => Value; });
-
 function getField(value: Value, field: StructField, scope: Scope) {
 	if (field.stored) {
 		return expr(memberExpression(read(value, scope), mangleName(field.name)));
@@ -33,63 +28,6 @@ function getField(value: Value, field: StructField, scope: Scope) {
 		return field.getter(value, scope);
 	}
 }
-
-function structField(name: string, type: Type | string, getter?: (target: Value, scope: Scope) => Value): StructField {
-	const resolvedType = typeof type === "string" ? parseType(type) : type;
-	if (getter) {
-		return {
-			name,
-			type: resolvedType,
-			stored: false,
-			getter,
-		}
-	}
-	return {
-		name,
-		type: resolvedType,
-		stored: true,
-	};
-}
-
-const defaultStructTypes: { [name: string]: Array<StructField> } = {
-	"String": [
-		structField("unicodeScalars", "UTF32View", (value, scope) => expr(callExpression(memberExpression(identifier("Array"), identifier("from")), [read(value, scope)]))),
-		structField("utf16", "UTF16View", (value) => value),
-		structField("utf8", "UTF8View", (value, scope) => expr(callExpression(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode")), [read(value, scope)]))),
-	],
-	"UTF32View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
-	],
-	"UTF16View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
-	],
-	"UTF8View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
-	],
-	"Collection": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
-	],
-	"Array": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
-	],
-};
-const defaultValues: { [name: string]: Expression } = {
-	"Bool": booleanLiteral(false),
-	"Int": numericLiteral(0),
-	"Int64": numericLiteral(0),
-	"Float": numericLiteral(0),
-	"Double": numericLiteral(0),
-	"String": stringLiteral(""),
-	"UTF16View": stringLiteral(""),
-	"Optional": nullLiteral(),
-	"Array": arrayExpression([]),
-};
 
 const emptyStatements: Statement[] = [];
 
@@ -154,7 +92,7 @@ function extractReference(decl: string, scope: Scope): Identifier | ThisExpressi
 		if (match[1] === "$match") {
 			return identifier("$match");
 		}
-		return match[1] === "self" && scope.self ? scope.self : mangleName(match[1]);
+		return lookup(match[1], scope);
 	}
 	const specializationStripped = decl.replace(/ .*/, "");
 	if (hasOwnProperty(builtinFunctions, specializationStripped)) {
@@ -206,8 +144,9 @@ function collapseToExpression(expressions: Expression[]): Expression {
 }
 
 export function compileTermToProgram(root: Term): Program {
-	const programScope = newScope("global", undefined);
-	const structTypes = Object.assign(Object.create(null), defaultStructTypes);
+	const programScope = newRootScope();
+	const structTypes = Object.assign(Object.create(null), builtinStructTypes);
+	const defaultValues = Object.assign(Object.create(null), builtinDefaultValues);
 	const classTypes: { [name: string]: Array<StructField> } = Object.create(null);
 
 	function typeRequiresCopy(type: Type): boolean {
@@ -247,7 +186,7 @@ export function compileTermToProgram(root: Term): Program {
 						case 0:
 							break;
 						case 1:
-							return objectExpression([objectProperty(mangleName(onlyStored[0].name), copyValue(read(getField(expr(value), onlyStored[0], scope), scope), onlyStored[0].type, scope))]);
+							return objectExpression([objectProperty(lookup(onlyStored[0].name, scope), copyValue(read(getField(expr(value), onlyStored[0], scope), scope), onlyStored[0].type, scope))]);
 						default:
 							const [first, after] = reuseExpression(value, scope);
 							return objectExpression(onlyStored.map((fieldLayout) => {
@@ -510,7 +449,7 @@ export function compileTermToProgram(root: Term): Program {
 				const name = nameForDeclRefExpr(term);
 				const id = extractReference(name, scope);
 				if (typeof id === "string") {
-					return builtin(id, getType(term));
+					return functionValue(id, getType(term));
 				}
 				return variable(id);
 			}
@@ -602,16 +541,15 @@ export function compileTermToProgram(root: Term): Program {
 			case "closure_expr":
 			case "autoclosure_expr": {
 				expectLength(term.children, 2);
-				const expression = translateTermToValue(term.children[1], scope);
 				const parameter_list = termWithName(term.children, "parameter_list");
-				if (parameter_list.children.length === 0) {
-					return callable(() => expression, getType(term));
-				}
-				const params: LVal[] = [];
-				for (const param of termsWithName(parameter_list.children, "parameter")) {
-					params.push(mangleName(param.args[0]));
-				}
-				return expr(functionExpression(undefined, params, blockStatement([returnStatement(read(expression, scope))])));
+				return callable((scope, arg) => {
+					const childScope = newScope("anonymous", scope);
+					termsWithName(parameter_list.children, "parameter").forEach((param, index) => {
+						childScope.mapping[param.args[0]] = hoistToIdentifier(read(arg(index, param.args[0]), childScope), childScope);
+					});
+					const expression = translateTermToValue(term.children[1], childScope);
+					return expression;
+				}, getType(term));
 			}
 			default: {
 				console.log(term);
@@ -638,7 +576,6 @@ export function compileTermToProgram(root: Term): Program {
 				if (typeof braceStatement === "undefined") {
 					return emptyStatements;
 				}
-				const params: LVal[] = [];
 				const parameterLists = termsWithName(term.children, "parameter_list");
 				let selfParameterList: Term | undefined;
 				let parameterList: Term;
@@ -652,19 +589,32 @@ export function compileTermToProgram(root: Term): Program {
 						parameterList = parameterLists[1];
 						break;
 				}
-				for (const param of termsWithName(parameterList.children, "parameter")) {
-					params.push(mangleName(param.args[0]));
+				scope.functions[term.args[0]] = (scope, arg, type) => {
+					const childScope = newScope(term.args[0], scope);
+					if (selfParameterList) {
+						childScope.mapping["self"] = thisExpression();
+					}
+					termsWithName(parameterList.children, "parameter").forEach((param, index) => {
+						childScope.mapping[param.args[0]] = hoistToIdentifier(read(arg(index, param.args[0]), childScope), childScope);
+					});
+					const stmts = emitScope(childScope, translateStatement(braceStatement, childScope));
+					return statements(stmts);
+				};
+				if (term.properties.access === "public") {
+					const identifier = insertFunction(term.args[0], scope, getType(term));
+					return [exportNamedDeclaration(undefined, [exportSpecifier(identifier, identifier)])];
 				}
-				const childScope = newScope(term.args[0], selfParameterList ? thisExpression() : undefined, scope);
-				const statements = translateStatement(braceStatement, childScope);
-				return [functionDeclaration(mangleName(term.args[0]), params, blockStatement(emitScope(childScope, statements)))];
+				return emptyStatements;
 			}
 			case "return_stmt": {
 				expectLength(term.children, 0, 1);
 				if (term.children.length) {
-					const expression = translateExpression(term.children[0], scope);
-					const expressionCopy = copyValue(expression, getType(term.children[0]), scope);
-					return [returnStatement(expressionCopy)];
+					const value = translateTermToValue(term.children[0], scope);
+					if (value.kind === "statements") {
+						return value.statements;
+					}
+					const expression = copyValue(read(value, scope), getType(term.children[0]), scope);
+					return [returnStatement(expression)];
 				} else {
 					return [returnStatement()];
 				}

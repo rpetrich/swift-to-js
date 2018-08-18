@@ -1,10 +1,9 @@
-import { assignmentExpression, objectExpression, callExpression, objectProperty, functionExpression, thisExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, memberExpression, Expression, Identifier, MemberExpression, ThisExpression } from "babel-types";
+import { assignmentExpression, objectExpression, callExpression, objectProperty, functionExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, thisExpression, nullLiteral, memberExpression, Expression, Identifier, MemberExpression, NullLiteral, ThisExpression, Statement } from "babel-types";
 
-import { builtinFunctions, insertBuiltin } from "./builtins";
-import { undefinedLiteral, uniqueIdentifier, emitScope, newScope, fullPathOfScope, Scope } from "./scope";
-import { Type } from "./types";
+import { addVariable, undefinedLiteral, uniqueIdentifier, emitScope, newScope, rootScope, mangleName, fullPathOfScope, Scope } from "./scope";
+import { parse as parseType, Type } from "./types";
 
-export type ArgGetter = (index: number | "this") => Value;
+export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
 export interface ExpressionValue {
 	kind: "expression";
@@ -14,7 +13,7 @@ export interface ExpressionValue {
 
 export function expr(expression: Identifier | ThisExpression, pointer?: boolean): VariableValue;
 export function expr(expression: Expression, pointer?: boolean): ExpressionValue | VariableValue;
-export function expr(expression: Expression, pointer: boolean = false): ExpressionValue | VariableValue {
+export function expr(expression: Expression, pointer: boolean = false): ExpressionValue | ReturnType<typeof variable> {
 	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
 		return variable(expression);
 	}
@@ -22,17 +21,23 @@ export function expr(expression: Expression, pointer: boolean = false): Expressi
 }
 
 
-// export interface StatementsValue {
-// 	kind: "statements";
-// 	statements: Statement[];
-// }
+export interface StatementsValue {
+	kind: "statements";
+	statements: Statement[];
+}
 
-// export function statements(statements: Statement[]): StatementsValue | Value {
-// 	if (statements.length === 1 && statements[0].type === "ReturnStatement") {
-// 		return statements[0].argument === null ? identifier("undefined") : expr(statements[0].argument);
-// 	}
-// 	return 
-// }
+export function statements(statements: Statement[]): StatementsValue | ReturnType<typeof expr> {
+	if (statements.length === 1) {
+		const firstStatement = statements[0];
+		if (firstStatement.type === "ReturnStatement") {
+			return expr(firstStatement.argument === null ? undefinedLiteral : firstStatement.argument);
+		}
+	}
+	return {
+		kind: "statements",
+		statements,
+	};
+}
 
 export interface CallableValue {
 	kind: "callable";
@@ -68,14 +73,14 @@ export function boxed(contents: Value): BoxedValue {
 }
 
 
-export interface BuiltinValue {
-	kind: "builtin";
+export interface FunctionValue {
+	kind: "function";
 	name: string;
 	type: Type;
 }
 
-export function builtin(name: string, type: Type): BuiltinValue {
-	return { kind: "builtin", name, type };
+export function functionValue(name: string, type: Type): FunctionValue {
+	return { kind: "function", name, type };
 }
 
 
@@ -88,7 +93,30 @@ export function tuple(values: Value[]): TupleValue {
 	return { kind: "tuple", values };
 }
 
-export type Value = ExpressionValue | CallableValue | VariableValue | BuiltinValue | TupleValue | BoxedValue;
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue;
+
+
+export type StructField = {
+	name: string;
+	type: Type;
+} & ({ stored: true } | { stored: false; getter: (target: Value, scope: Scope) => Value; });
+
+export function structField(name: string, type: Type | string, getter?: (target: Value, scope: Scope) => Value): StructField {
+	const resolvedType = typeof type === "string" ? parseType(type) : type;
+	if (getter) {
+		return {
+			name,
+			type: resolvedType,
+			stored: false,
+			getter,
+		}
+	}
+	return {
+		name,
+		type: resolvedType,
+		stored: true,
+	};
+}
 
 
 const baseProperty = identifier("base");
@@ -124,10 +152,12 @@ function getArgumentPointers(type: Type): boolean[] {
 }
 
 export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): Expression {
-	const inner: Scope = newScope("anonymous", thisExpression(), scope);
+	const inner: Scope = newScope("anonymous", scope);
+	inner.mapping["self"] = thisExpression();
 	let usedCount = 0;
+	const identifiers: { [index: number]: Identifier } = Object.create(null);
 	const pointers = getArgumentPointers(type);
-	const newValue = expression(inner, (i) => {
+	const newValue = expression(inner, (i, name) => {
 		if (usedCount === -1) {
 			throw new Error(`Requested access to scope after it was generated!`);
 		}
@@ -137,23 +167,43 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 		if (usedCount <= i) {
 			usedCount = i + 1;
 		}
-		return expr(identifier("$" + i), pointers[i]);
+		let result: Identifier;
+		if (Object.hasOwnProperty.call(identifiers, i)) {
+			result = identifiers[i];
+		} else {
+			result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
+		}
+		return expr(result, pointers[i]);
 	});
 	const args: Identifier[] = [];
 	for (let i = 0; i < usedCount; i++) {
-		args[i] = identifier("$" + i);
+		args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + i);
 	}
-	const result = functionExpression(undefined, args, blockStatement(emitScope(inner, [returnStatement(read(newValue, inner))])));
+	let statements: Statement[];
+	if (newValue.kind === "statements") {
+		statements = newValue.statements;
+	} else {
+		statements = [returnStatement(read(newValue, inner))];
+	}
+	const result = functionExpression(undefined, args, blockStatement(emitScope(inner, statements)));
 	usedCount = -1;
 	return result;
 }
+
+export function insertFunction(name: string, scope: Scope, type: Type): Identifier {
+	const mangled = mangleName(name);
+	const globalScope = rootScope(scope);
+	addVariable(globalScope, mangled, functionize(globalScope, type, (inner, arg) => scope.functions[name](inner, arg, type, name)));
+	return mangled;
+}
+
 
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
-		case "builtin":
-			return insertBuiltin(value.name, scope, value.type);
+		case "function":
+			return insertFunction(value.name, scope, value.type);
 		case "tuple":
 			return arrayExpression(value.values.map((child) => read(child, scope)));
 		case "expression":
@@ -167,6 +217,8 @@ export function read(value: Value, scope: Scope): Expression {
 			return functionize(scope, value.type, value.call);
 		case "direct":
 			return value.ref;
+		case "statements":
+			return callExpression(functionExpression(undefined, [], blockStatement(value.statements)), []);
 		case "boxed":
 			if (value.contents.kind === "direct") {
 				const ref = value.contents.ref;
@@ -196,12 +248,12 @@ export function call(target: Value, args: Value[], scope: Scope): Value {
 		if (i < args.length) {
 			return args[i];
 		}
-		throw new Error(`${target.kind === "builtin" ? target.name : "Callable"} asked for argument ${i}, but only ${args.length} arguments provided!`);
+		throw new Error(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i}, but only ${args.length} arguments provided!`);
 	}
 	switch (target.kind) {
-		case "builtin":
-			return call(expr(insertBuiltin(target.name, scope, target.type)), args, scope);
-			// return builtinFunctions[target.name](scope, getter, target.type, target.name);
+		case "function":
+			// return call(expr(insertFunction(target.name, scope, target.type)), args, scope);
+			return scope.functions[target.name](scope, getter, target.type, target.name);
 		case "callable":
 			return target.call(scope, getter);
 		default:
@@ -241,6 +293,15 @@ export function reuseExpression(expression: Expression, scope: Scope): [Expressi
 		const temp = uniqueIdentifier(scope);
 		return [assignmentExpression("=", temp, expression), temp];
 	}
+}
+
+export function hoistToIdentifier(expression: Expression, scope: Scope): Identifier | ThisExpression {
+	if (expression.type === "Identifier" || expression.type === "ThisExpression") {
+		return expression;
+	}
+	const result = uniqueIdentifier(scope);
+	addVariable(scope, result, expression);
+	return result;
 }
 
 function expectedMessage(name: string, type: Type) {

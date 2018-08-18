@@ -1,11 +1,14 @@
 import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Statement, ThisExpression } from "babel-types";
+import { FunctionBuilder } from "./functions";
+import { functions as builtinFunctions } from "./builtins";
 
 export const undefinedLiteral = identifier("undefined");
 
 export interface Scope {
 	name: string;
 	variables: { [name: string]: Expression | undefined };
-	self: Identifier | ThisExpression | undefined;
+	functions: { [name: string]: FunctionBuilder };
+	mapping: { [name: string]: ThisExpression | Identifier };
 	parent: Scope | undefined;
 };
 
@@ -26,8 +29,24 @@ export function rootScope(scope: Scope) {
 	return result;
 }
 
-export function newScope(name: string, self?: Identifier | ThisExpression, parent?: Scope) {
-	return { name, variables: Object.create(null), self, parent };
+export function newRootScope(): Scope {
+	return {
+		name: "global",
+		variables: Object.create(null),
+		functions: Object.assign(Object.create(null), builtinFunctions),
+		mapping: Object.create(null),
+		parent: undefined
+	};
+}
+
+export function newScope(name: string, parent: Scope) {
+	return {
+		name,
+		variables: Object.create(null),
+		functions: parent.functions,
+		mapping: Object.create(null),
+		parent
+	};
 }
 
 export function hasNameInScope(scope: Scope, name: string): boolean {
@@ -89,6 +108,10 @@ function mangleSymbol(symbol: string) {
 
 export function mangleName(name: string) {
 	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\(file\).|\(\)|\W)/g, mangleSymbol));
+}
+
+export function lookup(name: string, scope: Scope): Identifier | ThisExpression {
+	return Object.hasOwnProperty.call(scope.mapping, name) ? scope.mapping[name] : mangleName(name);
 }
 
 export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {

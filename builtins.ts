@@ -1,7 +1,8 @@
-import { read, unbox, call, functionize, expr, callable, variable, builtin, tuple, ArgGetter, Value, ExpressionValue } from "./values";
-import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { read, unbox, call, functionize, expr, callable, variable, structField, functionValue, tuple, ArgGetter, Value, StructField, ExpressionValue } from "./values";
+import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { FunctionBuilder } from "./functions";
 import { parse, Type } from "./types";
-import { assignmentExpression, binaryExpression, callExpression, logicalExpression, variableDeclaration, variableDeclarator, numericLiteral, returnStatement, functionExpression, blockStatement, unaryExpression, identifier, nullLiteral, arrayExpression, memberExpression, thisExpression, Identifier, NullLiteral } from "babel-types";
+import { assignmentExpression, booleanLiteral, binaryExpression, callExpression, stringLiteral, newExpression, logicalExpression, variableDeclaration, variableDeclarator, numericLiteral, returnStatement, functionExpression, blockStatement, unaryExpression, identifier, nullLiteral, arrayExpression, memberExpression, thisExpression, Identifier, NullLiteral, Expression } from "babel-types";
 
 function returnType(type: Type) {
 	if (type.kind === "function") {
@@ -9,8 +10,6 @@ function returnType(type: Type) {
 	}
 	throw new Error(`Expected a function type, got a ${type.kind} type`);
 }
-
-export type BuiltinFunction = (scope: Scope, arg: ArgGetter, type: Type, name: string) => Value;
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -30,7 +29,7 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 	return arg0.kind === "direct" ? variable(read(arg0, scope)) : expr(read(arg0, scope));
 }
 
-function wrapped(fn: BuiltinFunction): BuiltinFunction {
+function wrapped(fn: FunctionBuilder): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
 		const innerType = returnType(type);
 		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, name), innerType);
@@ -45,7 +44,48 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(assignmentExpression(operator, read(unbox(arg(0), scope), scope), read(arg(1), scope))));
 }
 
-export const builtinFunctions: { [name: string]: BuiltinFunction } = {
+export const structTypes: { [name: string]: Array<StructField> } = {
+	"String": [
+		structField("unicodeScalars", "UTF32View", (value, scope) => expr(callExpression(memberExpression(identifier("Array"), identifier("from")), [read(value, scope)]))),
+		structField("utf16", "UTF16View", (value) => value),
+		structField("utf8", "UTF8View", (value, scope) => expr(callExpression(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode")), [read(value, scope)]))),
+	],
+	"UTF32View": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
+	"UTF16View": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
+	"UTF8View": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
+	"Collection": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
+	"Array": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+	],
+};
+
+export const defaultValues: { [name: string]: Expression } = {
+	"Bool": booleanLiteral(false),
+	"Int": numericLiteral(0),
+	"Int64": numericLiteral(0),
+	"Float": numericLiteral(0),
+	"Double": numericLiteral(0),
+	"String": stringLiteral(""),
+	"UTF16View": stringLiteral(""),
+	"Optional": nullLiteral(),
+	"Array": arrayExpression([]),
+};
+
+export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).Int.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Int.+": binaryBuiltin("+"),
 	"Swift.(file).Int.-": binaryBuiltin("-"),
@@ -132,13 +172,3 @@ export const builtinFunctions: { [name: string]: BuiltinFunction } = {
 	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
 	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(arrayExpression([callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])])), returnType(type)),
 };
-
-export function insertBuiltin(name: string, scope: Scope, type: Type): Identifier | NullLiteral {
-	if (name === "Swift.(file).Optional.none") {
-		return nullLiteral();
-	}
-	const mangled = mangleName(name);
-	const globalScope = rootScope(scope);
-	addVariable(globalScope, mangled, functionize(globalScope, type, (inner, arg) => builtinFunctions[name](inner, arg, type, name)));
-	return mangled;
-}
