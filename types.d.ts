@@ -5,7 +5,6 @@ export type Type = Function | Optional | MetaType | Generic | Dictionary | Array
 export interface Optional {
 	kind: "optional";
 	type: Type;
-	depth: number;
 	location: Location;
 }
 

@@ -149,6 +149,10 @@ function expectLength<T extends any[]>(array: T, length: number) {
 	}
 }
 
+function isOptionalOfOptional(type: Type): boolean {
+	return type.kind === "optional" && type.type.kind === "optional";
+}
+
 function typeRequiresCopy(type: Type): boolean {
 	switch (type.kind) {
 		case "name":
@@ -169,6 +173,9 @@ function typeRequiresCopy(type: Type): boolean {
 		case "namespaced":
 			return typeRequiresCopy(type.type);
 		case "optional":
+			if (isOptionalOfOptional(type)) {
+				return true;
+			}
 			return typeRequiresCopy(type.type);
 	}
 }
@@ -239,9 +246,15 @@ function copyValue(value: Expression, type: Type, scope: Scope): Expression {
 		case "function":
 			return value;
 		case "optional": {
-			if (typeRequiresCopy(type.type)) {
+			if (isOptionalOfOptional(type)) {
+				if (typeRequiresCopy(type.type)) {
+					const [first, after] = reuseExpression(value, scope);
+					return conditionalExpression(binaryExpression("===", memberExpression(first, identifier("length")), numericLiteral(0)), arrayExpression([]), copyValue(after, type.type, scope));
+				} else {
+					return callExpression(memberExpression(value, identifier("slice")), []);
+				}
+			} else if (typeRequiresCopy(type.type)) {
 				const [first, after] = reuseExpression(value, scope);
-				// TODO: Support multiple levels of optional
 				return conditionalExpression(binaryExpression("===", first, nullLiteral()), nullLiteral(), copyValue(after, type.type, scope));
 			} else {
 				return value;
@@ -330,7 +343,15 @@ function translatePattern(term: Term, value: Expression, scope: Scope): Expressi
 	switch (term.name) {
 		case "optional_some_element": {
 			expectLength(term.children, 1);
-			return binaryExpression("!==", translatePattern(term.children[0], value, scope), nullLiteral());
+			const type = getType(term);
+			if (type.kind !== "optional") {
+				throw new TypeError(`Expected optional, got ${stringifyType(type)}`);
+			}
+			const translated = translatePattern(term.children[0], value, scope);
+			if (isOptionalOfOptional(type)) {
+				return binaryExpression("!==", memberExpression(translated, identifier("length")), numericLiteral(0));
+			}
+			return binaryExpression("!==", translated, nullLiteral());
 		}
 		case "case_label_item":
 		case "pattern_let": {

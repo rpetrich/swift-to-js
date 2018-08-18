@@ -5,7 +5,7 @@ Type
   = Function / NamespacedType / MetaType / Optional / Generic / Dictionary / Array / Tuple / Modified / Name
 
 Optional
-  = type:(Function / NamespacedType / Generic / Dictionary / Array / Tuple / Modified / Name) depth:[?!]+ { return { kind: "optional", type: type, depth: depth.length, location: location() }; }
+  = type:(Function / NamespacedType / Generic / Dictionary / Array / Tuple / Modified / Name) depth:[?!]+ { return depth.reduce(function (type) { return { kind: "optional", type: type, location: location() } }, type); }
 
 Generic
   = base:Name '<' typeArgs:Type* '>' { return { kind: "generic", base: base, arguments: typeArgs, location: location() }; }
