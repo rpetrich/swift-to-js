@@ -1,3 +1,3 @@
-function emptyIntArray$() {
+function emptyIntArray() {
   return [];
 }

@@ -43,6 +43,8 @@ export function fullPathOfScope(scope: Scope) {
 
 const mangledSymbols: { [symbol: string]: string } = {
 	"Swift.(file).": "$$",
+	"_:": "",
+	"()": "",
 	":": "$",
 	".": "$",
 	"_": "_",
@@ -74,7 +76,7 @@ function mangleSymbol(symbol: string) {
 }
 
 export function mangleName(name: string) {
-	return identifier(name.replace(/(Swift\.\(file\).|\W)/g, mangleSymbol));
+	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\(file\).|\(\)|\W)/g, mangleSymbol));
 }
 
 export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {

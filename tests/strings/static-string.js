@@ -1,3 +1,3 @@
-function hello_world$() {
+function hello_world() {
   return "Hello World!";
 }

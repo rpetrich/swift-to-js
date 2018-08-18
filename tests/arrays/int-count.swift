@@ -1,3 +1,3 @@
-public func arrayCount(array: [Int]) -> Int {
+public func arrayCount(_ array: [Int]) -> Int {
     return array.count
 }

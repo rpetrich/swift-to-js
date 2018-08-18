@@ -1,3 +1,3 @@
-function arrayCount$array$(array) {
+function arrayCount(array) {
   return array.length;
 }
