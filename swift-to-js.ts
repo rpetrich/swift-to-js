@@ -4,7 +4,8 @@ import { undefinedLiteral, addVariable, emitScope, newScope, rootScope, mangleNa
 import { newPointer, boxed, call, callable, builtin, unbox, tuple, variable, expr, read, reuseExpression, stringifyType, ExpressionValue, VariableValue, BuiltinValue, TupleValue, Value } from "./values";
 import { builtinFunctions } from "./builtins";
 
-import { stdin } from "process";
+import { spawn } from "child_process";
+import { argv } from "process";
 import { switchStatement, switchCase, sequenceExpression, objectExpression, newExpression, thisExpression, objectProperty, assignmentExpression, arrayExpression, memberExpression, functionExpression, program, binaryExpression, blockStatement, booleanLiteral, nullLiteral, stringLiteral, callExpression, conditionalExpression, expressionStatement, ifStatement, identifier, functionDeclaration, numericLiteral, returnStatement, variableDeclaration, variableDeclarator, classDeclaration, logicalExpression, classBody, unaryExpression, whileStatement, Expression, LVal, Statement, Identifier, SwitchCase, IfStatement, MemberExpression, ArrayExpression, Program } from "babel-types";
 import { transformFromAst } from "babel-core";
 
@@ -726,12 +727,7 @@ export function compileTermToProgram(root: Term): Program {
 	return program(emitScope(programScope, translateStatement(root, programScope)));
 }
 
-export function compileASTSource(astSource: string): string | undefined {
-	const parsed = parseAST(astSource);
-	return transformFromAst(compileTermToProgram(parsed)).code;
-}
-
-export function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
+function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		stream.setEncoding("utf8");
 		stream.resume();
@@ -742,6 +738,25 @@ export function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
 	});
 }
 
+export async function compile(path: string): Promise<string | undefined> {
+	const process = spawn("swiftc", ["-dump-ast", path]);
+	const stdout = readAsString(process.stdout);
+	const stderr = readAsString(process.stderr);
+	await new Promise((resolve, reject) => {
+		process.on("exit", (code, signal) => {
+			if (code !== 0) {
+				reject(new Error(`swiftc failed with ${code}`));
+			} else {
+				resolve();
+			}
+		});
+	});
+	const rootTerm = parseAST(await stderr);
+	await stdout;
+	const program = compileTermToProgram(rootTerm);
+	return transformFromAst(program).code;
+}
+
 if (require.main === module) {
-	readAsString(stdin).then(compileASTSource).then(console.log);
+	compile(argv[argv.length - 1]).then(console.log);
 }
