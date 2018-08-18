@@ -2,9 +2,9 @@
   "name": "swift-to-js",
   "version": "0.0.1",
   "description": "JavaScript backend for Swift",
-  "main": "swift-to-js.js",
+  "main": "dist/swift-to-js.js",
   "scripts": {
-    "build": "tsc && pegjs ast.pegjs && pegjs types.pegjs",
+    "build": "tsc && pegjs --output dist/ast.js ast.pegjs && pegjs --output dist/types.js types.pegjs",
     "test": "jest"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
