@@ -209,14 +209,19 @@ export function compileTermToProgram(root: Term): Program {
 		switch (type.kind) {
 			case "name":
 				if (hasOwnProperty(structTypes, type.name) && value.type !== "ObjectExpression") {
-					const [first, after] = reuseExpression(value, scope);
 					let usedFirst = false;
 					const onlyStored = storedFields(structTypes[type.name]);
-					if (onlyStored.length !== 0) {
-						return objectExpression(onlyStored.map((fieldLayout) => {
-							const identifier = usedFirst ? after : (usedFirst = true, first);
-							return objectProperty(mangleName(fieldLayout.name), copyValue(read(getField(expr(identifier), fieldLayout, scope), scope), fieldLayout.type, scope));
-						}));
+					switch (onlyStored.length) {
+						case 0:
+							break;
+						case 1:
+							return objectExpression([objectProperty(mangleName(onlyStored[0].name), copyValue(read(getField(expr(value), onlyStored[0], scope), scope), onlyStored[0].type, scope))]);
+						default:
+							const [first, after] = reuseExpression(value, scope);
+							return objectExpression(onlyStored.map((fieldLayout) => {
+								const identifier = usedFirst ? after : (usedFirst = true, first);
+								return objectProperty(mangleName(fieldLayout.name), copyValue(read(getField(expr(identifier), fieldLayout, scope), scope), fieldLayout.type, scope));
+							}));
 					}
 				}
 				return value;
