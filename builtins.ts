@@ -157,4 +157,5 @@ export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).FloatingPoint.==": binaryBuiltin("==="),
 	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
 	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(arrayExpression([callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])])), returnType(type)),
+	"Swift.(file).print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 };

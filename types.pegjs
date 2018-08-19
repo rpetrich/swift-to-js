@@ -18,9 +18,12 @@ FunctionAttribute
 Tuple
   = '(' types:(TupleContents / _) ')' { return { kind: "tuple", types: types, location: location() }; }
 TupleContents
-  = _ (Name ':' _)? head:Type tail:TupleTerm* _ { return typeof tail !== "undefined" ? [head].concat(tail) : [head]; }
+  = _ (Name ':' _)? head:(Variadic / Type) tail:TupleTerm* _ { return typeof tail !== "undefined" ? [head].concat(tail) : [head]; }
 TupleTerm
-  = _ ',' _ (Name ':' _)? type:Type { return type; }
+  = _ ',' _ (Name ':' _)? type:(Variadic / Type) { return type; }
+
+Variadic
+  = type:Type '...' { return { kind: "array", type: type, location: location() } }
 
 Array
   = '[' _ type:Type _ ']' { return { kind: "array", type: type, location: location() }; }
