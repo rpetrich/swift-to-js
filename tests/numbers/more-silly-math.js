@@ -1,5 +1,5 @@
 export function more_silly_math$num$(num) {
-  var result = 0;
+  let result = 0;
 
   if (num < 0) {
     result = num;

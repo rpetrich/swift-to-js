@@ -1,4 +1,4 @@
-import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Declaration, Statement, ThisExpression } from "babel-types";
+import { identifier, variableDeclaration, variableDeclarator, exportNamedDeclaration, Identifier, Expression, Declaration, Statement, ThisExpression } from "babel-types";
 import { FunctionBuilder } from "./functions";
 import { functions as builtinFunctions } from "./builtins";
 
@@ -13,13 +13,18 @@ export interface Scope {
 	parent: Scope | undefined;
 };
 
-export function addVariable(scope: Scope, name: string | Identifier, initializer: Expression | undefined = undefinedLiteral): boolean {
-	const nameString = typeof name === "string" ? name : name.name;
-	if (Object.hasOwnProperty.call(scope.declarations, nameString)) {
-		return false;
+export function addVariable(scope: Scope, name: Identifier, initializer: Expression | undefined = undefinedLiteral) {
+	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
+		throw new Error(`Declaration of ${name.name} already exists`);
 	}
-	scope.declarations[nameString] = typeof initializer === "undefined" ? undefined : variableDeclaration("var", [variableDeclarator(identifier(nameString), initializer === undefinedLiteral ? undefined : initializer)]);
-	return true;
+	scope.declarations[name.name] = typeof initializer === "undefined" ? undefined : variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]);
+}
+
+export function addExternalVariable(scope: Scope, name: Identifier, initializer: Expression = undefinedLiteral) {
+	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
+		throw new Error(`Declaration of ${name.name} already exists`);
+	}
+	scope.declarations[name.name] = exportNamedDeclaration(variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]), []);
 }
 
 export function rootScope(scope: Scope) {
@@ -41,7 +46,7 @@ export function newRootScope(): Scope {
 	};
 }
 
-export function newScope(name: string, parent: Scope) {
+export function newScope(name: string, parent: Scope): Scope {
 	return {
 		name,
 		declarations: Object.create(null),
@@ -123,7 +128,6 @@ export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {
 	while (hasNameInScope(scope, name)) {
 		name = prefix + i++;
 	}
-	addVariable(scope, name);
 	return identifier(name);
 }
 

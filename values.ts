@@ -1,4 +1,4 @@
-import { assignmentExpression, objectExpression, callExpression, objectProperty, functionExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, thisExpression, nullLiteral, memberExpression, Expression, Identifier, MemberExpression, NullLiteral, ThisExpression, Statement } from "babel-types";
+import { assignmentExpression, objectExpression, sequenceExpression, callExpression, objectProperty, functionExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, thisExpression, nullLiteral, memberExpression, Expression, Identifier, MemberExpression, NullLiteral, ThisExpression, Statement, ExpressionStatement } from "babel-types";
 
 import { addVariable, undefinedLiteral, uniqueIdentifier, emitScope, newScope, rootScope, mangleName, fullPathOfScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
@@ -28,10 +28,17 @@ export interface StatementsValue {
 }
 
 export function statements(statements: Statement[]): StatementsValue | ReturnType<typeof expr> {
-	if (statements.length === 1) {
-		const firstStatement = statements[0];
-		if (firstStatement.type === "ReturnStatement") {
-			return expr(firstStatement.argument === null ? undefinedLiteral : firstStatement.argument);
+	if (statements.length >= 1) {
+		const lastStatement = statements[statements.length - 1];
+		if (lastStatement.type === "ReturnStatement") {
+			const last = lastStatement.argument === null ? undefinedLiteral : lastStatement.argument;
+			if (statements.length === 1) {
+				return expr(last);
+			}
+			const exceptLast = statements.slice(0, statements.length - 1);
+			if (exceptLast.every(statement => statement.type === "ExpressionStatement")) {
+				return expr(sequenceExpression(exceptLast.map(statement => (statement as ExpressionStatement).expression).concat(last)));
+			}
 		}
 	}
 	return {
@@ -153,7 +160,14 @@ export function read(value: Value, scope: Scope): Expression {
 		case "function":
 			return insertFunction(value.name, scope, value.type);
 		case "tuple":
-			return arrayExpression(value.values.map((child) => read(child, scope)));
+			switch (value.values.length) {
+				case 0:
+					return undefinedLiteral;
+				case 1:
+					return read(value.values[0], scope);
+				default:
+					return arrayExpression(value.values.map((child) => read(child, scope)));
+			}
 		case "expression":
 			if (value.pointer) {
 				const [first, second] = reuseExpression(value.expression, scope);
@@ -243,15 +257,16 @@ export function reuseExpression(expression: Expression, scope: Scope): [Expressi
 		return [expression, expression];
 	} else {
 		const temp = uniqueIdentifier(scope);
+		addVariable(scope, temp);
 		return [assignmentExpression("=", temp, expression), temp];
 	}
 }
 
-export function hoistToIdentifier(expression: Expression, scope: Scope): Identifier | ThisExpression {
+export function hoistToIdentifier(expression: Expression, scope: Scope, name: string = "temp"): Identifier | ThisExpression {
 	if (expression.type === "Identifier" || expression.type === "ThisExpression") {
 		return expression;
 	}
-	const result = uniqueIdentifier(scope);
+	const result = uniqueIdentifier(scope, name);
 	addVariable(scope, result, expression);
 	return result;
 }

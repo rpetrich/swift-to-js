@@ -1,2 +1,2 @@
-var unaryInit;
+export let unaryInit;
 unaryInit = 0;

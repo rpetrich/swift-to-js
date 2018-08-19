@@ -76,3 +76,17 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), scope);
 	};
 }
+
+export function wrapped(fn: FunctionBuilder): FunctionBuilder {
+	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
+		const innerType = returnType(type);
+		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, name), innerType);
+	}
+}
+
+export function returnType(type: Type) {
+	if (type.kind === "function") {
+		return type.return;
+	}
+	throw new Error(`Expected a function type, got a ${type.kind} type`);
+}

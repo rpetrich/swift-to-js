@@ -1,2 +1,2 @@
-var emptyInit;
+export let emptyInit;
 emptyInit = undefined;

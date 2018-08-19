@@ -1,6 +1,6 @@
 export function description_of_double$option$(option) {
-  var unwrapped;
-  var doubleUnwrapped;
+  let unwrapped;
+  let doubleUnwrapped;
 
   if ((unwrapped = option).length !== 0) {
     if ((doubleUnwrapped = unwrapped) !== null) {
