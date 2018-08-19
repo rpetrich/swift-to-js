@@ -835,9 +835,12 @@ export async function compile(path: string): Promise<string | undefined> {
 	const stdout = readAsString(process.stdout);
 	const stderr = readAsString(process.stderr);
 	await new Promise((resolve, reject) => {
-		process.on("exit", (code, signal) => {
+		process.on("exit", async (code, signal) => {
 			if (code !== 0) {
-				reject(new Error(`swiftc failed with ${code}`));
+				const lines = (await stderr).split(/\r\n|\r|\n/g);
+				const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
+				const filteredLines = bracketIndex !== -1 ? lines.slice(0, bracketIndex) : lines;
+				reject(new Error(filteredLines.join("\n")));
 			} else {
 				resolve();
 			}
@@ -850,5 +853,9 @@ export async function compile(path: string): Promise<string | undefined> {
 }
 
 if (require.main === module) {
-	compile(argv[argv.length - 1]).then(console.log);
+	compile(argv[argv.length - 1]).then(console.log).catch((e) => {
+		// console.error(e instanceof Error ? e.message : e);
+		console.error(e);
+		process.exit(1);
+	});
 }
