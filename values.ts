@@ -207,27 +207,33 @@ export function read(value: Value, scope: Scope): Expression {
 	}
 }
 
-export function call(target: Value, args: Value[], scope: Scope): Value {
+export const undefinedValue = expr(undefinedLiteral);
+
+export function call(target: Value, thisArgument: Value, args: Value[], scope: Scope): Value {
 	const getter: ArgGetter = (i) => {
 		if (i === "this") {
-			return expr(undefinedLiteral);
+			return thisArgument;
 		}
 		if (i < args.length) {
 			return args[i];
 		}
-		throw new Error(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i}, but only ${args.length} arguments provided!`);
+		throw new Error(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i + 1}, but only ${args.length} arguments provided!`);
 	};
 	switch (target.kind) {
 		case "function":
 			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
 				return scope.functions[target.name](scope, getter, target.type, target.name);
 			} else {
-				return call(expr(insertFunction(target.name, scope, target.type)), args, scope);
+				return call(expr(insertFunction(target.name, scope, target.type)), thisArgument, args, scope);
 			}
 		case "callable":
 			return target.call(scope, getter);
 		default:
-			return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
+			if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
+				return expr(callExpression(memberExpression(read(target, scope), identifier("call")), [thisArgument as Value].concat(args).map((value) => read(value, scope))));
+			} else {
+				return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
+			}
 	}
 }
 

@@ -3,7 +3,7 @@ import { defaultValues as builtinDefaultValues, structTypes as builtinStructType
 import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newRootScope, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, newPointer, read, reuseExpression, statements, stringifyType, StructField, structField, tuple, TupleValue, unbox, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, newPointer, read, reuseExpression, statements, stringifyType, StructField, structField, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -522,9 +522,9 @@ export function compileTermToProgram(root: Term): Program {
 				const type = getType(args);
 				const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope) : tuple([translateTermToValue(args, scope)]);
 				if (argsValue.kind === "tuple") {
-					return call(peekedTarget, argsValue.values, scope);
+					return call(peekedTarget, undefinedValue, argsValue.values, scope);
 				} else {
-					return call(expr(memberExpression(read(peekedTarget, scope), identifier("apply"))), [expr(undefinedLiteral) as Value].concat(argsValue), scope);
+					return call(expr(memberExpression(read(peekedTarget, scope), identifier("apply"))), undefinedValue, [expr(undefinedLiteral) as Value].concat(argsValue), scope);
 				}
 			}
 			case "tuple_expr": {
@@ -626,64 +626,56 @@ export function compileTermToProgram(root: Term): Program {
 			case "func_decl": {
 				const isConstructor = term.name === "constructor_decl";
 				expectLength(term.args, 1);
-				const braceStatement = findTermWithName(term.children, "brace_stmt");
-				if (typeof braceStatement === "undefined") {
-					return emptyStatements;
-				}
-				const parameterLists = termsWithName(term.children, "parameter_list");
-				let selfParameterList: Term | undefined;
-				let parameterList: Term;
-				expectLength(parameterLists, 1, 2);
-				switch (parameterLists.length) {
-					case 1:
-						parameterList = parameterLists[0];
-						break;
-					default:
-						selfParameterList = parameterLists[0];
-						parameterList = parameterLists[1];
-						break;
-				}
 				const name = term.args[0];
-				const fn: FunctionBuilder = (innerScope, arg, type) => {
-					const body = braceStatement.children.slice();
-					const childScope = newScope(name, innerScope);
-					if (!isConstructor && selfParameterList) {
-						childScope.mapping.self = hoistToIdentifier(read(arg("this"), innerScope), childScope, "self");
-					}
-					termsWithName(parameterList.children, "parameter").forEach((param, index) => {
-						expectLength(param.args, 1);
-						childScope.mapping[param.args[0]] = hoistToIdentifier(read(arg(index, param.args[0]), childScope), childScope, param.args[0]);
-					});
-					if (isConstructor) {
-						const typeOfResult = returnType(returnType(getType(term)));
-						const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
-						const defaultInstantiation = defaultInstantiateType(typeOfResult, (fieldName) => {
-							if (body.length && body[0].name === "assign_expr") {
-								const children = body[0].children;
-								expectLength(children, 2);
-								if (children[0].name === "member_ref_expr") {
-									const [fieldType, member] = extractMember(getProperty(children[0], "decl", isString));
-									if (member === fieldName) {
-										body.shift();
-										return translateExpression(children[1], childScope);
+
+				function constructCallable(parameterList: Term, remainingLists: Term[], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
+					return (targetScope: Scope, arg: ArgGetter) => {
+						const childScope = typeof initialScope !== "undefined" ? initialScope : newScope(name, targetScope);
+						termsWithName(parameterList.children, "parameter").forEach((param, index) => {
+							expectLength(param.args, 1);
+							const parameterName = param.args[0];
+							targetScope.mapping[parameterName] = hoistToIdentifier(read(arg(index, parameterName), childScope), childScope, parameterName);
+						});
+						if (remainingLists.length) {
+							return callable(constructCallable(remainingLists[0], remainingLists.slice(1), returnType(functionType), initialScope), functionType);
+						}
+						const body = termWithName(term.children, "brace_stmt").children.slice();
+						if (isConstructor) {
+							const typeOfResult = returnType(returnType(getType(term)));
+							const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
+							const defaultInstantiation = defaultInstantiateType(typeOfResult, (fieldName) => {
+								if (body.length && body[0].name === "assign_expr") {
+									const children = body[0].children;
+									expectLength(children, 2);
+									if (children[0].name === "member_ref_expr") {
+										const [fieldType, member] = extractMember(getProperty(children[0], "decl", isString));
+										if (member === fieldName) {
+											body.shift();
+											return translateExpression(children[1], childScope);
+										}
 									}
 								}
+								return undefined;
+							});
+							if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
+								return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
 							}
-							return undefined;
-						});
-						if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-							return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
+							addVariable(childScope, selfMapping, defaultInstantiation);
 						}
-						addVariable(childScope, selfMapping, defaultInstantiation);
-					}
-					return statements(emitScope(childScope, translateAllStatements(body, childScope)));
-				};
-				if (isConstructor) {
-					scope.functions[name] = wrapped(fn);
-				} else if (term.properties.access === "public") {
+						return statements(emitScope(childScope, translateAllStatements(body, childScope)));
+					};
+				}
+
+				const parameterLists = termsWithName(term.children, "parameter_list");
+				if (parameterLists.length === 0) {
+					throw new Error(`Expected a parameter list for a function declaration`);
+				}
+
+				const fn = constructCallable(parameterLists[0], parameterLists.slice(1), getType(term));
+				if (!isConstructor && term.properties.access === "public") {
 					insertFunction(name, scope, getType(term), fn, true);
 				} else {
-					scope.functions[name] = noinline(fn);
+					scope.functions[name] = isConstructor || /^anonname=/.test(name) ? fn : noinline(fn);
 				}
 				return emptyStatements;
 			}
@@ -778,8 +770,8 @@ export function compileTermToProgram(root: Term): Program {
 						} else {
 							expectLength(child.children, 1);
 							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
-								console.log("computedStruct invoked", child.children[0]);
-								return value;
+								const declaration = termWithName(child.children, "func_decl");
+								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 							statements = concat(statements, translateStatement(child.children[0], scope));
 						}
@@ -810,8 +802,8 @@ export function compileTermToProgram(root: Term): Program {
 						} else {
 							expectLength(child.children, 1);
 							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
-								console.log("computedStruct invoked", child.children[0]);
-								return value;
+								const declaration = termWithName(child.children, "func_decl");
+								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 						}
 					}

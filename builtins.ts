@@ -2,7 +2,7 @@ import { arrayExpression, assignmentExpression, binaryExpression, blockStatement
 import { FunctionBuilder, returnType, wrapped } from "./functions";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, StructField, structField, tuple, unbox, Value, variable } from "./values";
+import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -14,7 +14,7 @@ function returnThis(scope: Scope, arg: ArgGetter): Value {
 
 function returnTodo(scope: Scope, arg: ArgGetter, type: Type, name: string): Value {
 	console.log(name);
-	return call(expr(mangleName("todo_missing_builtin$" + name)), [], scope);
+	return call(expr(mangleName("todo_missing_builtin$" + name)), undefinedValue, [], scope);
 }
 
 function returnLength(scope: Scope, arg: ArgGetter): Value {
@@ -32,9 +32,9 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 
 export const structTypes: { [name: string]: StructField[] } = {
 	"String": [
-		structField("unicodeScalars", "UTF32View", (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [value], scope)),
+		structField("unicodeScalars", "UTF32View", (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
 		structField("utf16", "UTF16View", (value) => value),
-		structField("utf8", "UTF8View", (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), [value], scope)),
+		structField("utf8", "UTF8View", (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
 	],
 	"UTF32View": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -92,13 +92,13 @@ export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).Int.*=": assignmentBuiltin("*="), // TODO: Fix to mutate
 	"Swift.(file).SignedNumeric.-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
 	"Swift.(file).Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
-		return call(expr(identifier("Sequence$reduce")), [arg(0)], scope);
+		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
 	"Swift.(file).Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
 	"Swift.(file).Bool.init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Bool._getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
-	"Swift.(file).Bool.&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), [], scope), scope)))),
-	"Swift.(file).Bool.||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), [], scope), scope)))),
+	"Swift.(file).Bool.&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
+	"Swift.(file).Bool.||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
 	"Swift.(file).Optional.none": () => expr(nullLiteral()),
 	"Swift.(file).Optional.==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
 	"Swift.(file).Optional.!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
@@ -107,13 +107,13 @@ export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).Collection.count": returnLength,
 	"Swift.(file).Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
 	"Swift.(file).BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
-	"Swift.(file).String.init": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0)], scope)),
+	"Swift.(file).String.init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0)], scope)),
 	"Swift.(file).String.+": binaryBuiltin("+"),
-	"Swift.(file).String.lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toLowerCase"))), [], scope), returnType(type)),
-	"Swift.(file).String.uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toUpperCase"))), [], scope), returnType(type)),
+	"Swift.(file).String.lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
+	"Swift.(file).String.uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
 	"Swift.(file).??": returnTodo,
 	"Swift.(file).~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
-	"Swift.(file).Array.init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [arg(0)], scope)),
+	"Swift.(file).Array.init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
 	"Swift.(file).Array.count": returnLength,
 	"Swift.(file).Array.subscript": returnTodo,
 	"Swift.(file).Double.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),

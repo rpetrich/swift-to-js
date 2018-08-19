@@ -15,7 +15,6 @@ function getArgumentPointers(type: Type): boolean[] {
 
 export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): [Identifier[], Statement[]] {
 	const inner: Scope = newScope("anonymous", scope);
-	inner.mapping.self = thisExpression();
 	let usedCount = 0;
 	const identifiers: { [index: number]: Identifier } = Object.create(null);
 	const pointers = getArgumentPointers(type);
@@ -73,7 +72,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
-		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), scope);
+		return call(expr(insertFunction(name, scope, type, builder)), arg("this"), type.arguments.types.map((_, i) => arg(i)), scope);
 	};
 }
 

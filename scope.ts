@@ -17,6 +17,7 @@ export function addVariable(scope: Scope, name: Identifier, initializer: Express
 	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
 		throw new Error(`Declaration of ${name.name} already exists`);
 	}
+	scope.mapping[name.name] = name;
 	scope.declarations[name.name] = typeof initializer === "undefined" ? undefined : variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]);
 }
 
@@ -24,6 +25,7 @@ export function addExternalVariable(scope: Scope, name: Identifier, initializer:
 	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
 		throw new Error(`Declaration of ${name.name} already exists`);
 	}
+	scope.mapping[name.name] = name;
 	scope.declarations[name.name] = exportNamedDeclaration(variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]), []);
 }
 
@@ -120,7 +122,14 @@ export function mangleName(name: string) {
 }
 
 export function lookup(name: string, scope: Scope): Identifier | ThisExpression {
-	return Object.hasOwnProperty.call(scope.mapping, name) ? scope.mapping[name] : mangleName(name);
+	let targetScope: Scope | undefined = scope;
+	do {
+		if (Object.hasOwnProperty.call(targetScope.mapping, name)) {
+			return targetScope.mapping[name];
+		}
+		targetScope = targetScope.parent;
+	} while (targetScope);
+	return mangleName(name);
 }
 
 export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {
