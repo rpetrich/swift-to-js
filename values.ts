@@ -2,6 +2,7 @@ import { assignmentExpression, objectExpression, callExpression, objectProperty,
 
 import { addVariable, undefinedLiteral, uniqueIdentifier, emitScope, newScope, rootScope, mangleName, fullPathOfScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
+import { insertFunction, functionize } from "./functions";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -144,59 +145,6 @@ export function unbox(value: Value, scope: Scope): VariableValue {
 	}
 }
 
-function getArgumentPointers(type: Type): boolean[] {
-	if (type.kind === "function") {
-		return type.arguments.types.map((arg) => arg.kind === "modified" && arg.modifier === "inout");
-	}
-	throw new TypeError(expectedMessage("function", type));
-}
-
-export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): Expression {
-	const inner: Scope = newScope("anonymous", scope);
-	inner.mapping["self"] = thisExpression();
-	let usedCount = 0;
-	const identifiers: { [index: number]: Identifier } = Object.create(null);
-	const pointers = getArgumentPointers(type);
-	const newValue = expression(inner, (i, name) => {
-		if (usedCount === -1) {
-			throw new Error(`Requested access to scope after it was generated!`);
-		}
-		if (i === "this") {
-			return expr(thisExpression());
-		}
-		if (usedCount <= i) {
-			usedCount = i + 1;
-		}
-		let result: Identifier;
-		if (Object.hasOwnProperty.call(identifiers, i)) {
-			result = identifiers[i];
-		} else {
-			result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
-		}
-		return expr(result, pointers[i]);
-	});
-	const args: Identifier[] = [];
-	for (let i = 0; i < usedCount; i++) {
-		args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + i);
-	}
-	let statements: Statement[];
-	if (newValue.kind === "statements") {
-		statements = newValue.statements;
-	} else {
-		statements = [returnStatement(read(newValue, inner))];
-	}
-	const result = functionExpression(undefined, args, blockStatement(emitScope(inner, statements)));
-	usedCount = -1;
-	return result;
-}
-
-export function insertFunction(name: string, scope: Scope, type: Type): Identifier {
-	const mangled = mangleName(name);
-	const globalScope = rootScope(scope);
-	addVariable(globalScope, mangled, functionize(globalScope, type, (inner, arg) => scope.functions[name](inner, arg, type, name)));
-	return mangled;
-}
-
 
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
@@ -252,8 +200,11 @@ export function call(target: Value, args: Value[], scope: Scope): Value {
 	}
 	switch (target.kind) {
 		case "function":
-			// return call(expr(insertFunction(target.name, scope, target.type)), args, scope);
-			return scope.functions[target.name](scope, getter, target.type, target.name);
+			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
+				return scope.functions[target.name](scope, getter, target.type, target.name);
+			} else {
+				return call(expr(insertFunction(target.name, scope, target.type)), args, scope);
+			}
 		case "callable":
 			return target.call(scope, getter);
 		default:
@@ -302,10 +253,6 @@ export function hoistToIdentifier(expression: Expression, scope: Scope): Identif
 	const result = uniqueIdentifier(scope);
 	addVariable(scope, result, expression);
 	return result;
-}
-
-function expectedMessage(name: string, type: Type) {
-	return `Expected a ${name}, got a ${type.kind}: ${stringifyType(type)}`;
 }
 
 export function stringifyType(type: Type): string {

@@ -1,11 +1,12 @@
-function increment$number$(number) {
+var increment$number$ = function (number) {
   return number + 1;
-}
-
-function increment_until_zero$number$(number) {
+},
+    increment_until_zero$number$ = function (number) {
   if (number < 0) {
-    return increment$number$(number);
+    return increment$number$;
   }
 
   return number;
-}
+};
+
+export { increment_until_zero$number$ };

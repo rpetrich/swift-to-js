@@ -1,4 +1,4 @@
-function description_of$option$(option) {
+var description_of$option$ = function (option) {
   var unwrapped;
 
   if ((unwrapped = option) !== null) {
@@ -10,4 +10,6 @@ function description_of$option$(option) {
   }
 
   return "None";
-}
+};
+
+export { description_of$option$ };

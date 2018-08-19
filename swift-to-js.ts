@@ -1,8 +1,9 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { parse as parseType, Type } from "./types";
 import { undefinedLiteral, addVariable, emitScope, newScope, newRootScope, rootScope, lookup, mangleName, Scope } from "./scope";
-import { newPointer, insertFunction, statements, boxed, call, callable, functionValue, unbox, tuple, variable, expr, read, structField, reuseExpression, hoistToIdentifier, stringifyType, ExpressionValue, VariableValue, FunctionValue, StructField, TupleValue, Value } from "./values";
-import { functions as builtinFunctions, structTypes as builtinStructTypes, defaultValues as builtinDefaultValues } from "./builtins";
+import { newPointer, statements, boxed, call, callable, functionValue, unbox, tuple, variable, expr, read, structField, reuseExpression, hoistToIdentifier, stringifyType, ExpressionValue, VariableValue, FunctionValue, StructField, TupleValue, Value } from "./values";
+import { structTypes as builtinStructTypes, defaultValues as builtinDefaultValues } from "./builtins";
+import { insertFunction, noinline } from "./functions";
 
 import { spawn } from "child_process";
 import { argv } from "process";
@@ -85,18 +86,23 @@ function extractMember(decl: string): [Type, string] {
 	throw new Error(`Unable to parse member from declaration: ${decl}`);
 }
 
-function extractReference(decl: string, scope: Scope): Identifier | ThisExpression | string {
+function extractReference(term: Term, scope: Scope): Value {
 	// TODO: Parse declarations correctly via PEG
+	const decl = nameForDeclRefExpr(term);
 	const match = decl.match(/\.([^.]+)(@)/);
 	if (match && match.length === 3) {
-		if (match[1] === "$match") {
-			return identifier("$match");
+		const extracted = match[1];
+		if (Object.hasOwnProperty.call(scope.functions, extracted)) {
+			return functionValue(extracted, getType(term));
 		}
-		return lookup(match[1], scope);
+		if (extracted === "$match") {
+			return variable(identifier("$match"));
+		}
+		return variable(lookup(extracted, scope));
 	}
 	const specializationStripped = decl.replace(/ .*/, "");
-	if (hasOwnProperty(builtinFunctions, specializationStripped)) {
-		return specializationStripped;
+	if (hasOwnProperty(scope.functions, specializationStripped)) {
+		return functionValue(specializationStripped, getType(term));
 	}
 	throw new Error(`Unable to parse declaration: ${decl}`);
 }
@@ -446,12 +452,7 @@ export function compileTermToProgram(root: Term): Program {
 			}
 			case "declref_expr": {
 				expectLength(term.children, 0);
-				const name = nameForDeclRefExpr(term);
-				const id = extractReference(name, scope);
-				if (typeof id === "string") {
-					return functionValue(id, getType(term));
-				}
-				return variable(id);
+				return extractReference(term, scope);
 			}
 			case "subscript_expr": {
 				expectLength(term.children, 2);
@@ -589,7 +590,7 @@ export function compileTermToProgram(root: Term): Program {
 						parameterList = parameterLists[1];
 						break;
 				}
-				scope.functions[term.args[0]] = (scope, arg, type) => {
+				scope.functions[term.args[0]] = noinline((scope, arg, type) => {
 					const childScope = newScope(term.args[0], scope);
 					if (selfParameterList) {
 						childScope.mapping["self"] = thisExpression();
@@ -599,7 +600,7 @@ export function compileTermToProgram(root: Term): Program {
 					});
 					const stmts = emitScope(childScope, translateStatement(braceStatement, childScope));
 					return statements(stmts);
-				};
+				});
 				if (term.properties.access === "public") {
 					const identifier = insertFunction(term.args[0], scope, getType(term));
 					return [exportNamedDeclaration(undefined, [exportSpecifier(identifier, identifier)])];

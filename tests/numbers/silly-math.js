@@ -1,4 +1,4 @@
-function silly_math$num$(num) {
+var silly_math$num$ = function (num) {
   var result;
   result = num;
 
@@ -7,4 +7,6 @@ function silly_math$num$(num) {
   }
 
   return result;
-}
+};
+
+export { silly_math$num$ };

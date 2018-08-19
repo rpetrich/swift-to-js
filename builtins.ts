@@ -1,4 +1,4 @@
-import { read, unbox, call, functionize, expr, callable, variable, structField, functionValue, tuple, ArgGetter, Value, StructField, ExpressionValue } from "./values";
+import { read, unbox, call, expr, callable, variable, structField, functionValue, tuple, ArgGetter, Value, StructField, ExpressionValue } from "./values";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { FunctionBuilder } from "./functions";
 import { parse, Type } from "./types";
