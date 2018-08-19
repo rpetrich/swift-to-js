@@ -3,7 +3,7 @@ import { parse as parseType, Type } from "./types";
 import { undefinedLiteral, addVariable, emitScope, newScope, newRootScope, rootScope, lookup, mangleName, Scope } from "./scope";
 import { newPointer, statements, boxed, call, callable, functionValue, unbox, tuple, variable, expr, read, structField, reuseExpression, hoistToIdentifier, stringifyType, ExpressionValue, VariableValue, FunctionValue, StructField, TupleValue, Value } from "./values";
 import { structTypes as builtinStructTypes, defaultValues as builtinDefaultValues } from "./builtins";
-import { insertFunction, noinline } from "./functions";
+import { insertFunction, noinline, FunctionBuilder } from "./functions";
 
 import { spawn } from "child_process";
 import { argv } from "process";
@@ -590,20 +590,21 @@ export function compileTermToProgram(root: Term): Program {
 						parameterList = parameterLists[1];
 						break;
 				}
-				scope.functions[term.args[0]] = noinline((scope, arg, type) => {
-					const childScope = newScope(term.args[0], scope);
+				const name = term.args[0];
+				const fn: FunctionBuilder = (scope, arg, type) => {
+					const childScope = newScope(name, scope);
 					if (selfParameterList) {
 						childScope.mapping["self"] = thisExpression();
 					}
 					termsWithName(parameterList.children, "parameter").forEach((param, index) => {
 						childScope.mapping[param.args[0]] = hoistToIdentifier(read(arg(index, param.args[0]), childScope), childScope);
 					});
-					const stmts = emitScope(childScope, translateStatement(braceStatement, childScope));
-					return statements(stmts);
-				});
+					return statements(emitScope(childScope, translateStatement(braceStatement, childScope)));
+				};
 				if (term.properties.access === "public") {
-					const identifier = insertFunction(term.args[0], scope, getType(term));
-					return [exportNamedDeclaration(undefined, [exportSpecifier(identifier, identifier)])];
+					insertFunction(name, scope, getType(term), fn, true);
+				} else {
+					scope.functions[name] = noinline(fn);
 				}
 				return emptyStatements;
 			}

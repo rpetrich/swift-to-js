@@ -1,5 +1,3 @@
-var uppercase$ofString$ = function (str) {
+export function uppercase$ofString$(str) {
   return str.toUpperCase();
-};
-
-export { uppercase$ofString$ };
+}

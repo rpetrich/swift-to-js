@@ -1,4 +1,4 @@
-var more_silly_math$num$ = function (num) {
+export function more_silly_math$num$(num) {
   var result = 0;
 
   if (num < 0) {
@@ -8,6 +8,4 @@ var more_silly_math$num$ = function (num) {
   }
 
   return result * 1000 + 4;
-};
-
-export { more_silly_math$num$ };
+}

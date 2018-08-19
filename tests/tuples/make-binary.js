@@ -1,5 +1,3 @@
-var makeTuplePoint$x$y$ = function (x, y) {
+export function makeTuplePoint$x$y$(x, y) {
   return [x, y];
-};
-
-export { makeTuplePoint$x$y$ };
+}

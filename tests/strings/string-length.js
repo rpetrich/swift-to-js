@@ -1,5 +1,3 @@
-var string_length$str$ = function (str) {
+export function string_length$str$(str) {
   return str.length;
-};
-
-export { string_length$str$ };
+}

@@ -1,3 +1,3 @@
-func increment(number: Int) -> Int {
+public func increment(number: Int) -> Int {
     return number + 1
 }

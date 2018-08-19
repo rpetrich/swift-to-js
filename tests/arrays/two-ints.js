@@ -1,5 +1,3 @@
-var twoInts$first$second$ = function (first, second) {
+export function twoInts$first$second$(first, second) {
   return [first, second];
-};
-
-export { twoInts$first$second$ };
+}

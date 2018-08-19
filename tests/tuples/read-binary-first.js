@@ -1,5 +1,3 @@
-var readX$fromTuplePoint$ = function (point) {
+export function readX$fromTuplePoint$(point) {
   return point[0];
-};
-
-export { readX$fromTuplePoint$ };
+}

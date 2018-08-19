@@ -1,5 +1,3 @@
-var hello_world = function () {
+export function hello_world() {
   return "Hello World!";
-};
-
-export { hello_world };
+}

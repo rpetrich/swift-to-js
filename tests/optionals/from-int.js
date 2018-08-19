@@ -1,4 +1,4 @@
-var optional_from$num$ = function (num) {
+export function optional_from$num$(num) {
   if (num > 0) {
     return true;
   } else {
@@ -8,6 +8,4 @@ var optional_from$num$ = function (num) {
   }
 
   return null;
-};
-
-export { optional_from$num$ };
+}

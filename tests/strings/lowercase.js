@@ -1,5 +1,3 @@
-var lowercase$ofString$ = function (str) {
+export function lowercase$ofString$(str) {
   return str.toLowerCase();
-};
-
-export { lowercase$ofString$ };
+}

@@ -1,5 +1,3 @@
-var oneInt$value$ = function (value) {
+export function oneInt$value$(value) {
   return [value];
-};
-
-export { oneInt$value$ };
+}

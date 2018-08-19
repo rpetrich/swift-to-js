@@ -1,4 +1,4 @@
-import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Statement, ThisExpression } from "babel-types";
+import { identifier, variableDeclaration, variableDeclarator, Identifier, Expression, Declaration, Statement, ThisExpression } from "babel-types";
 import { FunctionBuilder } from "./functions";
 import { functions as builtinFunctions } from "./builtins";
 
@@ -6,18 +6,19 @@ export const undefinedLiteral = identifier("undefined");
 
 export interface Scope {
 	name: string;
-	variables: { [name: string]: Expression | undefined };
+	declarations: { [name: string]: Declaration | undefined };
 	functions: { [name: string]: FunctionBuilder };
+	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: ThisExpression | Identifier };
 	parent: Scope | undefined;
 };
 
 export function addVariable(scope: Scope, name: string | Identifier, initializer: Expression | undefined = undefinedLiteral): boolean {
 	const nameString = typeof name === "string" ? name : name.name;
-	if (Object.hasOwnProperty.call(scope.variables, nameString)) {
+	if (Object.hasOwnProperty.call(scope.declarations, nameString)) {
 		return false;
 	}
-	scope.variables[nameString] = initializer;
+	scope.declarations[nameString] = typeof initializer === "undefined" ? undefined : variableDeclaration("var", [variableDeclarator(identifier(nameString), initializer === undefinedLiteral ? undefined : initializer)]);
 	return true;
 }
 
@@ -32,8 +33,9 @@ export function rootScope(scope: Scope) {
 export function newRootScope(): Scope {
 	return {
 		name: "global",
-		variables: Object.create(null),
+		declarations: Object.create(null),
 		functions: Object.assign(Object.create(null), builtinFunctions),
+		functionUsage: Object.create(null),
 		mapping: Object.create(null),
 		parent: undefined
 	};
@@ -42,8 +44,9 @@ export function newRootScope(): Scope {
 export function newScope(name: string, parent: Scope) {
 	return {
 		name,
-		variables: Object.create(null),
+		declarations: Object.create(null),
 		functions: parent.functions,
+		functionUsage: parent.functionUsage,
 		mapping: Object.create(null),
 		parent
 	};
@@ -52,7 +55,7 @@ export function newScope(name: string, parent: Scope) {
 export function hasNameInScope(scope: Scope, name: string): boolean {
 	let current: Scope | undefined = scope;
 	while (typeof current !== "undefined") {
-		if (Object.hasOwnProperty.call(current.variables, name)) {
+		if (Object.hasOwnProperty.call(current.declarations, name)) {
 			return true;
 		}
 		current = current.parent;
@@ -120,14 +123,14 @@ export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {
 	while (hasNameInScope(scope, name)) {
 		name = prefix + i++;
 	}
-	scope.variables[name] = undefinedLiteral;
+	addVariable(scope, name);
 	return identifier(name);
 }
 
 export function emitScope(scope: Scope, statements: Statement[]): Statement[] {
-	const keys = Object.keys(scope.variables);
+	const keys = Object.keys(scope.declarations);
 	if (keys.length === 0) {
 		return statements;
 	}
-	return ([variableDeclaration("var", keys.filter((key) => scope.variables[key]).map((key) => variableDeclarator(identifier(key), scope.variables[key] !== undefinedLiteral ? scope.variables[key] : undefined)))] as Statement[]).concat(statements);
+	return (keys.filter((key) => typeof scope.declarations[key] !== "undefined").map((key) => scope.declarations[key]) as Statement[]).concat(statements);
 }

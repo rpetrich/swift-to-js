@@ -1,5 +1,3 @@
-var utf32_length$str$ = function (str) {
+export function utf32_length$str$(str) {
   return Array.from(str).length;
-};
-
-export { utf32_length$str$ };
+}

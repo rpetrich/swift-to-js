@@ -1,5 +1,3 @@
-var arrayGet$array$index$ = function (array, index) {
+export function arrayGet$array$index$(array, index) {
   return array[index];
-};
-
-export { arrayGet$array$index$ };
+}

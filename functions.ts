@@ -2,7 +2,7 @@ import { stringifyType, expr, call, read, callable, ArgGetter, Value } from "./v
 import { Type } from "./types";
 import { addVariable, mangleName, emitScope, rootScope, newScope, Scope } from "./scope";
 
-import { identifier, blockStatement, functionExpression, returnStatement, thisExpression, Identifier, Expression, Statement } from "babel-types";
+import { identifier, blockStatement, functionExpression, exportNamedDeclaration, functionDeclaration, returnStatement, thisExpression, Identifier, Expression, Statement } from "babel-types";
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Type, name: string) => Value;
 
@@ -13,7 +13,7 @@ function getArgumentPointers(type: Type): boolean[] {
 	throw new TypeError(`Expected a function, got a ${type.kind}: ${stringifyType(type)}`);
 }
 
-export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): Expression {
+export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): [Identifier[], Statement[]] {
 	const inner: Scope = newScope("anonymous", scope);
 	inner.mapping["self"] = thisExpression();
 	let usedCount = 0;
@@ -47,28 +47,32 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 	} else {
 		statements = [returnStatement(read(newValue, inner))];
 	}
-	const result = functionExpression(undefined, args, blockStatement(emitScope(inner, statements)));
+	const result = emitScope(inner, statements);
 	usedCount = -1;
-	return result;
+	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | undefined = scope.functions[name]): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | undefined = scope.functions[name], shouldExport: boolean = false): Identifier {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}
-	if (type.kind !== "function") {
-		throw new Error(`Expected function, got ${stringifyType(type)}`);
-	}
-	const argTypes = type.arguments.types;
 	const mangled = mangleName(name);
+	if (Object.hasOwnProperty.call(scope.functionUsage, name)) {
+		return mangled;
+	}
+	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
-	scope.functions[name] = (scope, arg) => call(expr(mangled), argTypes.map((_, i) => arg(i)), scope);
-	addVariable(globalScope, mangled, functionize(globalScope, type, (inner, arg) => builder(inner, arg, type, name)));
+	const [args, statements] = functionize(globalScope, type, (inner, arg) => builder(inner, arg, type, name));
+	const fn = functionDeclaration(mangled, args, blockStatement(statements));
+	globalScope.declarations[mangled.name] = shouldExport ? exportNamedDeclaration(fn, []) : fn;
 	return mangled;
 }
 
 export function noinline(builder: FunctionBuilder): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string) => {
-		return expr(insertFunction(name, scope, type, builder));
+		if (type.kind !== "function") {
+			throw new Error(`Expected function, got ${stringifyType(type)}`);
+		}
+		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), scope);
 	};
 }

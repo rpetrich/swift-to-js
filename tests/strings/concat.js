@@ -1,5 +1,3 @@
-var concat$l$r$ = function (l, r) {
+export function concat$l$r$(l, r) {
   return l + r;
-};
-
-export { concat$l$r$ };
+}

@@ -1,3 +1,3 @@
-function increment$number$(number) {
+export function increment$number$(number) {
   return number + 1;
 }

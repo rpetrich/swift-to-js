@@ -1,5 +1,3 @@
-var negate$number$ = function (number) {
+export function negate$number$(number) {
   return -number;
-};
-
-export { negate$number$ };
+}

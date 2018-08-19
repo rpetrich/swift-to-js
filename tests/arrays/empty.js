@@ -1,5 +1,3 @@
-var emptyIntArray = function () {
+export function emptyIntArray() {
   return [];
-};
-
-export { emptyIntArray };
+}

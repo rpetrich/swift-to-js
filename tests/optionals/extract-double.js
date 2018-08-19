@@ -1,5 +1,6 @@
-var description_of_double$option$ = function (option) {
-  var unwrapped, doubleUnwrapped;
+export function description_of_double$option$(option) {
+  var unwrapped;
+  var doubleUnwrapped;
 
   if ((unwrapped = option).length !== 0) {
     if ((doubleUnwrapped = unwrapped) !== null) {
@@ -14,6 +15,4 @@ var description_of_double$option$ = function (option) {
   }
 
   return "Outer None";
-};
-
-export { description_of_double$option$ };
+}

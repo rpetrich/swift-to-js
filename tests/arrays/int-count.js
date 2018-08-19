@@ -1,5 +1,3 @@
-var arrayCount = function (array) {
+export function arrayCount(array) {
   return array.length;
-};
-
-export { arrayCount };
+}

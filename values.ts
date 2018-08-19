@@ -162,7 +162,8 @@ export function read(value: Value, scope: Scope): Expression {
 				return value.expression;
 			}
 		case "callable":
-			return functionize(scope, value.type, value.call);
+			const [args, statements] = functionize(scope, value.type, value.call);
+			return functionExpression(undefined, args, blockStatement(statements));
 		case "direct":
 			return value.ref;
 		case "statements":
