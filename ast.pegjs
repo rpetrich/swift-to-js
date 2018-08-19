@@ -2,12 +2,12 @@ Program = _ term:Term _ { return term; }
 
 Term
   = "(" _ name:BareString _ tokens:WhitespaceAndAttributeOrArgument* _ children:WhitespaceAndTerm* _ ")" {
-  	const props = {}, args = [];
+    const props = {}, args = [];
     for (var i = 0; i < tokens.length; i++) {
-    	if (typeof tokens[i] == "string") {
-        	args.push(tokens[i]);
+      if (typeof tokens[i] == "string") {
+          args.push(tokens[i]);
         } else {
-			props[tokens[i].key] = tokens[i].value;
+      props[tokens[i].key] = tokens[i].value;
         }
     }
     return { name: name, args:args, properties: props, children: children, location: location() };
@@ -23,51 +23,62 @@ WhitespaceAndAttributeOrArgument
 Argument
   = argument:(DoubleQuotedString / SingleQuotedString) { return argument; }
 
-Attribute "attribute"
+Attribute
   = key:Identifier value:AttributeValue? { return { key: key, value: value === null ? true : value } }
 AttributeValue
-  = ('=' / ': ' / ' #') value: (Range / CommaSeparated / String / BracketedBareString / "") { return value; }
+  = ('=' / ': ' / ' #') value: (Range / List / String / ParenthesizedBareString / EmptyString) { return value; }
 
-String
+EmptyString "empty string"
+  = "" { return ""; }
+
+String "string"
   = BareString / DoubleQuotedString / SingleQuotedString
 
-EscapeSequence
+EscapeSequence "escape sequence"
   = "\\" sequence:['"tn] { return sequence == "t" ? "\t" : sequence == "n" ? "\n" : sequence; }
 
-DoubleQuotedString
+DoubleQuotedString "doublequote string"
   = '"' content:(EscapeSequence / [^"])* '"' { return content.join(""); }
 WhitespaceAndDoubleQuotedString
   = _ str:DoubleQuotedString { return str; }
 
-SingleQuotedString
+SingleQuotedString "singlequote string"
   = "'" content:(EscapeSequence / [^'])* "'" { return content.join(""); }
 
-CommaSeparated
-  = head:SingleQuotedString tail:CommaPrefixed+ { return [head].concat(tail); }
-CommaPrefixed
-  = ',' str:SingleQuotedString { return str; }
+List "list"
+  = CommaSeparatedBareString / BracketedList
 
-Identifier
+CommaSeparatedBareString
+  = head:(SingleQuotedString / BareString) tail:CommaPrefixedBareString+ { return [head].concat(tail); }
+CommaPrefixedBareString
+  = ',' str:(SingleQuotedString / BareString) { return str; }
+
+BracketedList
+  = '[' _ head:BareString tail:BracketedListTail* _ ']' { return [head].concat(tail); }
+BracketedListTail
+  = ',' _ string:BareString { return string; }
+
+Identifier "identifier"
   = prefix:[a-zA-Z_@.] remaining:[a-zA-Z_\-@.]* { return prefix + remaining.join(""); }
 
-BareString
+BareString "bare string"
   = prefix:BareStringToken remaining:BareStringTail* { return prefix + remaining.join(""); }
 BareStringToken
-  = [a-zA-Z0-9_.:@*<>~$%&,+\-!?/]
+  = [a-zA-Z0-9_.:@*<>~$%&+\-!?/]
 BareStringTail
   = BareStringToken / '=' / BareStringParenPair / BareStringSquarePair
 BareStringTailWhitespace
   = BareStringTail / " "
-BareStringParenPair
+BareStringParenPair "parenthesized string component"
   = '(' body:BareStringTailWhitespace* ')' { return "(" + body.join("") + ")"; }
-BareStringSquarePair
+BareStringSquarePair "subscripted bare string"
   = ws: _ '[' body:BareStringTailWhitespace* ']' { return ws + "[" + body.join("") + "]"; }
 
-BracketedBareString
+ParenthesizedBareString "parenthesized bare string"
   = all:('(' BareString ')') { return all.join(""); }
 
-Range
-  = '[' _ from:String _ '-' _ to:String ']' { return { from: from, to: to }; }
+Range "range"
+  = '[' _ from:String ' ' _ '- ' _ to:String ']' { return { from: from, to: to }; }
 
 _ "whitespace"
   = [ \t\n\r]*
