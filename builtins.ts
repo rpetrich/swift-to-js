@@ -1,8 +1,8 @@
-import { read, unbox, call, expr, callable, variable, structField, functionValue, tuple, ArgGetter, Value, StructField, ExpressionValue } from "./values";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { FunctionBuilder, returnType, wrapped } from "./functions";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
-import { wrapped, returnType, FunctionBuilder } from "./functions";
 import { parse as parseType, Type } from "./types";
-import { assignmentExpression, booleanLiteral, binaryExpression, callExpression, stringLiteral, newExpression, logicalExpression, variableDeclaration, variableDeclarator, numericLiteral, returnStatement, functionExpression, blockStatement, unaryExpression, identifier, nullLiteral, arrayExpression, memberExpression, thisExpression, Identifier, NullLiteral, Expression } from "babel-types";
+import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, StructField, structField, tuple, unbox, Value, variable } from "./values";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -24,13 +24,13 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==") {
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0), scope), read(arg(1), scope))));
-} 
+}
 
 function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=") {
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(assignmentExpression(operator, read(unbox(arg(0), scope), scope), read(arg(1), scope))));
 }
 
-export const structTypes: { [name: string]: Array<StructField> } = {
+export const structTypes: { [name: string]: StructField[] } = {
 	"String": [
 		structField("unicodeScalars", "UTF32View", (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [value], scope)),
 		structField("utf16", "UTF16View", (value) => value),
@@ -39,23 +39,23 @@ export const structTypes: { [name: string]: Array<StructField> } = {
 	"UTF32View": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
 	"UTF16View": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
 	"UTF8View": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
 	"Collection": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
 	"Array": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length"))))
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
 };
 

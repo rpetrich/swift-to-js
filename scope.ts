@@ -1,6 +1,6 @@
-import { identifier, variableDeclaration, variableDeclarator, exportNamedDeclaration, Identifier, Expression, Declaration, Statement, ThisExpression } from "babel-types";
-import { FunctionBuilder } from "./functions";
+import { Declaration, exportNamedDeclaration, Expression, identifier, Identifier, Statement, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
+import { FunctionBuilder } from "./functions";
 
 export const undefinedLiteral = identifier("undefined");
 
@@ -11,7 +11,7 @@ export interface Scope {
 	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: ThisExpression | Identifier };
 	parent: Scope | undefined;
-};
+}
 
 export function addVariable(scope: Scope, name: Identifier, initializer: Expression | undefined = undefinedLiteral) {
 	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
@@ -42,7 +42,7 @@ export function newRootScope(): Scope {
 		functions: Object.assign(Object.create(null), builtinFunctions),
 		functionUsage: Object.create(null),
 		mapping: Object.create(null),
-		parent: undefined
+		parent: undefined,
 	};
 }
 
@@ -53,7 +53,7 @@ export function newScope(name: string, parent: Scope): Scope {
 		functions: parent.functions,
 		functionUsage: parent.functionUsage,
 		mapping: Object.create(null),
-		parent
+		parent,
 	};
 }
 
@@ -73,7 +73,8 @@ export function fullPathOfScope(scope: Scope) {
 	let current: Scope | undefined = scope;
 	do {
 		result.unshift(current.name);
-	} while (current = current.parent);
+		current = current.parent;
+	} while (current);
 	if (result.length > 1) {
 		result.shift();
 	}

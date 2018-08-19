@@ -1,8 +1,8 @@
-import { assignmentExpression, objectExpression, sequenceExpression, callExpression, objectProperty, functionExpression, blockStatement, returnStatement, arrayExpression, numericLiteral, identifier, stringLiteral, thisExpression, nullLiteral, memberExpression, Expression, Identifier, MemberExpression, NullLiteral, ThisExpression, Statement, ExpressionStatement } from "babel-types";
+import { arrayExpression, assignmentExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
 
-import { addVariable, undefinedLiteral, uniqueIdentifier, emitScope, newScope, rootScope, mangleName, fullPathOfScope, Scope } from "./scope";
+import { functionize, insertFunction } from "./functions";
+import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { insertFunction, functionize } from "./functions";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -36,8 +36,8 @@ export function statements(statements: Statement[]): StatementsValue | ReturnTyp
 				return expr(last);
 			}
 			const exceptLast = statements.slice(0, statements.length - 1);
-			if (exceptLast.every(statement => statement.type === "ExpressionStatement")) {
-				return expr(sequenceExpression(exceptLast.map(statement => (statement as ExpressionStatement).expression).concat(last)));
+			if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
+				return expr(sequenceExpression(exceptLast.map((statement) => (statement as ExpressionStatement).expression).concat(last)));
 			}
 		}
 	}
@@ -117,7 +117,7 @@ export function structField(name: string, type: Type | string, getter?: (target:
 			type: resolvedType,
 			stored: false,
 			getter,
-		}
+		};
 	}
 	return {
 		name,
@@ -191,7 +191,9 @@ export function read(value: Value, scope: Scope): Expression {
 					case "ThisExpression":
 						return identifier("unboxable$this");
 					case "MemberExpression":
-						return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);					
+						return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
+					default:
+						break;
 				}
 			// } else if (value.contents.kind === "expression") {
 			// 	if (value.contents.pointer) {
@@ -199,7 +201,9 @@ export function read(value: Value, scope: Scope): Expression {
 			// 	}
 			// 	return newPointer(arrayExpression([value.contents.expression]), numericLiteral(0));
 			}
-			throw new Error(`Unable to box a ${value.contents.kind} value as pointer`);
+			throw new TypeError(`Unable to box a ${value.contents.kind} value as pointer`);
+		default:
+			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
 	}
 }
 
@@ -212,7 +216,7 @@ export function call(target: Value, args: Value[], scope: Scope): Value {
 			return args[i];
 		}
 		throw new Error(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i}, but only ${args.length} arguments provided!`);
-	}
+	};
 	switch (target.kind) {
 		case "function":
 			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
@@ -294,5 +298,7 @@ export function stringifyType(type: Type): string {
 			return stringifyType(type.namespace) + "." + stringifyType(type.type);
 		case "name":
 			return type.name;
+		default:
+			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}
 }

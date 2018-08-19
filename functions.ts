@@ -1,8 +1,8 @@
-import { stringifyType, expr, call, read, callable, ArgGetter, Value } from "./values";
+import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Type } from "./types";
-import { addVariable, mangleName, emitScope, rootScope, newScope, Scope } from "./scope";
+import { ArgGetter, call, callable, expr, read, stringifyType, Value } from "./values";
 
-import { identifier, blockStatement, functionExpression, exportNamedDeclaration, functionDeclaration, returnStatement, thisExpression, Identifier, Expression, Statement } from "babel-types";
+import { blockStatement, exportNamedDeclaration, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Type, name: string) => Value;
 
@@ -15,7 +15,7 @@ function getArgumentPointers(type: Type): boolean[] {
 
 export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): [Identifier[], Statement[]] {
 	const inner: Scope = newScope("anonymous", scope);
-	inner.mapping["self"] = thisExpression();
+	inner.mapping.self = thisExpression();
 	let usedCount = 0;
 	const identifiers: { [index: number]: Identifier } = Object.create(null);
 	const pointers = getArgumentPointers(type);
@@ -81,7 +81,7 @@ export function wrapped(fn: FunctionBuilder): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
 		const innerType = returnType(type);
 		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, name), innerType);
-	}
+	};
 }
 
 export function returnType(type: Type) {
