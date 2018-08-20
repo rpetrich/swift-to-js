@@ -975,7 +975,7 @@ const swiftPath: string = (() => {
 })();
 
 export async function compile(path: string): Promise<string | undefined> {
-	const process = spawn(swiftPath, ["-dump-ast", path]);
+	const process = spawn(swiftPath, ["-dump-ast", "--", path]);
 	const stdout = readAsString(process.stdout);
 	const stderr = readAsString(process.stderr);
 	await new Promise((resolve, reject) => {
