@@ -1,8 +1,9 @@
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
-import { FunctionBuilder, returnType, wrapped } from "./functions";
+import { FunctionBuilder, noinline, returnType, wrapped } from "./functions";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
+
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -72,6 +73,7 @@ export const defaultValues: { [name: string]: Expression } = {
 };
 
 export const functions: { [name: string]: FunctionBuilder } = {
+	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [stringLiteral("Unexpectedly found nil while unwrapping an Optional value")]))])),
 	"Swift.(file).Int.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Int.+": binaryBuiltin("+"),
 	"Swift.(file).Int.-": binaryBuiltin("-"),

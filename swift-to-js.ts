@@ -640,6 +640,26 @@ export function compileTermToProgram(root: Term): Program {
 					}
 				}));
 			}
+			case "force_value_expr": {
+				expectLength(term.children, 1);
+				const value = translateTermToValue(term.children[0], scope);
+				const [first, after] = reuseExpression(read(value, scope), scope);
+				// TODO: Optimize some cases where we can prove it to be a .some
+				const failed = read(call(functionValue("Swift.(swift-to-js).forceUnwrapFailed()", parseType("() -> ()")), undefinedValue, [], scope), scope);
+				if (isNestedOptional(getType(term.children[0]))) {
+					return expr(conditionalExpression(
+						binaryExpression("!==", memberExpression(first, identifier("length")), numericLiteral(0)),
+						memberExpression(after, numericLiteral(0), true),
+						failed,
+					));
+				} else {
+					return expr(conditionalExpression(
+						binaryExpression("!==", first, nullLiteral()),
+						after,
+						failed,
+					));
+				}
+			}
 			case "erasure_expr": {
 				// TODO: Support runtime Any type that can be inspected
 				return translateTermToValue(term.children[0], scope);
