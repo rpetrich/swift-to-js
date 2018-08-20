@@ -6,6 +6,11 @@ import { blockStatement, exportNamedDeclaration, Expression, functionDeclaration
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Type, name: string) => Value;
 
+export interface GetterSetterBuilder {
+	get: FunctionBuilder;
+	set: FunctionBuilder;
+}
+
 function getArgumentPointers(type: Type): boolean[] {
 	if (type.kind === "function") {
 		return type.arguments.types.map((arg) => arg.kind === "modified" && arg.modifier === "inout");
@@ -51,7 +56,7 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | undefined = scope.functions[name], shouldExport: boolean = false): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | GetterSetterBuilder | undefined = scope.functions[name], shouldExport: boolean = false): Identifier {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}
@@ -61,7 +66,7 @@ export function insertFunction(name: string, scope: Scope, type: Type, builder: 
 	}
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
-	const [args, statements] = functionize(globalScope, type, (inner, arg) => builder(inner, arg, type, name));
+	const [args, statements] = functionize(globalScope, type, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name));
 	const fn = functionDeclaration(mangled, args, blockStatement(statements));
 	globalScope.declarations[mangled.name] = shouldExport ? exportNamedDeclaration(fn, []) : fn;
 	return mangled;

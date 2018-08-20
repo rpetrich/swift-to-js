@@ -4,11 +4,26 @@ Top
 Type
   = Function / NamespacedType / MetaType / Optional / Generic / Dictionary / Array / Tuple / Modified / Name
 
+Types
+  = head:Type tail:CommaType * { return [head].concat(tail) }
+CommaType
+  = ',' _ value:Type { return value; }
+
 Optional
   = type:(Function / NamespacedType / Generic / Dictionary / Array / Tuple / Modified / Name) depth:[?!]+ { return depth.reduce(function (type) { return { kind: "optional", type: type, location: location() } }, type); }
 
 Generic
-  = base:Name '<' typeArgs:Type* '>' { return { kind: "generic", base: base, arguments: typeArgs, location: location() }; }
+  = base:Name '<' typeArgs:Types '>' {
+  if (base.kind === "name") {
+    if (base.name === "Array" && typeArgs.length === 1) {
+      return { kind: "array", type: typeArgs[0], location: location() };
+    }
+    if (base.name === "Dictionary" && typeArgs.length === 2) {
+      return { kind: "dictionary", keyType: typeArgs[0], valueType: typeArgs[1], location: location() };
+    }
+  }
+  return { kind: "generic", base: base, arguments: typeArgs, location: location() };
+}
 
 Function
   = attributes:FunctionAttribute* argTypes:Tuple _ throws:('throws' / "rethrows")? _ '->' _ returnType:Type { return { kind: "function", arguments: argTypes, return: returnType, throws: throws === "throws", rethrows: throws === "rethrows", attributes: attributes, location: location() }; }

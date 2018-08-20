@@ -1,13 +1,13 @@
 import { Declaration, exportNamedDeclaration, Expression, identifier, Identifier, Statement, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
-import { FunctionBuilder } from "./functions";
+import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 
 export const undefinedLiteral = identifier("undefined");
 
 export interface Scope {
 	name: string;
 	declarations: { [name: string]: Declaration | undefined };
-	functions: { [name: string]: FunctionBuilder };
+	functions: { [name: string]: FunctionBuilder | GetterSetterBuilder };
 	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: ThisExpression | Identifier };
 	parent: Scope | undefined;

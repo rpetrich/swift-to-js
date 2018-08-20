@@ -1,9 +1,9 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { defaultValues as builtinDefaultValues, structTypes as builtinStructTypes } from "./builtins";
-import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
+import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newRootScope, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, newPointer, read, reuseExpression, statements, stringifyType, StructField, structField, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, newPointer, read, reuseExpression, statements, stringifyType, StructField, structField, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -74,35 +74,39 @@ function getProperty<T extends Property>(term: Term, key: string, checker: (prop
 		}
 		throw new Error(`Value for ${key} on ${term.name} is of the wrong type: ${JSON.stringify(term.properties)}`);
 	}
-	throw new Error(`Could not find ${key} in ${term.name}. Keys are ${Object.keys(props)}`);
+	throw new Error(`Could not find ${key} in ${term.name}. Keys are ${Object.keys(props).join(", ")}`);
 }
 
 function extractMember(decl: string): [Type, string] {
 	// TODO: Parse declarations correctly via PEG
-	const match = decl.match(/([^.]+)\.([^. ]+)(@|$| \[)/);
-	if (match && match.length === 4) {
-		return [parseType(match[1]), match[2]];
+	const match = decl.match(/([^.]+?)( extension|)\.([^. ]+)(@|$| \[)/);
+	if (match && match.length === 5) {
+		return [parseType(match[1]), match[3]];
 	}
 	throw new Error(`Unable to parse member from declaration: ${decl}`);
 }
 
-function extractReference(term: Term, scope: Scope): Value {
+function extractReference(term: Term, scope: Scope, type?: Type): Value {
 	// TODO: Parse declarations correctly via PEG
 	const decl = nameForDeclRefExpr(term);
 	const match = decl.match(/\.([^.]+)(@)/);
 	if (match && match.length === 3) {
 		const extracted = match[1];
 		if (Object.hasOwnProperty.call(scope.functions, extracted)) {
-			return functionValue(extracted, getType(term));
+			return functionValue(extracted, type || getType(term));
 		}
 		if (extracted === "$match") {
 			return variable(identifier("$match"));
 		}
 		return variable(lookup(extracted, scope));
 	}
-	const specializationStripped = decl.replace(/ .*/, "");
+	const specializationStripped = decl.replace(/ \[.*/, "");
 	if (hasOwnProperty(scope.functions, specializationStripped)) {
-		return functionValue(specializationStripped, getType(term));
+		return functionValue(specializationStripped, type || getType(term));
+	}
+	const extensionStripped = specializationStripped.replace(/\b extension\./, ".");
+	if (hasOwnProperty(scope.functions, extensionStripped)) {
+		return functionValue(extensionStripped, type || getType(term));
 	}
 	throw new Error(`Unable to parse declaration: ${decl}`);
 }
@@ -147,6 +151,17 @@ function getType(term: Term) {
 
 function collapseToExpression(expressions: Expression[]): Expression {
 	return expressions.length === 0 ? undefinedLiteral : expressions.length === 1 ? expressions[0] : sequenceExpression(expressions);
+}
+
+function noSemanticExpressions(term: Term) {
+	return term.name !== "semantic_expr";
+}
+
+function requiresGetter(term: Term): boolean {
+	if (Object.hasOwnProperty.call(term.properties, "storage_kind")) {
+		return getProperty(term, "storage_kind", isString) === "computed";
+	}
+	return getProperty(term, "readImpl", isString) !== "stored";
 }
 
 export function compileTermToProgram(root: Term): Program {
@@ -388,7 +403,8 @@ export function compileTermToProgram(root: Term): Program {
 
 	function translatePattern(term: Term, value: Expression, scope: Scope): Expression {
 		switch (term.name) {
-			case "optional_some_element": {
+			case "pattern_optional_some": // Development
+			case "optional_some_element": { // Swift 4.1
 				expectLength(term.children, 1);
 				const type = getType(term);
 				if (type.kind !== "optional") {
@@ -508,7 +524,22 @@ export function compileTermToProgram(root: Term): Program {
 			}
 			case "subscript_expr": {
 				expectLength(term.children, 2);
-				return copyValue(expr(memberExpression(translateExpression(term.children[0], scope), translateExpression(term.children[1], scope), true)), getType(term), scope);
+				const type = getType(term);
+				const functionType: Type = {
+					kind: "function",
+					arguments: {
+						kind: "tuple",
+						types: term.children.map(getType),
+						location: type.location,
+					},
+					return: type,
+					throws: false,
+					rethrows: false,
+					attributes: [],
+					location: type.location,
+				};
+				const ref = extractReference(term, scope, functionType);
+				return subscript(ref, term.children.map(child => translateTermToValue(child, scope)));
 			}
 			case "prefix_unary_expr":
 			case "call_expr":
@@ -553,7 +584,10 @@ export function compileTermToProgram(root: Term): Program {
 				return expr(stringLiteral(getProperty(term, "value", isString)));
 			}
 			case "array_expr": {
-				return expr(arrayExpression(term.children.map((child) => translateExpression(child, scope))));
+				return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => translateExpression(child, scope))));
+			}
+			case "dictionary_expr": {
+				return expr(objectExpression([]));
 			}
 			case "paren_expr": {
 				expectLength(term.children, 1);
@@ -579,8 +613,24 @@ export function compileTermToProgram(root: Term): Program {
 			case "assign_expr": {
 				expectLength(term.children, 2);
 				const type = getType(term.children[0]);
-				const dest = unbox(translateTermToValue(term.children[0], scope), scope);
-				const expressions = storeValue(read(dest, scope), translateTermToValue(term.children[1], scope), type, scope);
+				const dest = translateTermToValue(term.children[0], scope);
+				const source = translateTermToValue(term.children[1], scope);
+				// TODO: Support copying types and migrate into values
+				if (dest.kind === "subscript") {
+					if (dest.function.kind !== "function") {
+						throw TypeError(`Expected a helper function to call the subscript setter`);
+					}
+					const name = dest.function.name;
+					if (!Object.hasOwnProperty.call(scope.functions, name)) {
+						throw TypeError(`Unable to find the subscript function named ${name}`);
+					}
+					const fn = scope.functions[name];
+					if (typeof fn === "function") {
+						throw TypeError(`Subscript named ${name} does not have a setter`);
+					}
+					return call(callable((scope, arg) => fn.set(scope, arg, type, name), type), undefinedValue, dest.args.concat(source), scope);
+				}
+				const expressions = storeValue(read(unbox(dest, scope), scope), source, type, scope);
 				return expr(collapseToExpression(expressions));
 			}
 			case "inout_expr": {
@@ -683,15 +733,16 @@ export function compileTermToProgram(root: Term): Program {
 				return translateAllStatements(term.children, scope);
 			}
 			case "constructor_decl":
+			case "accessor_decl":
 			case "func_decl": {
 				const isConstructor = term.name === "constructor_decl";
 				expectLength(term.args, 1);
 				const name = term.args[0];
 
-				function constructCallable(parameterList: Term, remainingLists: Term[], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
+				function constructCallable(parameterList: Term[], remainingLists: Array<Term[]>, functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
 					return (targetScope: Scope, arg: ArgGetter) => {
 						const childScope = typeof initialScope !== "undefined" ? initialScope : newScope(name, targetScope);
-						termsWithName(parameterList.children, "parameter").forEach((param, index) => {
+						termsWithName(parameterList, "parameter").forEach((param, index) => {
 							expectLength(param.args, 1);
 							const parameterName = param.args[0];
 							targetScope.mapping[parameterName] = hoistToIdentifier(read(arg(index, parameterName), childScope), childScope, parameterName);
@@ -726,7 +777,9 @@ export function compileTermToProgram(root: Term): Program {
 					};
 				}
 
-				const parameterLists = termsWithName(term.children, "parameter_list");
+				// Workaround differences in AST between swift 4.1 and development
+				const parameters = termsWithName(term.children, "parameter");
+				const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map(term => term.children));
 				if (parameterLists.length === 0) {
 					throw new Error(`Expected a parameter list for a function declaration`);
 				}
@@ -825,15 +878,15 @@ export function compileTermToProgram(root: Term): Program {
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
-						if (getProperty(child, "storage_kind", isString) !== "computed") {
-							layout.push(structField(child.args[0], getType(child)));
-						} else {
+						if (requiresGetter(child)) {
 							expectLength(child.children, 1);
 							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
-								const declaration = termWithName(child.children, "func_decl");
+								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 							statements = concat(statements, translateStatement(child.children[0], scope));
+						} else {
+							layout.push(structField(child.args[0], getType(child)));
 						}
 					} else {
 						statements = concat(statements, translateStatement(child, scope));
@@ -862,7 +915,7 @@ export function compileTermToProgram(root: Term): Program {
 						} else {
 							expectLength(child.children, 1);
 							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
-								const declaration = termWithName(child.children, "func_decl");
+								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 						}

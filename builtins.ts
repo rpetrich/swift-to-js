@@ -1,9 +1,9 @@
-import { FunctionBuilder, noinline, returnType, wrapped } from "./functions";
+import { FunctionBuilder, GetterSetterBuilder, noinline, returnType, wrapped } from "./functions";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, read, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, expr, hoistToIdentifier, ExpressionValue, functionValue, read, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, assignmentExpression, objectExpression, isLiteral, ifStatement, conditionalExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator, ThisExpression, Statement, expressionStatement } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -58,6 +58,9 @@ export const structTypes: { [name: string]: StructField[] } = {
 	"Array": [
 		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	],
+	"Dictionary": [
+		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]), identifier("length")))),
+	],
 };
 
 export const defaultValues: { [name: string]: Expression } = {
@@ -70,9 +73,21 @@ export const defaultValues: { [name: string]: Expression } = {
 	"UTF16View": stringLiteral(""),
 	"Optional": nullLiteral(),
 	"Array": arrayExpression([]),
+	"Dictionary": objectExpression([]),
 };
 
-export const functions: { [name: string]: FunctionBuilder } = {
+function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier | ThisExpression): Statement {
+	return ifStatement(
+		logicalExpression(
+			"||",
+			binaryExpression(">=", index, memberExpression(array, identifier("length"))),
+			binaryExpression("<", index, numericLiteral(0)),
+		),
+		throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")]))
+	);
+}
+
+export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder } = {
 	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [stringLiteral("Unexpectedly found nil while unwrapping an Optional value")]))])),
 	"Swift.(file).Int.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Int.+": binaryBuiltin("+"),
@@ -117,7 +132,25 @@ export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
 	"Swift.(file).Array.init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
 	"Swift.(file).Array.count": returnLength,
-	"Swift.(file).Array.subscript": returnTodo,
+	"Swift.(file).Array.subscript": {
+		get(scope, arg) {
+			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
+			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+			return statements([
+				arrayBoundsCheck(array, index),
+				returnStatement(memberExpression(array, index, true))
+			]);
+		},
+		set(scope, arg) {
+			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
+			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+			const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
+			return statements([
+				arrayBoundsCheck(array, index),
+				returnStatement(assignmentExpression("=", memberExpression(array, index, true), value))
+			]);
+		},
+	},
 	"Swift.(file).Double.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 	"Swift.(file).Double.+": binaryBuiltin("+"),
 	"Swift.(file).Double.-": binaryBuiltin("-"),
@@ -159,5 +192,43 @@ export const functions: { [name: string]: FunctionBuilder } = {
 	"Swift.(file).FloatingPoint.==": binaryBuiltin("==="),
 	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
 	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(arrayExpression([callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])])), returnType(type)),
+	"Swift.(file).Dictionary.subscript": {
+		get(scope, arg) {
+			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
+			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+			return expr(conditionalExpression(
+				callExpression(
+					memberExpression(
+						memberExpression(
+							identifier("Object"),
+							identifier("hasOwnProperty")
+						),
+						identifier("call")
+					),
+					[dict, index]
+				),
+				memberExpression(dict, index, true),
+				nullLiteral()
+			));
+		},
+		set(scope, arg) {
+			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
+			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+			const valueExpression = read(arg(2, "value"), scope);
+			const remove = unaryExpression("delete", memberExpression(dict, index, true));
+			if (valueExpression.type === "NullLiteral") {
+				return expr(remove);
+			}
+			if (isLiteral(valueExpression)) {
+				return expr(assignmentExpression("=", memberExpression(dict, index, true), valueExpression));
+			}
+			const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
+			return expr(conditionalExpression(
+				binaryExpression("!==", hoistedValue, nullLiteral()),
+				assignmentExpression("=", memberExpression(dict, index, true), hoistedValue),
+				remove
+			));
+		},
+	},
 	"Swift.(file).print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 };

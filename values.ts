@@ -101,7 +101,19 @@ export function tuple(values: Value[]): TupleValue {
 	return { kind: "tuple", values };
 }
 
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue;
+
+export interface SubscriptValue {
+	kind: "subscript";
+	function: Value;
+	args: Value[];
+}
+
+export function subscript(fn: Value, args: Value[]): SubscriptValue {
+	return { kind: "subscript", function: fn, args };
+}
+
+
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue;
 
 
 export type StructField = {
@@ -182,19 +194,22 @@ export function read(value: Value, scope: Scope): Expression {
 			return value.ref;
 		case "statements":
 			return callExpression(functionExpression(undefined, [], blockStatement(value.statements)), []);
+		case "subscript":
+			return read(call(value.function, undefinedValue, value.args, scope), scope);
 		case "boxed":
 			if (value.contents.kind === "direct") {
-				const ref = value.contents.ref;
-				switch (ref.type) {
-					case "Identifier":
-						return identifier("unboxable$" + ref.name);
-					case "ThisExpression":
-						return identifier("unboxable$this");
-					case "MemberExpression":
-						return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
-					default:
-						break;
-				}
+				return read(value.contents, scope);
+				// const ref = value.contents.ref;
+				// switch (ref.type) {
+				// 	case "Identifier":
+				// 		return identifier("unboxable$" + ref.name);
+				// 	case "ThisExpression":
+				// 		return identifier("unboxable$this");
+				// 	case "MemberExpression":
+				// 		return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
+				// 	default:
+				// 		break;
+				// }
 			// } else if (value.contents.kind === "expression") {
 			// 	if (value.contents.pointer) {
 			// 		return value.contents;
@@ -222,18 +237,20 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 	switch (target.kind) {
 		case "function":
 			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
-				return scope.functions[target.name](scope, getter, target.type, target.name);
+				const fn = scope.functions[target.name];
+				return (typeof fn === "function" ? fn : fn.get)(scope, getter, target.type, target.name);
 			} else {
 				return call(expr(insertFunction(target.name, scope, target.type)), thisArgument, args, scope);
 			}
 		case "callable":
 			return target.call(scope, getter);
 		default:
-			if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
-				return expr(callExpression(memberExpression(read(target, scope), identifier("call")), [thisArgument as Value].concat(args).map((value) => read(value, scope))));
-			} else {
-				return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
-			}
+			break;
+	}
+	if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
+		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), [thisArgument as Value].concat(args).map((value) => read(value, scope))));
+	} else {
+		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
 	}
 }
 

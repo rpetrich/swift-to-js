@@ -1,15 +1,17 @@
 Program = _ term:Term _ { return term; }
 
 Term
-  = "(" _ name:BareString _ tokens:WhitespaceAndAttributeOrArgument* _ children:WhitespaceAndTerm* _ ")" {
+  = "(" _ name:BareString _ headTokens:WhitespaceAndAttributeOrArgument* _ children:WhitespaceAndTerm* _ tailTokens:WhitespaceAndAttributeOrArgument* _ ")" {
     const props = {}, args = [];
-    for (var i = 0; i < tokens.length; i++) {
-      if (typeof tokens[i] == "string") {
-          args.push(tokens[i]);
-        } else {
-      props[tokens[i].key] = tokens[i].value;
-        }
+    function addToken(token) {
+      if (typeof token == "string") {
+        args.push(token);
+      } else {
+        props[token.key] = token.value;
+      }
     }
+    headTokens.forEach(addToken);
+    tailTokens.forEach(addToken);
     return { name: name, args:args, properties: props, children: children, location: location() };
   }
 WhitespaceAndTerm
@@ -46,7 +48,7 @@ SingleQuotedString "singlequote string"
   = "'" content:(EscapeSequence / [^'])* "'" { return content.join(""); }
 
 List "list"
-  = CommaSeparatedBareString / BracketedList
+  = CommaSeparatedBareString / BracketedList / EmptyBracketedList
 
 CommaSeparatedBareString
   = head:(SingleQuotedString / BareString) tail:CommaPrefixedBareString+ { return [head].concat(tail); }
@@ -58,21 +60,26 @@ BracketedList
 BracketedListTail
   = ',' _ string:BareString { return string; }
 
+EmptyBracketedList
+  = '[]' { return []; }
+
 Identifier "identifier"
   = prefix:[a-zA-Z_@.] remaining:[a-zA-Z_\-@.]* { return prefix + remaining.join(""); }
 
 BareString "bare string"
   = prefix:BareStringToken remaining:BareStringTail* { return prefix + remaining.join(""); }
 BareStringToken
-  = [a-zA-Z0-9_.:@*<>~$%&+\-!?/]
+  = ': ' / ', ' / [a-zA-Z0-9_.:@*<>~$%&+\-!?/]
 BareStringTail
-  = BareStringToken / '=' / BareStringParenPair / BareStringSquarePair
+  = BareStringToken / '=' / BareStringParenPair / BareStringSquarePair / BareStringExtension
 BareStringTailWhitespace
   = BareStringTail / " "
 BareStringParenPair "parenthesized string component"
   = '(' body:BareStringTailWhitespace* ')' { return "(" + body.join("") + ")"; }
 BareStringSquarePair "subscripted bare string"
   = ws: _ '[' body:BareStringTailWhitespace* ']' { return ws + "[" + body.join("") + "]"; }
+BareStringExtension
+  = ' extension.' // Special case for extension methods. At some point we will need declaration parsing in here
 
 ParenthesizedBareString "parenthesized bare string"
   = all:('(' BareString ')') { return all.join(""); }
