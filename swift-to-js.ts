@@ -9,6 +9,7 @@ import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { argv } from "process";
+import { readdirSync } from "fs";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
 
@@ -944,8 +945,37 @@ function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
 	});
 }
 
+const swiftPath: string = (() => {
+	try {
+		// Search toolchains
+		let hasLatest: boolean = false;
+		const developmentToolchains: string[] = [];
+		for (const subpath of readdirSync("/Library/Developer/Toolchains/")) {
+			if (/^swift-DEVELOPMENT-SNAPSHOT-.*\.xctoolchain$/.test(subpath)) {
+				developmentToolchains.push(`/Library/Developer/Toolchains/${subpath}/usr/bin/swiftc`);
+			} else if (subpath === "swift-latest.xctoolchain") {
+				hasLatest = true;
+			}
+		}
+		// Attempt to use the latest development toolchain
+		if (developmentToolchains.length) {
+			developmentToolchains.sort();
+			return developmentToolchains[developmentToolchains.length - 1];
+		}
+		// Or the latest symlink
+		if (hasLatest) {
+			return "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/swiftc";
+		}
+		// Or whatever the installed Xcode version has
+		return "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc";
+	} catch (e) {
+		// Or the swiftc in the user's path
+		return "swiftc";
+	}
+})();
+
 export async function compile(path: string): Promise<string | undefined> {
-	const process = spawn("swiftc", ["-dump-ast", path]);
+	const process = spawn(swiftPath, ["-dump-ast", path]);
 	const stdout = readAsString(process.stdout);
 	const stderr = readAsString(process.stderr);
 	await new Promise((resolve, reject) => {
