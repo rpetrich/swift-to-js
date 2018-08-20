@@ -75,7 +75,7 @@ export interface BoxedValue {
 
 export function boxed(contents: Value): BoxedValue {
 	if (contents.kind !== "direct") {
-		throw new TypeError(`Unable to box a $(contents.kind)}`);
+		throw new TypeError(`Unable to box a ${contents.kind}`);
 	}
 	return { kind: "boxed", contents };
 }
