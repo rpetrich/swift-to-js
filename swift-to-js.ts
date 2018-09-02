@@ -407,11 +407,13 @@ export function compileTermToProgram(root: Term): Program {
 				if (type.kind !== "optional") {
 					throw new TypeError(`Expected optional, got ${stringifyType(type)}`);
 				}
-				const translated = translatePattern(term.children[0], value, scope);
 				if (isNestedOptional(type)) {
-					return binaryExpression("!==", memberExpression(translated, identifier("length")), numericLiteral(0));
+					const [first, second] = reuseExpression(value, scope);
+					const assign = translatePattern(term.children[0], memberExpression(first, numericLiteral(0), true), scope);
+					const hasLength = binaryExpression("!==", memberExpression(second, identifier("length")), numericLiteral(0));
+					return sequenceExpression([assign, hasLength]);
 				}
-				return binaryExpression("!==", translated, nullLiteral());
+				return binaryExpression("!==", translatePattern(term.children[0], value, scope), nullLiteral());
 			}
 			case "case_label_item":
 			case "pattern_let": {
