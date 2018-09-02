@@ -50,7 +50,7 @@ MetaType
   = base:(Generic / Optional / Name) '.' as:("Type" / "Protocol") { return { kind: "metatype", base: base, as: as, location: location() }; }
 
 NamespacedType
-  = namespace:Name '.' type:Type { return { kind: "namespaced", namespace: namespace, type: type, location: location() }; }
+  = namespace:(Generic / Name) '.' type:Type { return { kind: "namespaced", namespace: namespace, type: type, location: location() }; }
 
 Modified
   = modifier:("inout" / "@lvalue") " " _ type:Type { return { kind: "modified", modifier: modifier, type: type, location: location() }; }

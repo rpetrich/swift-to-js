@@ -66,7 +66,7 @@ export interface Name {
 
 export interface Namespaced {
 	kind: "namespaced";
-	namespace: Name;
+	namespace: Generic | Name;
 	type: Type;
 	location: Location;
 }
