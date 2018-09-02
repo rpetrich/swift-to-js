@@ -276,7 +276,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 	"Swift.(file).Float./=": assignmentBuiltin("/="),
 	"Swift.(file).FloatingPoint.==": binaryBuiltin("==="),
 	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
-	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(arrayExpression([callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])])), returnType(type)),
+	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
 	"Swift.(file).Dictionary.subscript": {
 		get(scope, arg) {
 			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
