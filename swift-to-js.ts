@@ -3,13 +3,13 @@ import { defaultValues as builtinDefaultValues, structTypes as builtinStructType
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newRootScope, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, newPointer, read, reuseExpression, statements, stringifyType, StructField, structField, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, StructField, structField, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
-import { argv } from "process";
 import { readdirSync } from "fs";
+import { argv } from "process";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
 
@@ -57,7 +57,7 @@ function findTermWithName(terms: Term[], name: string | RegExp): Term | undefine
 function termWithName(terms: Term[], name: string | RegExp): Term {
 	const result = findTermWithName(terms, name);
 	if (typeof result === "undefined") {
-		throw new Error(`Could not find ${name} term!`);
+		throw new Error(`Could not find ${name} term: ${terms.map((term) => term.name).join(", ")}`);
 	}
 	return result;
 }
@@ -120,10 +120,6 @@ function expectLength<T extends any[]>(array: T, ...lengths: number[]) {
 	}
 	console.error(array);
 	throw new Error(`Expected ${lengths.join(" or ")} items, but got ${array.length}`);
-}
-
-function isNestedOptional(type: Type): boolean {
-	return type.kind === "optional" && type.type.kind === "optional";
 }
 
 function isStored(field: StructField) {
@@ -526,7 +522,7 @@ export function compileTermToProgram(root: Term): Program {
 			case "subscript_expr": {
 				expectLength(term.children, 2);
 				const type = getType(term);
-				const functionType: Type = {
+				const getterType: Type = {
 					kind: "function",
 					arguments: {
 						kind: "tuple",
@@ -539,8 +535,23 @@ export function compileTermToProgram(root: Term): Program {
 					attributes: [],
 					location: type.location,
 				};
-				const ref = extractReference(term, scope, functionType);
-				return subscript(ref, term.children.map(child => translateTermToValue(child, scope)));
+				const getter = extractReference(term, scope, getterType);
+				// TODO: Define the setter type
+				const setterType: Type = {
+					kind: "function",
+					arguments: {
+						kind: "tuple",
+						types: term.children.map(getType),
+						location: type.location,
+					},
+					return: type,
+					throws: false,
+					rethrows: false,
+					attributes: [],
+					location: type.location,
+				};
+				const setter = extractReference(term, scope, setterType);
+				return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope)));
 			}
 			case "prefix_unary_expr":
 			case "call_expr":
@@ -616,23 +627,7 @@ export function compileTermToProgram(root: Term): Program {
 				const type = getType(term.children[0]);
 				const dest = translateTermToValue(term.children[0], scope);
 				const source = translateTermToValue(term.children[1], scope);
-				// TODO: Support copying types and migrate into values
-				if (dest.kind === "subscript") {
-					if (dest.function.kind !== "function") {
-						throw TypeError(`Expected a helper function to call the subscript setter`);
-					}
-					const name = dest.function.name;
-					if (!Object.hasOwnProperty.call(scope.functions, name)) {
-						throw TypeError(`Unable to find the subscript function named ${name}`);
-					}
-					const fn = scope.functions[name];
-					if (typeof fn === "function") {
-						throw TypeError(`Subscript named ${name} does not have a setter`);
-					}
-					return call(callable((scope, arg) => fn.set(scope, arg, type, name), type), undefinedValue, dest.args.concat(source), scope);
-				}
-				const expressions = storeValue(read(unbox(dest, scope), scope), source, type, scope);
-				return expr(collapseToExpression(expressions));
+				return set(dest, source, scope);
 			}
 			case "inout_expr": {
 				expectLength(term.children, 1);
@@ -733,14 +728,17 @@ export function compileTermToProgram(root: Term): Program {
 			case "source_file": {
 				return translateAllStatements(term.children, scope);
 			}
-			case "constructor_decl":
 			case "accessor_decl":
+				if (Object.hasOwnProperty.call(term.properties, "materializeForSet_for")) {
+					return emptyStatements;
+				}
+			case "constructor_decl":
 			case "func_decl": {
 				const isConstructor = term.name === "constructor_decl";
 				expectLength(term.args, 1);
 				const name = term.args[0];
 
-				function constructCallable(parameterList: Term[], remainingLists: Array<Term[]>, functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
+				function constructCallable(parameterList: Term[], remainingLists: Term[][], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
 					return (targetScope: Scope, arg: ArgGetter) => {
 						const childScope = typeof initialScope !== "undefined" ? initialScope : newScope(name, targetScope);
 						termsWithName(parameterList, "parameter").forEach((param, index) => {
@@ -751,36 +749,48 @@ export function compileTermToProgram(root: Term): Program {
 						if (remainingLists.length) {
 							return callable(constructCallable(remainingLists[0], remainingLists.slice(1), returnType(functionType), initialScope), functionType);
 						}
-						const body = termWithName(term.children, "brace_stmt").children.slice();
-						if (isConstructor) {
-							const typeOfResult = returnType(returnType(getType(term)));
-							const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
-							const defaultInstantiation = defaultInstantiateType(typeOfResult, (fieldName) => {
-								if (body.length && body[0].name === "assign_expr") {
-									const children = body[0].children;
-									expectLength(children, 2);
-									if (children[0].name === "member_ref_expr") {
-										const [fieldType, member] = extractMember(getProperty(children[0], "decl", isString));
-										if (member === fieldName) {
-											body.shift();
-											return translateExpression(children[1], childScope);
+						const brace = findTermWithName(term.children, "brace_stmt");
+						if (brace) {
+							const body = termWithName(term.children, "brace_stmt").children.slice();
+							if (isConstructor) {
+								const typeOfResult = returnType(returnType(getType(term)));
+								const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
+								const defaultInstantiation = defaultInstantiateType(typeOfResult, (fieldName) => {
+									if (body.length && body[0].name === "assign_expr") {
+										const children = body[0].children;
+										expectLength(children, 2);
+										if (children[0].name === "member_ref_expr") {
+											const [fieldType, member] = extractMember(getProperty(children[0], "decl", isString));
+											if (member === fieldName) {
+												body.shift();
+												return translateExpression(children[1], childScope);
+											}
 										}
 									}
+									return undefined;
+								});
+								if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
+									return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
 								}
-								return undefined;
-							});
-							if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-								return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
+								addVariable(childScope, selfMapping, defaultInstantiation);
 							}
-							addVariable(childScope, selfMapping, defaultInstantiation);
+							return statements(emitScope(childScope, translateAllStatements(body, childScope)));
+						} else {
+							if (isConstructor) {
+								const typeOfResult = returnType(returnType(getType(term)));
+								const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
+								const defaultInstantiation = defaultInstantiateType(typeOfResult, () => undefined);
+								return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
+							} else {
+								return statements([]);
+							}
 						}
-						return statements(emitScope(childScope, translateAllStatements(body, childScope)));
 					};
 				}
 
 				// Workaround differences in AST between swift 4.1 and development
 				const parameters = termsWithName(term.children, "parameter");
-				const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map(term => term.children));
+				const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map((paramList) => paramList.children));
 				if (parameterLists.length === 0) {
 					throw new Error(`Expected a parameter list for a function declaration`);
 				}
@@ -911,14 +921,16 @@ export function compileTermToProgram(root: Term): Program {
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
-						if (getProperty(child, "storage_kind", isString) !== "computed") {
+						if (requiresGetter(child)) {
+							// TODO: Implement getters/setters
 							layout.push(structField(child.args[0], getType(child)));
+							// expectLength(child.children, 1);
+							// layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
+							// 	const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
+							// 	return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+							// }));
 						} else {
-							expectLength(child.children, 1);
-							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
-								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
-							}));
+							layout.push(structField(child.args[0], getType(child)));
 						}
 					}
 				}
@@ -974,7 +986,12 @@ const swiftPath: string = (() => {
 	}
 })();
 
-export async function compile(path: string): Promise<string | undefined> {
+export interface CompilerOutput {
+	code: string | undefined;
+	ast: string;
+}
+
+export async function compile(path: string): Promise<CompilerOutput> {
 	const process = spawn(swiftPath, ["-dump-ast", "--", path]);
 	const stdout = readAsString(process.stdout);
 	const stderr = readAsString(process.stderr);
@@ -990,14 +1007,16 @@ export async function compile(path: string): Promise<string | undefined> {
 			}
 		});
 	});
-	const rootTerm = parseAST(await stderr);
+	const ast = await stderr;
+	// console.log(ast);
+	const rootTerm = parseAST(ast);
 	await stdout;
 	const program = compileTermToProgram(rootTerm);
-	return transformFromAst(program).code;
+	return { code: transformFromAst(program).code, ast };
 }
 
 if (require.main === module) {
-	compile(argv[argv.length - 1]).then(console.log).catch((e) => {
+	compile(argv[argv.length - 1]).then((result) => console.log(result.code)).catch((e) => {
 		// console.error(e instanceof Error ? e.message : e);
 		console.error(e);
 		process.exit(1);

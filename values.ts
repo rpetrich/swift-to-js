@@ -1,4 +1,4 @@
-import { arrayExpression, assignmentExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
@@ -70,11 +70,11 @@ export function variable(ref: Identifier | MemberExpression | ThisExpression): V
 
 export interface BoxedValue {
 	kind: "boxed";
-	contents: VariableValue;
+	contents: VariableValue | SubscriptValue;
 }
 
 export function boxed(contents: Value): BoxedValue {
-	if (contents.kind !== "direct") {
+	if (contents.kind !== "direct" && contents.kind !== "subscript") {
 		throw new TypeError(`Unable to box a ${contents.kind}`);
 	}
 	return { kind: "boxed", contents };
@@ -104,12 +104,13 @@ export function tuple(values: Value[]): TupleValue {
 
 export interface SubscriptValue {
 	kind: "subscript";
-	function: Value;
+	getter: Value;
+	setter: Value;
 	args: Value[];
 }
 
-export function subscript(fn: Value, args: Value[]): SubscriptValue {
-	return { kind: "subscript", function: fn, args };
+export function subscript(getter: Value, setter: Value, args: Value[]): SubscriptValue {
+	return { kind: "subscript", getter, setter, args };
 }
 
 
@@ -146,21 +147,32 @@ export function newPointer(base: Expression, offset: Expression): Value {
 	return expr(objectExpression([objectProperty(baseProperty, base), objectProperty(offsetProperty, offset)]), true);
 }
 
-export function unbox(value: Value, scope: Scope): VariableValue {
-	if (value.kind === "expression") {
-		if (value.pointer) {
-			const [first, second] = reuseExpression(value.expression, scope);
-			return variable(memberExpression(memberExpression(first, baseProperty), memberExpression(second, offsetProperty), true));
-		} else {
-			console.log(value);
-			throw new Error(`Unable to unbox an expression that's not a pointer`);
-		}
-	} else if (value.kind === "boxed") {
+export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
+	if (value.kind === "boxed") {
 		return value.contents;
 	} else if (value.kind === "direct") {
 		return value;
+	} else if (value.kind === "subscript") {
+		return value;
 	} else {
 		throw new Error(`Unable to unbox from ${value.kind} value as pointer`);
+	}
+}
+
+export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "="): Value {
+	switch (dest.kind) {
+		case "boxed":
+			return set(dest.contents, source, scope, operator);
+		case "direct":
+			if (dest.ref.type === "ThisExpression") {
+				throw new Error("Cannot assign to a this expression!");
+			}
+			return expr(assignmentExpression(operator, dest.ref, read(source, scope)));
+		case "subscript":
+			const value = operator === "=" ? source : expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(dest, scope), read(source, scope)));
+			return call(dest.setter, undefinedValue, dest.args.concat([source]), scope, "set");
+		default:
+			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
 }
 
@@ -195,28 +207,9 @@ export function read(value: Value, scope: Scope): Expression {
 		case "statements":
 			return callExpression(functionExpression(undefined, [], blockStatement(value.statements)), []);
 		case "subscript":
-			return read(call(value.function, undefinedValue, value.args, scope), scope);
+			return read(call(value.getter, undefinedValue, value.args, scope, "get"), scope);
 		case "boxed":
-			if (value.contents.kind === "direct") {
-				return read(value.contents, scope);
-				// const ref = value.contents.ref;
-				// switch (ref.type) {
-				// 	case "Identifier":
-				// 		return identifier("unboxable$" + ref.name);
-				// 	case "ThisExpression":
-				// 		return identifier("unboxable$this");
-				// 	case "MemberExpression":
-				// 		return read(newPointer(ref.object, ref.computed ? ref.property : stringLiteral((ref.property as Identifier).name)), scope);
-				// 	default:
-				// 		break;
-				// }
-			// } else if (value.contents.kind === "expression") {
-			// 	if (value.contents.pointer) {
-			// 		return value.contents;
-			// 	}
-			// 	return newPointer(arrayExpression([value.contents.expression]), numericLiteral(0));
-			}
-			throw new TypeError(`Unable to box a ${value.contents.kind} value as pointer`);
+			return read(value.contents, scope);
 		default:
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
 	}
@@ -224,7 +217,7 @@ export function read(value: Value, scope: Scope): Expression {
 
 export const undefinedValue = expr(undefinedLiteral);
 
-export function call(target: Value, thisArgument: Value, args: Value[], scope: Scope): Value {
+export function call(target: Value, thisArgument: Value, args: Value[], scope: Scope, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
 		if (i === "this") {
 			return thisArgument;
@@ -238,14 +231,34 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 		case "function":
 			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
 				const fn = scope.functions[target.name];
-				return (typeof fn === "function" ? fn : fn.get)(scope, getter, target.type, target.name);
+				switch (type) {
+					case "call":
+						if (typeof fn !== "function") {
+							throw new Error(`Expected a callable function!`);
+						}
+						return fn(scope, getter, target.type, target.name);
+					default:
+						if (typeof fn === "function") {
+							throw new Error(`Expected a ${type}ter!`);
+						}
+						return fn[type](scope, getter, target.type, target.name);
+				}
 			} else {
+				if (type !== "call") {
+					throw new Error(`Unable to call a ${type}ter on a function!`);
+				}
 				return call(expr(insertFunction(target.name, scope, target.type)), thisArgument, args, scope);
 			}
 		case "callable":
+			if (type !== "call") {
+				throw new Error(`Unable to call a ${type}ter on a function!`);
+			}
 			return target.call(scope, getter);
 		default:
 			break;
+	}
+	if (type !== "call") {
+		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
 	if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
 		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), [thisArgument as Value].concat(args).map((value) => read(value, scope))));
@@ -324,4 +337,8 @@ export function stringifyType(type: Type): string {
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}
+}
+
+export function isNestedOptional(type: Type): boolean {
+	return type.kind === "optional" && type.type.kind === "optional";
 }

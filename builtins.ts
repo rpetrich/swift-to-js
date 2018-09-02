@@ -1,9 +1,9 @@
 import { FunctionBuilder, GetterSetterBuilder, noinline, returnType, wrapped } from "./functions";
 import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, call, callable, expr, hoistToIdentifier, ExpressionValue, functionValue, read, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, set, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, objectExpression, isLiteral, ifStatement, conditionalExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, Expression, functionExpression, identifier, Identifier, logicalExpression, memberExpression, newExpression, NullLiteral, nullLiteral, numericLiteral, returnStatement, stringLiteral, thisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator, ThisExpression, Statement, expressionStatement } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -28,7 +28,7 @@ function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" 
 }
 
 function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=") {
-	return wrapped((scope: Scope, arg: ArgGetter) => expr(assignmentExpression(operator, read(unbox(arg(0), scope), scope), read(arg(1), scope))));
+	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
 }
 
 export const structTypes: { [name: string]: StructField[] } = {
@@ -63,6 +63,32 @@ export const structTypes: { [name: string]: StructField[] } = {
 	],
 };
 
+export enum PossibleValueTypes {
+	None,
+	Undefined = 1 << 0,
+	Boolean = 1 << 1,
+	Number = 1 << 2,
+	String = 1 << 3,
+	Function = 1 << 4, // Not used currently
+	Object = 1 << 5,
+	Symbol = 1 << 6, // Not used currently, possibly ever
+	Null = 1 << 7, // Not referenced by typeof, but modeled in our system
+	Array = 1 << 8, // Supported via Array.isArray
+}
+
+export const valueTypes: { [name: string]: PossibleValueTypes } = {
+	"Bool": PossibleValueTypes.Boolean,
+	"Int": PossibleValueTypes.Number,
+	"Int64": PossibleValueTypes.Number,
+	"Float": PossibleValueTypes.Number,
+	"Double": PossibleValueTypes.Number,
+	"String": PossibleValueTypes.String,
+	"UTF16View": PossibleValueTypes.String,
+	"Optional": PossibleValueTypes.Null,
+	"Array": PossibleValueTypes.Array,
+	"Dictionary": PossibleValueTypes.Object,
+};
+
 export const defaultValues: { [name: string]: Expression } = {
 	"Bool": booleanLiteral(false),
 	"Int": numericLiteral(0),
@@ -76,6 +102,65 @@ export const defaultValues: { [name: string]: Expression } = {
 	"Dictionary": objectExpression([]),
 };
 
+function possibleValuesForType(type: Type): PossibleValueTypes {
+	switch (type.kind) {
+		case "name":
+			if (type.name === "Bool") {
+				return PossibleValueTypes.Boolean;
+			}
+			if (type.name === "Int" || type.name === "Double") {
+				// TODO: More types
+				return PossibleValueTypes.Number;
+			}
+			if (type.name === "String") {
+				return PossibleValueTypes.String;
+			}
+			if (Object.hasOwnProperty.call(structTypes, type.name)) {
+				const storedFields = structTypes[type.name].filter((field) => !field.stored);
+				switch (storedFields.length) {
+					case 0:
+						return PossibleValueTypes.Undefined;
+					case 1:
+						return possibleValuesForType(storedFields[0].type);
+					default:
+						return PossibleValueTypes.Object;
+				}
+			}
+			// TODO: Model enums
+			return PossibleValueTypes.Object;
+		case "array":
+			return PossibleValueTypes.Array;
+		case "modified":
+			return possibleValuesForType(type.type);
+		case "dictionary":
+			return PossibleValueTypes.Object;
+		case "tuple":
+			switch (type.types.length) {
+				case 0:
+					return PossibleValueTypes.Undefined;
+				case 1:
+					return possibleValuesForType(type.types[0]);
+				default:
+					return PossibleValueTypes.Array;
+			}
+		case "generic":
+			return possibleValuesForType(type.base);
+		case "metatype":
+			return PossibleValueTypes.Object;
+		case "function":
+			return PossibleValueTypes.Function;
+		case "namespaced":
+			return possibleValuesForType(type.type);
+		case "optional":
+			if (isNestedOptional(type)) {
+				return PossibleValueTypes.Object;
+			}
+			return possibleValuesForType(type.type) | PossibleValueTypes.Null;
+		default:
+			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
+	}
+}
+
 function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier | ThisExpression): Statement {
 	return ifStatement(
 		logicalExpression(
@@ -83,7 +168,7 @@ function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier 
 			binaryExpression(">=", index, memberExpression(array, identifier("length"))),
 			binaryExpression("<", index, numericLiteral(0)),
 		),
-		throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")]))
+		throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")])),
 	);
 }
 
@@ -138,7 +223,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
 			return statements([
 				arrayBoundsCheck(array, index),
-				returnStatement(memberExpression(array, index, true))
+				returnStatement(memberExpression(array, index, true)),
 			]);
 		},
 		set(scope, arg) {
@@ -147,7 +232,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 			const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
 			return statements([
 				arrayBoundsCheck(array, index),
-				returnStatement(assignmentExpression("=", memberExpression(array, index, true), value))
+				returnStatement(assignmentExpression("=", memberExpression(array, index, true), value)),
 			]);
 		},
 	},
@@ -201,14 +286,14 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 					memberExpression(
 						memberExpression(
 							identifier("Object"),
-							identifier("hasOwnProperty")
+							identifier("hasOwnProperty"),
 						),
-						identifier("call")
+						identifier("call"),
 					),
-					[dict, index]
+					[dict, index],
 				),
 				memberExpression(dict, index, true),
-				nullLiteral()
+				nullLiteral(),
 			));
 		},
 		set(scope, arg) {
@@ -226,7 +311,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 			return expr(conditionalExpression(
 				binaryExpression("!==", hoistedValue, nullLiteral()),
 				assignmentExpression("=", memberExpression(dict, index, true), hoistedValue),
-				remove
+				remove,
 			));
 		},
 	},
