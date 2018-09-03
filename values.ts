@@ -299,7 +299,7 @@ export function stringifyType(type: Type): string {
 			// TODO: Handle attributes
 			return stringifyType(type.arguments) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return);
 		case "tuple":
-			return "(" + type.types.map(stringifyType) + ")";
+			return "(" + type.types.map(stringifyType).join(", ") + ")";
 		case "array":
 			return "[" + stringifyType(type.type) + "]";
 		case "dictionary":
