@@ -117,28 +117,6 @@ export function subscript(getter: Value, setter: Value, args: Value[]): Subscrip
 export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue;
 
 
-export type StructField = {
-	name: string;
-	type: Type;
-} & ({ stored: true } | { stored: false; getter: (target: Value, scope: Scope) => Value; });
-
-export function structField(name: string, type: Type | string, getter?: (target: Value, scope: Scope) => Value): StructField {
-	const resolvedType = typeof type === "string" ? parseType(type) : type;
-	if (getter) {
-		return {
-			name,
-			type: resolvedType,
-			stored: false,
-			getter,
-		};
-	}
-	return {
-		name,
-		type: resolvedType,
-		stored: true,
-	};
-}
-
 
 const baseProperty = identifier("base");
 const offsetProperty = identifier("offset");

@@ -1,7 +1,8 @@
 import { FunctionBuilder, GetterSetterBuilder, noinline, returnType, wrapped } from "./functions";
-import { emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { copyValue, expressionSkipsCopy, field, Field, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
+import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, set, statements, StructField, structField, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
@@ -31,134 +32,177 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
 }
 
-export const structTypes: { [name: string]: StructField[] } = {
-	"String": [
-		structField("unicodeScalars", "UTF32View", (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
-		structField("utf16", "UTF16View", (value) => value),
-		structField("utf8", "UTF8View", (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
-	],
-	"UTF32View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	],
-	"UTF16View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	],
-	"UTF8View": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		structField("startIndex", "Int64", (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		structField("endIndex", "Int64", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	],
-	"Collection": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	],
-	"Array": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	],
-	"Dictionary": [
-		structField("count", "Int", (value: Value, scope: Scope) => expr(memberExpression(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]), identifier("length")))),
-	],
-};
-
-export enum PossibleValueTypes {
-	None,
-	Undefined = 1 << 0,
-	Boolean = 1 << 1,
-	Number = 1 << 2,
-	String = 1 << 3,
-	Function = 1 << 4, // Not used currently
-	Object = 1 << 5,
-	Symbol = 1 << 6, // Not used currently, possibly ever
-	Null = 1 << 7, // Not referenced by typeof, but modeled in our system
-	Array = 1 << 8, // Supported via Array.isArray
-}
-
-export const valueTypes: { [name: string]: PossibleValueTypes } = {
-	"Bool": PossibleValueTypes.Boolean,
-	"Int": PossibleValueTypes.Number,
-	"Int64": PossibleValueTypes.Number,
-	"Float": PossibleValueTypes.Number,
-	"Double": PossibleValueTypes.Number,
-	"String": PossibleValueTypes.String,
-	"UTF16View": PossibleValueTypes.String,
-	"Optional": PossibleValueTypes.Null,
-	"Array": PossibleValueTypes.Array,
-	"Dictionary": PossibleValueTypes.Object,
-};
-
-export const defaultValues: { [name: string]: Expression } = {
-	"Bool": booleanLiteral(false),
-	"Int": numericLiteral(0),
-	"Int64": numericLiteral(0),
-	"Float": numericLiteral(0),
-	"Double": numericLiteral(0),
-	"String": stringLiteral(""),
-	"UTF16View": stringLiteral(""),
-	"Optional": nullLiteral(),
-	"Array": arrayExpression([]),
-	"Dictionary": objectExpression([]),
-};
-
-function possibleValuesForType(type: Type): PossibleValueTypes {
-	switch (type.kind) {
-		case "name":
-			if (type.name === "Bool") {
-				return PossibleValueTypes.Boolean;
-			}
-			if (type.name === "Int" || type.name === "Double") {
-				// TODO: More types
-				return PossibleValueTypes.Number;
-			}
-			if (type.name === "String") {
-				return PossibleValueTypes.String;
-			}
-			if (Object.hasOwnProperty.call(structTypes, type.name)) {
-				const storedFields = structTypes[type.name].filter((field) => !field.stored);
-				switch (storedFields.length) {
-					case 0:
-						return PossibleValueTypes.Undefined;
-					case 1:
-						return possibleValuesForType(storedFields[0].type);
-					default:
-						return PossibleValueTypes.Object;
+export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) => ReifiedType } = {
+	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false))),
+	"Int": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"Int64": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"Float": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"Double": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"String": (type, globalScope) => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+		field("unicodeScalars", reifyType("UnicodeScalarView", globalScope), (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
+		field("utf16", reifyType("UTF16View", globalScope), (value) => value),
+		field("utf8", reifyType("UTF8View", globalScope), (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
+	]),
+	"UnicodeScalarView": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(numericLiteral(0))),
+		field("endIndex", reifyType("Int64", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+	]),
+	"UTF16View": (type, globalScope) => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+		field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+	]),
+	"UTF8View": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+		field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+	]),
+	"Optional": (type, globalScope) => {
+		if (type.kind !== "optional") {
+			throw new TypeError(`Expected an optional when inspecting the value types of an Optional, instead got a ${stringifyType(type)} (a ${type.kind})`);
+		}
+		const reified = reifyType(type.type, globalScope);
+		if (isNestedOptional(type)) {
+			return {
+				fields: [],
+				possibleRepresentations: PossibleRepresentation.Array,
+				defaultValue() {
+					return expr(arrayExpression([]));
+				},
+				copy(value, scope) {
+					const expression = read(value, scope);
+					if (expressionSkipsCopy(expression)) {
+						return expr(expression);
+					}
+					if (reified.copy) {
+						// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
+						const [first, after] = reuseExpression(expression, scope);
+						return expr(conditionalExpression(
+							binaryExpression("===", memberExpression(first, identifier("length")), numericLiteral(0)),
+							arrayExpression([]),
+							read(reified.copy(expr(memberExpression(after, numericLiteral(0), true)), scope), scope),
+						));
+					} else {
+						// Nested Optionals of simple value are sliced
+						return expr(callExpression(memberExpression(expression, identifier("slice")), []));
+					}
+				},
+			};
+		} else {
+			return {
+				fields: [],
+				possibleRepresentations: PossibleRepresentation.Null | reified.possibleRepresentations,
+				defaultValue() {
+					return expr(nullLiteral());
+				},
+				copy(value, scope) {
+					if (reified.copy) {
+						// Optionals are copied by-value if non-null
+						const expression = read(value, scope);
+						if (expressionSkipsCopy(expression)) {
+							return expr(expression);
+						}
+						const [first, after] = reuseExpression(expression, scope);
+						return expr(conditionalExpression(
+							binaryExpression("===", first, nullLiteral()),
+							nullLiteral(),
+							read(reified.copy(expr(after), scope), scope),
+						));
+					} else {
+						// Optionals of simple value are passed through
+						return value;
+					}
+				},
+			};
+		}
+	},
+	"Array": (type, globalScope) => {
+		if (type.kind !== "array") {
+			throw new TypeError(`Expected an array when inspecting the value types of an Array, instead got a ${stringifyType(type)} (a ${type.kind})`);
+		}
+		const reified = reifyType(type.type, globalScope);
+		return {
+			fields: [
+				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+			],
+			possibleRepresentations: PossibleRepresentation.Array,
+			defaultValue() {
+				return expr(arrayExpression([]));
+			},
+			copy(value, scope) {
+				const expression = read(value, scope);
+				if (expressionSkipsCopy(expression)) {
+					return expr(expression);
 				}
-			}
-			// TODO: Model enums
-			return PossibleValueTypes.Object;
-		case "array":
-			return PossibleValueTypes.Array;
-		case "modified":
-			return possibleValuesForType(type.type);
-		case "dictionary":
-			return PossibleValueTypes.Object;
-		case "tuple":
-			switch (type.types.length) {
-				case 0:
-					return PossibleValueTypes.Undefined;
-				case 1:
-					return possibleValuesForType(type.types[0]);
-				default:
-					return PossibleValueTypes.Array;
-			}
-		case "generic":
-			return possibleValuesForType(type.base);
-		case "metatype":
-			return PossibleValueTypes.Object;
-		case "function":
-			return PossibleValueTypes.Function;
-		case "namespaced":
-			return possibleValuesForType(type.type);
-		case "optional":
-			if (isNestedOptional(type)) {
-				return PossibleValueTypes.Object;
-			}
-			return possibleValuesForType(type.type) | PossibleValueTypes.Null;
-		default:
-			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
-	}
+				if (reified.copy) {
+					// Arrays of complex types are mapped using a generated copy function
+					const id = uniqueIdentifier(scope, "value");
+					const converter = functionExpression(undefined, [id], blockStatement([returnStatement(read(reified.copy(expr(id), scope), scope))]));
+					return expr(callExpression(memberExpression(expression, identifier("map")), [converter]));
+				} else {
+					// Simple arrays are sliced
+					return expr(callExpression(memberExpression(expression, identifier("slice")), []));
+				}
+			},
+		};
+	},
+	"Dictionary": (type, globalScope) => {
+		if (type.kind !== "dictionary") {
+			throw new TypeError(`Expected Dictionary to be instantiated with a dictionary type, got a ${type.kind}`);
+		}
+		const { keyType, valueType } = type;
+		const reifiedKeyType = reifyType(keyType, globalScope);
+		const reifiedValueType = reifyType(valueType, globalScope);
+		function objectDictionaryImplementation(converterName?: string): ReifiedType {
+			const reifiedKeysType = reifyType({ kind: "array", type: keyType }, globalScope);
+			return {
+				fields: [
+					field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]), identifier("length")))),
+					field("keys", reifiedKeysType, (value: Value, scope: Scope) => {
+						const stringKeys = callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]);
+						if (typeof converterName === "string") {
+							const convertedKeys = callExpression(memberExpression(stringKeys, identifier("map")), [identifier(converterName)]);
+							return expr(convertedKeys);
+						} else {
+							return expr(stringKeys);
+						}
+					}),
+				],
+				possibleRepresentations: PossibleRepresentation.Object,
+				defaultValue() {
+					return expr(objectExpression([]));
+				},
+				copy(value, scope) {
+					const expression = read(value, scope);
+					if (expressionSkipsCopy(expression)) {
+						return expr(expression);
+					}
+					if (reifiedValueType.copy) {
+						throw new TypeError(`Copying dictionaries with non-simple values is not yet implemented!`);
+					}
+					return expr(callExpression(memberExpression(identifier("Object"), identifier("assign")), [objectExpression([]), expression]));
+				},
+			};
+		}
+		switch (reifiedKeyType.possibleRepresentations) {
+			case PossibleRepresentation.String:
+				return objectDictionaryImplementation();
+			case PossibleRepresentation.Boolean:
+				return objectDictionaryImplementation("Boolean");
+			case PossibleRepresentation.Number:
+				return objectDictionaryImplementation("Number");
+			default:
+				throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
+		}
+	},
+	"Collection": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+	]),
+};
+
+function optionalDefaultValue(type: Type) {
+	return isNestedOptional(type) ? arrayExpression([]) : nullLiteral();
 }
 
 function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier | ThisExpression): Statement {
@@ -201,11 +245,11 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 	"Swift.(file).Bool._getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
 	"Swift.(file).Bool.&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
 	"Swift.(file).Bool.||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
-	"Swift.(file).Optional.none": () => expr(nullLiteral()),
+	"Swift.(file).Optional.none": (scope, arg, type) => expr(optionalDefaultValue(type)),
 	"Swift.(file).Optional.==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
 	"Swift.(file).Optional.!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
 	"Swift.(file).Optional.flatMap": returnTodo,
-	"Swift.(file)._OptionalNilComparisonType.init(nilLiteral:)": wrapped(() => expr(nullLiteral())),
+	"Swift.(file)._OptionalNilComparisonType.init(nilLiteral:)": wrapped((scope, arg, type) => expr(optionalDefaultValue(type))),
 	"Swift.(file).Collection.count": returnLength,
 	"Swift.(file).Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
 	"Swift.(file).BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
@@ -218,7 +262,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 	"Swift.(file).Array.init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
 	"Swift.(file).Array.count": returnLength,
 	"Swift.(file).Array.subscript": {
-		get(scope, arg) {
+		get(scope, arg, type) {
 			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
 			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
 			return statements([
@@ -226,7 +270,7 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 				returnStatement(memberExpression(array, index, true)),
 			]);
 		},
-		set(scope, arg) {
+		set(scope, arg, type) {
 			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
 			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
 			const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
@@ -278,9 +322,14 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
 	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
 	"Swift.(file).Dictionary.subscript": {
-		get(scope, arg) {
+		get(scope, arg, type) {
 			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
 			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+			const resultType = returnType(type);
+			if (resultType.kind !== "optional") {
+				throw new Error(`Dictionary subscript must return an optional!`);
+			}
+			const value = copyValue(expr(memberExpression(dict, index, true)), resultType.type, scope);
 			return expr(conditionalExpression(
 				callExpression(
 					memberExpression(
@@ -292,11 +341,11 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 					),
 					[dict, index],
 				),
-				memberExpression(dict, index, true),
-				nullLiteral(),
+				isNestedOptional(resultType) ? arrayExpression([read(value, scope)]) : read(value, scope),
+				optionalDefaultValue(resultType),
 			));
 		},
-		set(scope, arg) {
+		set(scope, arg, type) {
 			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
 			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
 			const valueExpression = read(arg(2, "value"), scope);
@@ -317,3 +366,15 @@ export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder 
 	},
 	"Swift.(file).print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 };
+
+export function newScopeWithBuiltins(): Scope {
+	return {
+		name: "global",
+		declarations: Object.create(null),
+		types: Object.assign(Object.create(null), defaultTypes),
+		functions: Object.assign(Object.create(null), functions),
+		functionUsage: Object.create(null),
+		mapping: Object.create(null),
+		parent: undefined,
+	};
+}

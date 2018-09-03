@@ -1,9 +1,10 @@
 import { parse as parseAST, Property, Term } from "./ast";
-import { defaultValues as builtinDefaultValues, structTypes as builtinStructTypes } from "./builtins";
+import { newScopeWithBuiltins } from "./builtins";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
-import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newRootScope, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
+import { copyValue, defaultInstantiateType, field, Field, newClass, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, StructField, structField, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -23,7 +24,7 @@ function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArra
 	}
 }
 
-function getField(value: Value, field: StructField, scope: Scope) {
+function getField(value: Value, field: Field, scope: Scope) {
 	if (field.stored) {
 		return expr(memberExpression(read(value, scope), mangleName(field.name)));
 	} else {
@@ -78,11 +79,12 @@ function getProperty<T extends Property>(term: Term, key: string, checker: (prop
 	throw new Error(`Could not find ${key} in ${term.name}. Keys are ${Object.keys(props).join(", ")}`);
 }
 
-function extractMember(decl: string): [Type, string] {
+function extractMember(decl: string): string {
 	// TODO: Parse declarations correctly via PEG
 	const match = decl.match(/([^.]+?)( extension|)\.([^. ]+)(@|$| \[)/);
 	if (match && match.length === 5) {
-		return [parseType(match[1]), match[3]];
+		// return [parseType(match[1]), match[3]];
+		return match[3];
 	}
 	throw new Error(`Unable to parse member from declaration: ${decl}`);
 }
@@ -122,14 +124,6 @@ function expectLength<T extends any[]>(array: T, ...lengths: number[]) {
 	throw new Error(`Expected ${lengths.join(" or ")} items, but got ${array.length}`);
 }
 
-function isStored(field: StructField) {
-	return field.stored;
-}
-
-function storedFields(fields: StructField[]) {
-	return fields.filter(isStored);
-}
-
 function nameForDeclRefExpr(term: Term) {
 	if (hasOwnProperty(term.properties, "discriminator")) {
 		return getProperty(term, "discriminator", isString);
@@ -161,242 +155,12 @@ function requiresGetter(term: Term): boolean {
 	return getProperty(term, "readImpl", isString) !== "stored";
 }
 
+function returnUndef() {
+	return undefined;
+}
+
 export function compileTermToProgram(root: Term): Program {
-	const programScope = newRootScope();
-	const structTypes: typeof builtinStructTypes = Object.assign(Object.create(null), builtinStructTypes);
-	const defaultValues: typeof builtinDefaultValues = Object.assign(Object.create(null), builtinDefaultValues);
-	const classTypes: { [name: string]: StructField[] } = Object.create(null);
-
-	function typeRequiresCopy(type: Type): boolean {
-		switch (type.kind) {
-			case "name":
-				return hasOwnProperty(structTypes, type.name);
-			case "array":
-				return true;
-			case "modified":
-				return typeRequiresCopy(type.type);
-			case "dictionary":
-				return true;
-			case "tuple":
-				return true;
-			case "generic":
-				return typeRequiresCopy(type.base);
-			case "metatype":
-			case "function":
-				return false;
-			case "namespaced":
-				return typeRequiresCopy(type.type);
-			case "optional":
-				if (isNestedOptional(type)) {
-					return true;
-				}
-				return typeRequiresCopy(type.type);
-			default:
-				throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
-		}
-	}
-
-	function copyValue(value: Value, type: Type, scope: Scope): Value {
-		// if (value.kind === "direct" && value.ref.type === "Identifier" && Object.hasOwnProperty.call(scope.declarations, value.ref.name)) {
-		// 	return value;
-		// }
-		if (value.kind === "expression" && (value.expression.type === "ObjectExpression" || value.expression.type === "ArrayExpression" || value.expression.type === "CallExpression" || isLiteral(value.expression))) {
-			return value;
-		}
-		switch (type.kind) {
-			case "name":
-				if (hasOwnProperty(structTypes, type.name)) {
-					let usedFirst = false;
-					const onlyStored = storedFields(structTypes[type.name]);
-					switch (onlyStored.length) {
-						case 0:
-							// Empty structs should be passed through in case value has side effects
-							return value;
-						case 1:
-							// Unary structs are unwrapped
-							return copyValue(value, onlyStored[0].type, scope);
-						default:
-							// Binary and larger structs are copied field by field in order
-							const [first, after] = reuseExpression(read(value, scope), scope);
-							return expr(objectExpression(onlyStored.map((fieldLayout) => {
-								const identifier = usedFirst ? after : (usedFirst = true, first);
-								return objectProperty(mangleName(fieldLayout.name), read(copyValue(getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope), scope));
-							})));
-					}
-				}
-				return value;
-			case "array": {
-				const expression = read(value, scope);
-				if (expression.type === "ArrayExpression") {
-					return expr(expression);
-				}
-				if (typeRequiresCopy(type.type)) {
-					// Arrays of complex types are mapped using a generated copy function
-					const id = uniqueIdentifier(scope, "value");
-					const converter = functionExpression(undefined, [id], blockStatement([returnStatement(read(copyValue(expr(id), type.type, scope), scope))]));
-					return expr(callExpression(memberExpression(expression, identifier("map")), [converter]));
-				} else {
-					// Arrays of simple types are sliced
-					return expr(callExpression(memberExpression(expression, identifier("slice")), []));
-				}
-			}
-			case "modified":
-				return copyValue(value, type.type, scope);
-			case "dictionary":
-				// TODO: Support dictionary types
-				return value;
-			case "tuple":
-				switch (type.types.length) {
-					case 0:
-						// Empty tuples should be passed through in case value has side effects
-						return value;
-					case 1:
-						// Unary tuples are unwrapped
-						return copyValue(value, type.types[0], scope);
-					default:
-						const expression = read(value, scope);
-						if (expression.type === "ArrayExpression") {
-							return expr(expression);
-						}
-						// Binary and larger structs are copied
-						if (type.types.some(typeRequiresCopy)) {
-							// Tuples containing complex types need to be copied
-							const [first, after] = reuseExpression(expression, scope);
-							return expr(arrayExpression(type.types.map((t, i) => read(copyValue(expr(memberExpression(i ? after : first, numericLiteral(i), true)), t, scope), scope))));
-						} else {
-							// If all fields are simple, tuple can be sliced
-							return expr(callExpression(memberExpression(expression, identifier("slice")), []));
-						}
-				}
-				break;
-			case "generic":
-				// TODO: Support generic types
-				return value;
-			case "metatype":
-			case "function":
-				return value;
-			case "optional": {
-				if (isNestedOptional(type)) {
-					// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
-					if (typeRequiresCopy(type.type)) {
-						// Nested optional of a non-simple type
-						const [first, after] = reuseExpression(read(value, scope), scope);
-						return expr(conditionalExpression(
-							binaryExpression("===", memberExpression(first, identifier("length")), numericLiteral(0)),
-							arrayExpression([]),
-							read(copyValue(expr(after), type.type, scope), scope),
-						));
-					} else {
-						// Nested Optionals of simple value are sliced
-						return expr(callExpression(memberExpression(read(value, scope), identifier("slice")), []));
-					}
-				} else if (typeRequiresCopy(type.type)) {
-					// Optionals are copied by-value if non-null
-					const [first, after] = reuseExpression(read(value, scope), scope);
-					return expr(conditionalExpression(
-						binaryExpression("===", first, nullLiteral()),
-						nullLiteral(),
-						read(copyValue(expr(after), type.type, scope), scope),
-					));
-				} else {
-					// Optionals of simple value are passed through
-					return value;
-				}
-			}
-			case "namespaced":
-				return copyValue(value, type.type, scope);
-			default:
-				throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
-		}
-	}
-
-	function storeValue(dest: Identifier | MemberExpression, value: Value, type: Type, scope: Scope): Expression[] {
-		switch (type.kind) {
-			case "name":
-				if (hasOwnProperty(structTypes, type.name)) {
-					const onlyStored = storedFields(structTypes[type.name]);
-					switch (onlyStored.length) {
-						case 0:
-						case 1:
-							break;
-						default:
-							const [first, after] = reuseExpression(read(value, scope), scope);
-							let usedFirst = false;
-							return onlyStored.reduce((existing, fieldLayout) => {
-								const identifier = usedFirst ? after : (usedFirst = true, first);
-								return concat(existing, storeValue(mangleName(fieldLayout.name), getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope));
-							}, [] as Expression[]);
-					}
-				}
-				break;
-			default:
-				// TODO: support other types
-				break;
-		}
-		return [assignmentExpression("=", dest, read(copyValue(value, type, scope), scope))];
-	}
-
-	function returnUndef() {
-		return undefined;
-	}
-
-	function defaultInstantiateType(type: Type, consume: (fieldName: string) => Expression | undefined): Expression {
-		switch (type.kind) {
-			case "name": {
-				if (hasOwnProperty(defaultValues, type.name)) {
-					return defaultValues[type.name];
-				}
-				if (hasOwnProperty(structTypes, type.name)) {
-					const onlyStored = storedFields(structTypes[type.name]);
-					if (onlyStored.length !== 0) {
-						return objectExpression(onlyStored.map((field: StructField) => {
-							const name = field.name;
-							const value = consume(name);
-							return objectProperty(mangleName(name), value ? value : defaultInstantiateType(field.type, returnUndef));
-						}));
-					}
-				}
-				return undefinedLiteral;
-			}
-			case "array": {
-				return arrayExpression([]);
-			}
-			case "modified": {
-				return defaultInstantiateType(type.type, returnUndef);
-			}
-			case "dictionary": {
-				// TODO: Support dictionary types
-				return undefinedLiteral;
-			}
-			case "tuple": {
-				switch (type.types.length) {
-					case 0:
-						return undefinedLiteral;
-					case 1:
-						return defaultInstantiateType(type.types[0], returnUndef);
-					default:
-						return arrayExpression(type.types.map((innerType) => defaultInstantiateType(innerType, returnUndef)));
-				}
-			}
-			case "generic": {
-				// TODO: Support generic types
-				return undefinedLiteral;
-			}
-			case "metatype":
-			case "function": {
-				// Not even clear what should be done here
-				return undefinedLiteral;
-			}
-			case "optional": {
-				return nullLiteral();
-			}
-			case "namespaced": {
-				return defaultInstantiateType(type.type, returnUndef);
-			}
-			default:
-				throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
-		}
-	}
+	const programScope = newScopeWithBuiltins();
 
 	function translatePattern(term: Term, value: Expression, scope: Scope): Expression {
 		switch (term.name) {
@@ -465,22 +229,6 @@ export function compileTermToProgram(root: Term): Program {
 		}
 	}
 
-	function getStructOrClassForType(type: Type) {
-		switch (type.kind) {
-			case "name":
-				if (hasOwnProperty(structTypes, type.name)) {
-					return structTypes[type.name];
-				}
-				if (hasOwnProperty(classTypes, type.name)) {
-					return classTypes[type.name];
-				}
-				throw new TypeError(`Could not find type ${stringifyType(type)}`);
-			default:
-				throw new TypeError(`Type is not a struct: ${stringifyType(type)}`);
-		}
-	}
-
-
 	function translateExpression(term: Term, scope: Scope): Expression {
 		return read(translateTermToValue(term, scope), scope);
 	}
@@ -489,8 +237,10 @@ export function compileTermToProgram(root: Term): Program {
 		switch (term.name) {
 			case "member_ref_expr": {
 				expectLength(term.children, 1);
-				const [type, member] = extractMember(getProperty(term, "decl", isString));
-				for (const field of getStructOrClassForType(type)) {
+				const child = term.children[0];
+				const type = getType(child);
+				const member = extractMember(getProperty(term, "decl", isString));
+				for (const field of reifyType(type, scope).fields) {
 					if (field.name === member) {
 						return getField(translateTermToValue(term.children[0], scope), field, scope);
 					}
@@ -665,7 +415,7 @@ export function compileTermToProgram(root: Term): Program {
 					switch (parseInt(source, 10)) {
 						case -1: { // DefaultInitialize
 							if (valueTypes.length) {
-								return expr(defaultInstantiateType(valueTypes.shift()!, returnUndef));
+								return defaultInstantiateType(valueTypes.shift()!, scope, returnUndef);
 							} else {
 								throw new Error(`Tried to default instantiate more types than we have in the tuple`);
 							}
@@ -757,12 +507,12 @@ export function compileTermToProgram(root: Term): Program {
 							if (isConstructor) {
 								const typeOfResult = returnType(returnType(getType(term)));
 								const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
-								const defaultInstantiation = defaultInstantiateType(typeOfResult, (fieldName) => {
+								const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, (fieldName) => {
 									if (body.length && body[0].name === "assign_expr") {
 										const children = body[0].children;
 										expectLength(children, 2);
 										if (children[0].name === "member_ref_expr") {
-											const [fieldType, member] = extractMember(getProperty(children[0], "decl", isString));
+											const member = extractMember(getProperty(children[0], "decl", isString));
 											if (member === fieldName) {
 												body.shift();
 												return translateExpression(children[1], childScope);
@@ -772,17 +522,17 @@ export function compileTermToProgram(root: Term): Program {
 									return undefined;
 								});
 								if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-									return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
+									return statements(emitScope(childScope, [returnStatement(read(defaultInstantiation, scope))]));
 								}
-								addVariable(childScope, selfMapping, defaultInstantiation);
+								addVariable(childScope, selfMapping, read(defaultInstantiation, scope));
 							}
 							return statements(emitScope(childScope, translateAllStatements(body, childScope)));
 						} else {
 							if (isConstructor) {
 								const typeOfResult = returnType(returnType(getType(term)));
 								const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
-								const defaultInstantiation = defaultInstantiateType(typeOfResult, () => undefined);
-								return statements(emitScope(childScope, [returnStatement(defaultInstantiation)]));
+								const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, () => undefined);
+								return statements(emitScope(childScope, [returnStatement(read(defaultInstantiation, scope))]));
 							} else {
 								return statements([]);
 							}
@@ -831,7 +581,7 @@ export function compileTermToProgram(root: Term): Program {
 						scope.declarations[name.name] = exportNamedDeclaration(scope.declarations[name.name], []);
 					}
 				} else {
-					const defaultInstantiation = defaultInstantiateType(getType(term), returnUndef);
+					const defaultInstantiation = read(defaultInstantiateType(getType(term), scope, returnUndef), scope);
 					if (term.properties.access === "public") {
 						addExternalVariable(scope, name, defaultInstantiation);
 					} else {
@@ -880,31 +630,31 @@ export function compileTermToProgram(root: Term): Program {
 				return typeof cases !== "undefined" ? [declaration, cases] : [declaration];
 			}
 			case "enum_decl": {
-				console.log(term);
+				// console.log(term);
 				return emptyStatements;
 			}
 			case "struct_decl": {
 				expectLength(term.args, 1);
 				let statements: Statement[] = [];
-				const layout: StructField[] = [];
-				structTypes[term.args[0]] = layout;
+				const layout: Field[] = [];
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
 						if (requiresGetter(child)) {
 							expectLength(child.children, 1);
-							layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
+							layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
 								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 							statements = concat(statements, translateStatement(child.children[0], scope));
 						} else {
-							layout.push(structField(child.args[0], getType(child)));
+							layout.push(field(child.args[0], reifyType(getType(child), scope)));
 						}
 					} else {
 						statements = concat(statements, translateStatement(child, scope));
 					}
 				}
+				scope.types[term.args[0]] = () => struct(layout);
 				return statements;
 			}
 			case "pattern_binding_decl": {
@@ -918,24 +668,24 @@ export function compileTermToProgram(root: Term): Program {
 			}
 			case "class_decl": {
 				expectLength(term.args, 1);
-				const layout: StructField[] = [];
-				classTypes[term.args[0]] = layout;
+				const layout: Field[] = [];
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
 						if (requiresGetter(child)) {
 							// TODO: Implement getters/setters
-							layout.push(structField(child.args[0], getType(child)));
+							layout.push(field(child.args[0], reifyType(getType(child), scope)));
 							// expectLength(child.children, 1);
 							// layout.push(structField(child.args[0], getType(child), (value: Value, innerScope: Scope) => {
 							// 	const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							// 	return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							// }));
 						} else {
-							layout.push(structField(child.args[0], getType(child)));
+							layout.push(field(child.args[0], reifyType(getType(child), scope)));
 						}
 					}
 				}
+				scope.types[term.args[0]] = () => newClass(layout);
 				// TODO: Fill in body
 				return [classDeclaration(mangleName(term.args[0]), undefined, classBody([]), [])];
 			}

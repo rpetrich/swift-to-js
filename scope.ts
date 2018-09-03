@@ -1,13 +1,16 @@
 import { Declaration, exportNamedDeclaration, Expression, identifier, Identifier, Statement, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
+import { ReifiedType } from "./reified";
+import { Type } from "./types";
 
 export const undefinedLiteral = identifier("undefined");
 
 export interface Scope {
 	name: string;
 	declarations: { [name: string]: Declaration | undefined };
-	functions: { [name: string]: FunctionBuilder | GetterSetterBuilder };
+	types: { [name: string]: (type: Type, scope: Scope) => ReifiedType };
+	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: ThisExpression | Identifier };
 	parent: Scope | undefined;
@@ -37,21 +40,11 @@ export function rootScope(scope: Scope) {
 	return result;
 }
 
-export function newRootScope(): Scope {
-	return {
-		name: "global",
-		declarations: Object.create(null),
-		functions: Object.assign(Object.create(null), builtinFunctions),
-		functionUsage: Object.create(null),
-		mapping: Object.create(null),
-		parent: undefined,
-	};
-}
-
 export function newScope(name: string, parent: Scope): Scope {
 	return {
 		name,
 		declarations: Object.create(null),
+		types: parent.types,
 		functions: parent.functions,
 		functionUsage: parent.functionUsage,
 		mapping: Object.create(null),
