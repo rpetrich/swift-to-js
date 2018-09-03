@@ -198,7 +198,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							}),
 							field("first", reifyType({ kind: "optional", type: keyType }, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
-								return expr(conditionalExpression(memberExpression(first, identifier("length")), after, nullLiteral()));
+								return expr(conditionalExpression(memberExpression(first, identifier("length")), memberExpression(after, numericLiteral(0), true), nullLiteral()));
 							}),
 							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
