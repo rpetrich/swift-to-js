@@ -1,6 +1,6 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { newScopeWithBuiltins } from "./builtins";
-import { parse as parseDeclaration } from "./declaration";
+import { Declaration, parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
@@ -81,6 +81,27 @@ function getProperty<T extends Property>(term: Term, key: string, checker: (prop
 	throw new Error(`Could not find ${key} in ${term.name}. Keys are ${Object.keys(props).join(", ")}`);
 }
 
+function constructTypeFromNames(baseType: string, typeParameters?: ReadonlyArray<string>): Type {
+	if (typeof typeParameters === "undefined") {
+		return parseType(baseType);
+	}
+	switch (baseType) {
+		case "Optional":
+			expectLength(typeParameters, 1);
+			return { kind: "optional", type: parseType(typeParameters[0]) };
+		case "Tuple":
+			return { kind: "tuple", types: typeParameters.map((type) => parseType(type)) };
+		case "Array":
+			expectLength(typeParameters, 1);
+			return { kind: "array", type: parseType(typeParameters[0]) };
+		case "Dictionary":
+			expectLength(typeParameters, 2);
+			return { kind: "dictionary", keyType: parseType(typeParameters[0]), valueType: parseType(typeParameters[1]) };
+		default:
+			return { kind: "generic", base: parseType(baseType), arguments: typeParameters.map((type) => parseType(type)) };
+	}
+}
+
 function extractReference(term: Term, scope: Scope, type?: Type): Value {
 	const decl = nameForDeclRefExpr(term);
 	const declaration = parseDeclaration(decl);
@@ -94,9 +115,10 @@ function extractReference(term: Term, scope: Scope, type?: Type): Value {
 		if (type === undefined) {
 			type = getType(term);
 		}
-		const functions = declaration.type ? reifyType(declaration.type, scope).functions : scope.functions;
+		const functionType = declaration.type ? constructTypeFromNames(declaration.type, declaration.substitutions) : undefined;
+		const functions = functionType ? reifyType(functionType, scope).functions : scope.functions;
 		if (Object.hasOwnProperty.call(functions, declaration.member)) {
-			return functionValue(declaration.member, declaration.type, type || getType(term));
+			return functionValue(declaration.member, functionType, type);
 		}
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);

@@ -85,11 +85,11 @@ export function boxed(contents: Value): BoxedValue {
 export interface FunctionValue {
 	kind: "function";
 	name: string;
-	parentType: string | undefined;
+	parentType: Type | undefined;
 	type: Type;
 }
 
-export function functionValue(name: string, parentType: string | undefined, type: Type): FunctionValue {
+export function functionValue(name: string, parentType: Type | undefined, type: Type): FunctionValue {
 	return { kind: "function", name, parentType, type };
 }
 
