@@ -1,5 +1,5 @@
-import { FunctionBuilder, GetterSetterBuilder, noinline, returnType, wrapped } from "./functions";
-import { copyValue, expressionSkipsCopy, field, Field, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
+import { noinline, returnType, wrapped } from "./functions";
+import { copyValue, expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { expectLength } from "./utils";
@@ -34,11 +34,83 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 }
 
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType } = {
-	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false))),
-	"Int": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
+		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
+		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
+		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
+		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
+	}),
+	"SignedNumeric": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
+	}),
+	"Int": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+		"+": binaryBuiltin("+"),
+		"-": binaryBuiltin("-"),
+		"*": binaryBuiltin("*"),
+		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
+		"%": binaryBuiltin("%"),
+		"<": binaryBuiltin("<"),
+		">": binaryBuiltin(">"),
+		"<=": binaryBuiltin("<="),
+		">=": binaryBuiltin(">="),
+		"&": binaryBuiltin("&"),
+		"|": binaryBuiltin("|"),
+		"^": binaryBuiltin("^"),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+		"+=": assignmentBuiltin("+="),
+		"-=": assignmentBuiltin("-="),
+		"*=": assignmentBuiltin("*="),
+	}),
 	"Int64": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
-	"Float": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
-	"Double": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
+	"FloatingPoint": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+		"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
+	}),
+	"Float": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+		"+": binaryBuiltin("+"),
+		"-": binaryBuiltin("-"),
+		"*": binaryBuiltin("*"),
+		"/": binaryBuiltin("/"),
+		"%": binaryBuiltin("%"),
+		"<": binaryBuiltin("<"),
+		">": binaryBuiltin(">"),
+		"<=": binaryBuiltin("<="),
+		">=": binaryBuiltin(">="),
+		"&": binaryBuiltin("&"),
+		"|": binaryBuiltin("|"),
+		"^": binaryBuiltin("^"),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+		"+=": assignmentBuiltin("+="),
+		"-=": assignmentBuiltin("-="),
+		"*=": assignmentBuiltin("*="),
+		"/=": assignmentBuiltin("/="),
+	}),
+	"Double": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+		"+": binaryBuiltin("+"),
+		"-": binaryBuiltin("-"),
+		"*": binaryBuiltin("*"),
+		"/": binaryBuiltin("/"),
+		"%": binaryBuiltin("%"),
+		"<": binaryBuiltin("<"),
+		">": binaryBuiltin(">"),
+		"<=": binaryBuiltin("<="),
+		">=": binaryBuiltin(">="),
+		"&": binaryBuiltin("&"),
+		"|": binaryBuiltin("|"),
+		"^": binaryBuiltin("^"),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+		"+=": assignmentBuiltin("+="),
+		"-=": assignmentBuiltin("-="),
+		"*=": assignmentBuiltin("*="),
+		"/=": assignmentBuiltin("/="),
+	}),
 	"String": (globalScope, typeParameters) => {
 		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -60,6 +132,11 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			field("utf16", UTF16View, (value) => value),
 			field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
 		], {
+			"init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0)], scope)),
+			"+": binaryBuiltin("+"),
+			"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
+			"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
+		}, {
 			"UnicodeScalarView": () => UnicodeScalarView,
 			"UTF16View": () => UTF16View,
 			"UTF8View": () => UTF8View,
@@ -71,6 +148,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		if (typeParameters[0].kind === "optional") {
 			return {
 				fields: [],
+				functions: {
+					"none": (scope, arg, type) => expr(arrayExpression([])),
+					"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
+					"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
+					"flatMap": returnTodo,
+				},
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(arrayExpression([]));
@@ -98,6 +181,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		} else {
 			return {
 				fields: [],
+				functions: {
+					"none": (scope, arg, type) => expr(nullLiteral()),
+					"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
+					"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
+					"flatMap": returnTodo,
+				},
 				possibleRepresentations: PossibleRepresentation.Null | reified.possibleRepresentations,
 				defaultValue() {
 					return expr(nullLiteral());
@@ -131,6 +220,29 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			fields: [
 				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 			],
+			functions: {
+				init: wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
+				count: returnLength,
+				subscript: {
+					get(scope, arg, type) {
+						const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
+						const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+						return statements([
+							arrayBoundsCheck(array, index),
+							returnStatement(memberExpression(array, index, true)),
+						]);
+					},
+					set(scope, arg, type) {
+						const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
+						const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+						const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
+						return statements([
+							arrayBoundsCheck(array, index),
+							returnStatement(assignmentExpression("=", memberExpression(array, index, true), value)),
+						]);
+					},
+				},
+			},
 			possibleRepresentations: PossibleRepresentation.Array,
 			defaultValue() {
 				return expr(arrayExpression([]));
@@ -167,6 +279,51 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 						return expr(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]));
 					}),
 				],
+				functions: {
+					subscript: {
+						get(scope, arg, type) {
+							const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
+							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+							const resultType = returnType(type);
+							if (resultType.kind !== "optional") {
+								throw new Error(`Dictionary subscript must return an optional!`);
+							}
+							const value = copyValue(expr(memberExpression(dict, index, true)), resultType.type, scope);
+							return expr(conditionalExpression(
+								callExpression(
+									memberExpression(
+										memberExpression(
+											identifier("Object"),
+											identifier("hasOwnProperty"),
+										),
+										identifier("call"),
+									),
+									[dict, index],
+								),
+								isNestedOptional(resultType) ? arrayExpression([read(value, scope)]) : read(value, scope),
+								optionalDefaultValue(resultType),
+							));
+						},
+						set(scope, arg, type) {
+							const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
+							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+							const valueExpression = read(arg(2, "value"), scope);
+							const remove = unaryExpression("delete", memberExpression(dict, index, true));
+							if (valueExpression.type === "NullLiteral") {
+								return expr(remove);
+							}
+							if (isLiteral(valueExpression)) {
+								return expr(assignmentExpression("=", memberExpression(dict, index, true), valueExpression));
+							}
+							const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
+							return expr(conditionalExpression(
+								binaryExpression("!==", hoistedValue, nullLiteral()),
+								assignmentExpression("=", memberExpression(dict, index, true), hoistedValue),
+								remove,
+							));
+						},
+					},
+				},
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue() {
 					return expr(objectExpression([]));
@@ -242,155 +399,19 @@ function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier 
 	);
 }
 
-export const functions: { [name: string]: FunctionBuilder | GetterSetterBuilder } = {
+export const functions: FunctionMap = {
 	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [stringLiteral("Unexpectedly found nil while unwrapping an Optional value")]))])),
-	"Swift.(file).Int.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-	"Swift.(file).Int.+": binaryBuiltin("+"),
-	"Swift.(file).Int.-": binaryBuiltin("-"),
-	"Swift.(file).Int.*": binaryBuiltin("*"),
-	"Swift.(file).Int./": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
-	"Swift.(file).Int.%": binaryBuiltin("%"),
-	"Swift.(file).Int.<": binaryBuiltin("<"),
-	"Swift.(file).Int.>": binaryBuiltin(">"),
-	"Swift.(file).Int.<=": binaryBuiltin("<="),
-	"Swift.(file).Int.>=": binaryBuiltin(">="),
-	"Swift.(file).Int.&": binaryBuiltin("&"),
-	"Swift.(file).Int.|": binaryBuiltin("|"),
-	"Swift.(file).Int.^": binaryBuiltin("^"),
-	"Swift.(file).Int.==": binaryBuiltin("==="),
-	"Swift.(file).Int.!=": binaryBuiltin("!=="),
-	"Swift.(file).Int.+=": assignmentBuiltin("+="), // TODO: Fix to mutate
-	"Swift.(file).Int.-=": assignmentBuiltin("-="), // TODO: Fix to mutate
-	"Swift.(file).Int.*=": assignmentBuiltin("*="), // TODO: Fix to mutate
-	"Swift.(file).SignedNumeric.-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
-	"Swift.(file).Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
+	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
 		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
-	"Swift.(file).Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
-	"Swift.(file).Bool.init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-	"Swift.(file).Bool._getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
-	"Swift.(file).Bool.&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
-	"Swift.(file).Bool.||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
-	"Swift.(file).Optional.none": (scope, arg, type) => expr(optionalDefaultValue(type)),
-	"Swift.(file).Optional.==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
-	"Swift.(file).Optional.!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
-	"Swift.(file).Optional.flatMap": returnTodo,
-	"Swift.(file)._OptionalNilComparisonType.init(nilLiteral:)": wrapped((scope, arg, type) => expr(optionalDefaultValue(type))),
-	"Swift.(file).Collection.count": returnLength,
-	"Swift.(file).Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
-	"Swift.(file).BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
-	"Swift.(file).String.init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0)], scope)),
-	"Swift.(file).String.+": binaryBuiltin("+"),
-	"Swift.(file).String.lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
-	"Swift.(file).String.uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
-	"Swift.(file).??": returnTodo,
-	"Swift.(file).~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
-	"Swift.(file).Array.init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
-	"Swift.(file).Array.count": returnLength,
-	"Swift.(file).Array.subscript": {
-		get(scope, arg, type) {
-			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
-			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-			return statements([
-				arrayBoundsCheck(array, index),
-				returnStatement(memberExpression(array, index, true)),
-			]);
-		},
-		set(scope, arg, type) {
-			const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
-			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-			const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
-			return statements([
-				arrayBoundsCheck(array, index),
-				returnStatement(assignmentExpression("=", memberExpression(array, index, true), value)),
-			]);
-		},
-	},
-	"Swift.(file).Double.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-	"Swift.(file).Double.+": binaryBuiltin("+"),
-	"Swift.(file).Double.-": binaryBuiltin("-"),
-	"Swift.(file).Double.*": binaryBuiltin("*"),
-	"Swift.(file).Double./": binaryBuiltin("/"),
-	"Swift.(file).Double.%": binaryBuiltin("%"),
-	"Swift.(file).Double.<": binaryBuiltin("<"),
-	"Swift.(file).Double.>": binaryBuiltin(">"),
-	"Swift.(file).Double.<=": binaryBuiltin("<="),
-	"Swift.(file).Double.>=": binaryBuiltin(">="),
-	"Swift.(file).Double.&": binaryBuiltin("&"),
-	"Swift.(file).Double.|": binaryBuiltin("|"),
-	"Swift.(file).Double.^": binaryBuiltin("^"),
-	"Swift.(file).Double.==": binaryBuiltin("==="),
-	"Swift.(file).Double.!=": binaryBuiltin("!=="),
-	"Swift.(file).Double.+=": assignmentBuiltin("+="),
-	"Swift.(file).Double.-=": assignmentBuiltin("-="),
-	"Swift.(file).Double.*=": assignmentBuiltin("*="),
-	"Swift.(file).Double./=": assignmentBuiltin("/="),
-	"Swift.(file).Float.init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-	"Swift.(file).Float.+": binaryBuiltin("+"),
-	"Swift.(file).Float.-": binaryBuiltin("-"),
-	"Swift.(file).Float.*": binaryBuiltin("*"),
-	"Swift.(file).Float./": binaryBuiltin("/"),
-	"Swift.(file).Float.%": binaryBuiltin("%"),
-	"Swift.(file).Float.<": binaryBuiltin("<"),
-	"Swift.(file).Float.>": binaryBuiltin(">"),
-	"Swift.(file).Float.<=": binaryBuiltin("<="),
-	"Swift.(file).Float.>=": binaryBuiltin(">="),
-	"Swift.(file).Float.&": binaryBuiltin("&"),
-	"Swift.(file).Float.|": binaryBuiltin("|"),
-	"Swift.(file).Float.^": binaryBuiltin("^"),
-	"Swift.(file).Float.==": binaryBuiltin("==="),
-	"Swift.(file).Float.!=": binaryBuiltin("!=="),
-	"Swift.(file).Float.+=": assignmentBuiltin("+="),
-	"Swift.(file).Float.-=": assignmentBuiltin("-="),
-	"Swift.(file).Float.*=": assignmentBuiltin("*="),
-	"Swift.(file).Float./=": assignmentBuiltin("/="),
-	"Swift.(file).FloatingPoint.==": binaryBuiltin("==="),
-	"Swift.(file).FloatingPoint.!=": binaryBuiltin("!=="),
-	"Swift.(file).FloatingPoint.squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
-	"Swift.(file).Dictionary.subscript": {
-		get(scope, arg, type) {
-			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
-			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-			const resultType = returnType(type);
-			if (resultType.kind !== "optional") {
-				throw new Error(`Dictionary subscript must return an optional!`);
-			}
-			const value = copyValue(expr(memberExpression(dict, index, true)), resultType.type, scope);
-			return expr(conditionalExpression(
-				callExpression(
-					memberExpression(
-						memberExpression(
-							identifier("Object"),
-							identifier("hasOwnProperty"),
-						),
-						identifier("call"),
-					),
-					[dict, index],
-				),
-				isNestedOptional(resultType) ? arrayExpression([read(value, scope)]) : read(value, scope),
-				optionalDefaultValue(resultType),
-			));
-		},
-		set(scope, arg, type) {
-			const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
-			const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-			const valueExpression = read(arg(2, "value"), scope);
-			const remove = unaryExpression("delete", memberExpression(dict, index, true));
-			if (valueExpression.type === "NullLiteral") {
-				return expr(remove);
-			}
-			if (isLiteral(valueExpression)) {
-				return expr(assignmentExpression("=", memberExpression(dict, index, true), valueExpression));
-			}
-			const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
-			return expr(conditionalExpression(
-				binaryExpression("!==", hoistedValue, nullLiteral()),
-				assignmentExpression("=", memberExpression(dict, index, true), hoistedValue),
-				remove,
-			));
-		},
-	},
-	"Swift.(file).print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
+	"Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
+	"_OptionalNilComparisonType.init(nilLiteral:)": wrapped((scope, arg, type) => expr(optionalDefaultValue(type))),
+	"Collection.count": returnLength,
+	"Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
+	"BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
+	"??": returnTodo,
+	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
+	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 };
 
 export function newScopeWithBuiltins(): Scope {

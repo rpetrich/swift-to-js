@@ -1,3 +1,4 @@
+import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { expr, read, reuseExpression, undefinedValue, Value } from "./values";
@@ -19,6 +20,7 @@ export enum PossibleRepresentation {
 
 export interface ReifiedType {
 	fields: ReadonlyArray<Field>;
+	functions: FunctionMap;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	defaultValue(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
@@ -28,6 +30,10 @@ export interface ReifiedType {
 
 export interface TypeMap {
 	[name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType;
+}
+
+export interface FunctionMap {
+	[name: string]: FunctionBuilder | GetterSetterBuilder;
 }
 
 export type Field = {
@@ -48,11 +54,13 @@ function representationForFields(storedFields: ReadonlyArray<Field>) {
 
 const emptyTypes: ReadonlyArray<Type> = [];
 const emptyFields: ReadonlyArray<Field> = [];
+const noFunctions: Readonly<FunctionMap> = {};
 const noInnerTypes: Readonly<TypeMap> = {};
 
-export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
+		functions,
 		possibleRepresentations,
 		defaultValue() {
 			return defaultValue;
@@ -61,9 +69,10 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 	};
 }
 
-export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes) {
+export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		fields,
+		functions,
 		possibleRepresentations: type.possibleRepresentations,
 		defaultValue: type.defaultValue,
 		copy: type.copy,
@@ -72,12 +81,13 @@ export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, i
 	};
 }
 
-export function struct(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	const onlyStored = storedFields(fields);
 	switch (onlyStored.length) {
 		case 0:
 			return {
 				fields,
+				functions,
 				possibleRepresentations: PossibleRepresentation.Undefined,
 				defaultValue() {
 					return undefinedValue;
@@ -86,10 +96,11 @@ export function struct(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMa
 			};
 		case 1:
 			// TODO: Map fields appropriately on unary structs
-			return inheritLayout(onlyStored[0].type, fields, innerTypes);
+			return inheritLayout(onlyStored[0].type, fields, {}, innerTypes);
 		default:
 			return {
 				fields,
+				functions,
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue(scope, consume) {
 					return expr(objectExpression(onlyStored.map((field) => {
@@ -124,9 +135,10 @@ export function struct(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMa
 	}
 }
 
-export function newClass(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
+		functions,
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue() {
 			throw new Error(`Cannot default instantiate a class!`);
@@ -226,6 +238,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 				default:
 					return {
 						fields: [],
+						functions: noFunctions,
 						possibleRepresentations: PossibleRepresentation.Array,
 						defaultValue(innerScope) {
 							return expr(arrayExpression(reifiedTypes.map((inner) => read(inner.defaultValue(innerScope, alwaysUndefined), innerScope))));

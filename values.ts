@@ -1,6 +1,7 @@
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
+import { reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
 
@@ -84,11 +85,12 @@ export function boxed(contents: Value): BoxedValue {
 export interface FunctionValue {
 	kind: "function";
 	name: string;
+	parentType: string | undefined;
 	type: Type;
 }
 
-export function functionValue(name: string, type: Type): FunctionValue {
-	return { kind: "function", name, type };
+export function functionValue(name: string, parentType: string | undefined, type: Type): FunctionValue {
+	return { kind: "function", name, parentType, type };
 }
 
 
@@ -160,7 +162,8 @@ export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
 		case "function":
-			return insertFunction(value.name, scope, value.type);
+			const functions = typeof value.parentType !== "undefined" ? reifyType(value.parentType, scope) : scope.functions;
+			return insertFunction(value.name, scope, value.type, scope.functions[value.name]);
 		case "tuple":
 			switch (value.values.length) {
 				case 0:
@@ -207,8 +210,9 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 	};
 	switch (target.kind) {
 		case "function":
-			if (Object.hasOwnProperty.call(scope.functions, target.name)) {
-				const fn = scope.functions[target.name];
+			const functions = typeof target.parentType !== "undefined" ? reifyType(target.parentType, scope).functions : scope.functions;
+			if (Object.hasOwnProperty.call(functions, target.name)) {
+				const fn = functions[target.name];
 				switch (type) {
 					case "call":
 						if (typeof fn !== "function") {
@@ -225,7 +229,7 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 				if (type !== "call") {
 					throw new Error(`Unable to call a ${type}ter on a function!`);
 				}
-				return call(expr(insertFunction(target.name, scope, target.type)), thisArgument, args, scope);
+				return call(expr(insertFunction(target.name, scope, target.type, functions[target.name])), thisArgument, args, scope);
 			}
 		case "callable":
 			if (type !== "call") {

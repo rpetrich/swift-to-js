@@ -1,7 +1,8 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { newScopeWithBuiltins } from "./builtins";
+import { parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
-import { copyValue, defaultInstantiateType, field, Field, newClass, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { expectLength } from "./utils";
@@ -80,39 +81,25 @@ function getProperty<T extends Property>(term: Term, key: string, checker: (prop
 	throw new Error(`Could not find ${key} in ${term.name}. Keys are ${Object.keys(props).join(", ")}`);
 }
 
-function extractMember(decl: string): string {
-	// TODO: Parse declarations correctly via PEG
-	const match = decl.match(/([^.]+?)( extension|)\.([^. ]+)(@|$| \[)/);
-	if (match && match.length === 5) {
-		// return [parseType(match[1]), match[3]];
-		return match[3];
-	}
-	throw new Error(`Unable to parse member from declaration: ${decl}`);
-}
-
 function extractReference(term: Term, scope: Scope, type?: Type): Value {
-	// TODO: Parse declarations correctly via PEG
 	const decl = nameForDeclRefExpr(term);
-	const match = decl.match(/\.([^.]+)(@)/);
-	if (match && match.length === 3) {
-		const extracted = match[1];
-		if (Object.hasOwnProperty.call(scope.functions, extracted)) {
-			return functionValue(extracted, type || getType(term));
-		}
-		if (extracted === "$match") {
+	const declaration = parseDeclaration(decl);
+	if (typeof declaration.local === "string") {
+		if (declaration.local === "$match") {
 			return variable(identifier("$match"));
 		}
-		return variable(lookup(extracted, scope));
+		return variable(lookup(declaration.local, scope));
 	}
-	const specializationStripped = decl.replace(/ \[.*/, "");
-	if (hasOwnProperty(scope.functions, specializationStripped)) {
-		return functionValue(specializationStripped, type || getType(term));
+	if (typeof declaration.member === "string") {
+		if (type === undefined) {
+			type = getType(term);
+		}
+		const functions = declaration.type ? reifyType(declaration.type, scope).functions : scope.functions;
+		if (Object.hasOwnProperty.call(functions, declaration.member)) {
+			return functionValue(declaration.member, declaration.type, type || getType(term));
+		}
 	}
-	const extensionStripped = specializationStripped.replace(/\b extension\./, ".");
-	if (hasOwnProperty(scope.functions, extensionStripped)) {
-		return functionValue(extensionStripped, type || getType(term));
-	}
-	throw new Error(`Unable to parse declaration: ${decl}`);
+	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
 }
 
 function nameForDeclRefExpr(term: Term) {
@@ -230,7 +217,11 @@ export function compileTermToProgram(root: Term): Program {
 				expectLength(term.children, 1);
 				const child = term.children[0];
 				const type = getType(child);
-				const member = extractMember(getProperty(term, "decl", isString));
+				const decl = getProperty(term, "decl", isString);
+				const { member } = parseDeclaration(decl);
+				if (typeof member !== "string") {
+					throw new TypeError(`Expected a member expression when parsing declaration: ${decl}`);
+				}
 				for (const field of reifyType(type, scope).fields) {
 					if (field.name === member) {
 						return getField(translateTermToValue(term.children[0], scope), field, scope);
@@ -434,7 +425,7 @@ export function compileTermToProgram(root: Term): Program {
 				const value = translateTermToValue(term.children[0], scope);
 				const [first, after] = reuseExpression(read(value, scope), scope);
 				// TODO: Optimize some cases where we can prove it to be a .some
-				const failed = read(call(functionValue("Swift.(swift-to-js).forceUnwrapFailed()", parseType("() -> ()")), undefinedValue, [], scope), scope);
+				const failed = read(call(functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, parseType("() throws -> ()")), undefinedValue, [], scope), scope);
 				if (isNestedOptional(getType(term.children[0]))) {
 					return expr(conditionalExpression(
 						binaryExpression("!==", memberExpression(first, identifier("length")), numericLiteral(0)),
@@ -460,16 +451,16 @@ export function compileTermToProgram(root: Term): Program {
 		}
 	}
 
-	function translateAllStatements(terms: Term[], scope: Scope): Statement[] {
+	function translateAllStatements(terms: Term[], scope: Scope, functions: FunctionMap): Statement[] {
 		return terms.reduce((statements: Statement[], term: Term) => {
-			return concat(statements, translateStatement(term, scope));
+			return concat(statements, translateStatement(term, scope, functions));
 		}, emptyStatements);
 	}
 
-	function translateStatement(term: Term, scope: Scope): Statement[] {
+	function translateStatement(term: Term, scope: Scope, functions: FunctionMap): Statement[] {
 		switch (term.name) {
 			case "source_file": {
-				return translateAllStatements(term.children, scope);
+				return translateAllStatements(term.children, scope, functions);
 			}
 			case "accessor_decl":
 				if (Object.hasOwnProperty.call(term.properties, "materializeForSet_for")) {
@@ -503,8 +494,7 @@ export function compileTermToProgram(root: Term): Program {
 										const children = body[0].children;
 										expectLength(children, 2);
 										if (children[0].name === "member_ref_expr") {
-											const member = extractMember(getProperty(children[0], "decl", isString));
-											if (member === fieldName) {
+											if (parseDeclaration(getProperty(children[0], "decl", isString)).member === fieldName) {
 												body.shift();
 												return translateExpression(children[1], childScope);
 											}
@@ -517,7 +507,7 @@ export function compileTermToProgram(root: Term): Program {
 								}
 								addVariable(childScope, selfMapping, read(defaultInstantiation, scope));
 							}
-							return statements(emitScope(childScope, translateAllStatements(body, childScope)));
+							return statements(emitScope(childScope, translateAllStatements(body, childScope, functions)));
 						} else {
 							if (isConstructor) {
 								const typeOfResult = returnType(returnType(getType(term)));
@@ -539,10 +529,13 @@ export function compileTermToProgram(root: Term): Program {
 				}
 
 				const fn = constructCallable(parameterLists[0], parameterLists.slice(1), getType(term));
-				if (!isConstructor && term.properties.access === "public") {
+				if (/^anonname=/.test(name)) {
+					scope.functions[name] = fn;
+				} else if (!isConstructor && term.properties.access === "public") {
+					functions[name] = noinline(fn);
 					insertFunction(name, scope, getType(term), fn, true);
 				} else {
-					scope.functions[name] = isConstructor || /^anonname=/.test(name) ? fn : noinline(fn);
+					functions[name] = isConstructor ? fn : noinline(fn);
 				}
 				return emptyStatements;
 			}
@@ -562,7 +555,7 @@ export function compileTermToProgram(root: Term): Program {
 				}
 			}
 			case "top_level_code_decl": {
-				return translateAllStatements(term.children, scope);
+				return translateAllStatements(term.children, scope, functions);
 			}
 			case "var_decl": {
 				expectLength(term.children, 0);
@@ -582,21 +575,21 @@ export function compileTermToProgram(root: Term): Program {
 				return emptyStatements;
 			}
 			case "brace_stmt": {
-				return translateAllStatements(term.children, scope);
+				return translateAllStatements(term.children, scope, functions);
 			}
 			case "if_stmt": {
 				const children = term.children;
 				if (children.length === 3) {
-					return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope)), blockStatement(translateStatement(children[2], scope)))];
+					return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope, functions)), blockStatement(translateStatement(children[2], scope, functions)))];
 				}
 				if (children.length === 2) {
-					return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope)))];
+					return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope, functions)))];
 				}
 				throw new Error(`Expected 2 or 3 terms, got ${children.length}`);
 			}
 			case "while_stmt": {
 				expectLength(term.children, 2);
-				return [whileStatement(translateExpression(term.children[0], scope), blockStatement(translateStatement(term.children[1], scope)))];
+				return [whileStatement(translateExpression(term.children[0], scope), blockStatement(translateStatement(term.children[1], scope, functions)))];
 			}
 			case "switch_stmt": {
 				if (term.children.length < 1) {
@@ -611,7 +604,7 @@ export function compileTermToProgram(root: Term): Program {
 						throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 					}
 					const predicate = childTerm.children.slice(0, childTerm.children.length - 1).map((child) => translatePattern(child, identifier("$match"), scope)).reduce((left, right) => logicalExpression("||", left, right));
-					const body = blockStatement(translateStatement(childTerm.children[childTerm.children.length - 1], scope));
+					const body = blockStatement(translateStatement(childTerm.children[childTerm.children.length - 1], scope, functions));
 					// Basic optimization for else case in switch statement
 					if (typeof previous === "undefined" && predicate.type === "BooleanLiteral" && predicate.value === true) {
 						return body;
@@ -621,13 +614,28 @@ export function compileTermToProgram(root: Term): Program {
 				return typeof cases !== "undefined" ? [declaration, cases] : [declaration];
 			}
 			case "enum_decl": {
-				// console.log(term);
+				console.log(term);
+				expectLength(term.args, 1);
+				scope.types[term.args[0]] = () => {
+					return {
+						fields: [
+							field("rawValue", reifyType("Int", scope), (value) => value),
+						],
+						functions: {},
+						possibleRepresentations: PossibleRepresentation.Number,
+						defaultValue() {
+							throw new Error(`Unable to default instantiate enums`);
+						},
+						innerTypes: {},
+					};
+				};
 				return emptyStatements;
 			}
 			case "struct_decl": {
 				expectLength(term.args, 1);
 				let statements: Statement[] = [];
 				const layout: Field[] = [];
+				const methods: FunctionMap = {};
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
@@ -635,17 +643,17 @@ export function compileTermToProgram(root: Term): Program {
 							expectLength(child.children, 1);
 							layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
 								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-								return call(call(functionValue(declaration.args[0], getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+								return call(call(functionValue(declaration.args[0], undefined, getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
-							statements = concat(statements, translateStatement(child.children[0], scope));
+							statements = concat(statements, translateStatement(child.children[0], scope, methods));
 						} else {
 							layout.push(field(child.args[0], reifyType(getType(child), scope)));
 						}
 					} else {
-						statements = concat(statements, translateStatement(child, scope));
+						statements = concat(statements, translateStatement(child, scope, methods));
 					}
 				}
-				scope.types[term.args[0]] = () => struct(layout);
+				scope.types[term.args[0]] = () => struct(layout, methods);
 				return statements;
 			}
 			case "pattern_binding_decl": {
@@ -660,6 +668,7 @@ export function compileTermToProgram(root: Term): Program {
 			case "class_decl": {
 				expectLength(term.args, 1);
 				const layout: Field[] = [];
+				const methods: FunctionMap = {};
 				for (const child of term.children) {
 					if (child.name === "var_decl") {
 						expectLength(child.args, 1);
@@ -676,7 +685,7 @@ export function compileTermToProgram(root: Term): Program {
 						}
 					}
 				}
-				scope.types[term.args[0]] = () => newClass(layout);
+				scope.types[term.args[0]] = () => newClass(layout, methods);
 				// TODO: Fill in body
 				return [classDeclaration(mangleName(term.args[0]), undefined, classBody([]), [])];
 			}
@@ -686,7 +695,7 @@ export function compileTermToProgram(root: Term): Program {
 		}
 	}
 
-	return program(emitScope(programScope, translateStatement(root, programScope)));
+	return program(emitScope(programScope, translateStatement(root, programScope, programScope.functions)));
 }
 
 function readAsString(stream: NodeJS.ReadableStream): Promise<string> {

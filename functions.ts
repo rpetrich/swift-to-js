@@ -56,7 +56,7 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | GetterSetterBuilder | undefined = scope.functions[name], shouldExport: boolean = false): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | GetterSetterBuilder, shouldExport: boolean = false): Identifier {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}

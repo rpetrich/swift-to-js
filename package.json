@@ -7,7 +7,8 @@
     "build:ts": "tsc",
     "build:ast": "pegjs --output dist/ast.js ast.pegjs",
     "build:types": "pegjs --output dist/types.js types.pegjs",
-    "build": "mkdir -p dist && npm-run-all --parallel build:ts build:ast build:types",
+    "build:declaration": "pegjs --output dist/declaration.js declaration.pegjs",
+    "build": "mkdir -p dist && npm-run-all --parallel build:ts build:ast build:types build:declaration",
     "test": "jest",
     "lint": "tslint --project tsconfig.json --fix"
   },
