@@ -330,13 +330,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							}),
 							field("first", reifyType(possibleKeyType, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
-								const stringValue = memberExpression(after, numericLiteral(0), true);
-								const convertedValue = typeof converter !== "undefined" ? callExpression(converter, [stringValue]) : stringValue;
-								return expr(conditionalExpression(memberExpression(first, identifier("length")), read(wrapInOptional(expr(convertedValue), possibleKeyType, scope), scope), emptyOptional(possibleKeyType)));
+								const stringKey = memberExpression(after, numericLiteral(0), true);
+								const convertedKey = typeof converter !== "undefined" ? callExpression(converter, [stringKey]) : stringKey;
+								return expr(conditionalExpression(memberExpression(first, identifier("length")), read(wrapInOptional(expr(convertedKey), possibleKeyType, scope), scope), emptyOptional(possibleKeyType)));
 							}),
 							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
-								const [first, after] = reuseExpression(read(value, scope), scope);
-								return expr(binaryExpression("!==", memberExpression(first, identifier("length")), numericLiteral(0)));
+								return expr(binaryExpression("!==", memberExpression(read(value, scope), identifier("length")), numericLiteral(0)));
 							}),
 							field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
 								return expr(numericLiteral(0));
