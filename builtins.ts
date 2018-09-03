@@ -213,6 +213,10 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			};
 		}
 	},
+	// Should be represented as an empty struct, but we currently
+	"_OptionalNilComparisonType": () => primitive(PossibleRepresentation.Null, expr(nullLiteral()), [], {
+		"init(nilLiteral:)": wrapped((scope, arg, type) => expr(nullLiteral())),
+	}),
 	"Array": (globalScope, typeParameters) => {
 		expectLength(typeParameters, 1);
 		const reified = reifyType(typeParameters[0], globalScope);
@@ -405,7 +409,6 @@ export const functions: FunctionMap = {
 		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
 	"Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
-	"_OptionalNilComparisonType.init(nilLiteral:)": wrapped((scope, arg, type) => expr(optionalDefaultValue(type))),
 	"Collection.count": returnLength,
 	"Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
 	"BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
