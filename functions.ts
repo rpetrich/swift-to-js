@@ -1,10 +1,10 @@
 import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
-import { Type } from "./types";
+import { Function, Type } from "./types";
 import { ArgGetter, call, callable, expr, read, stringifyType, Value } from "./values";
 
 import { blockStatement, exportNamedDeclaration, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
 
-export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Type, name: string) => Value;
+export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Function, name: string) => Value;
 
 export interface GetterSetterBuilder {
 	get: FunctionBuilder;
@@ -56,7 +56,7 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Type, builder: FunctionBuilder | GetterSetterBuilder, shouldExport: boolean = false): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, shouldExport: boolean = false): Identifier {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}
@@ -84,6 +84,9 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 export function wrapped(fn: FunctionBuilder): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
 		const innerType = returnType(type);
+		if (innerType.kind !== "function") {
+			throw new Error(`Expected ${name} to be a function that returns a function, instead it returns ${stringifyType(innerType)}`);
+		}
 		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, name), innerType);
 	};
 }

@@ -33,6 +33,10 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
 }
 
+const voidType: Type = { kind: "tuple", types: [] };
+
+export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
+
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType } = {
 	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
@@ -145,73 +149,42 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Optional": (globalScope, typeParameters) => {
 		expectLength(typeParameters, 1);
 		const reified = reifyType(typeParameters[0], globalScope);
-		if (typeParameters[0].kind === "optional") {
-			return {
-				fields: [],
-				functions: {
-					"none": (scope, arg, type) => expr(arrayExpression([])),
-					"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
-					"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
-					"flatMap": returnTodo,
-				},
-				possibleRepresentations: PossibleRepresentation.Array,
-				defaultValue() {
-					return expr(arrayExpression([]));
-				},
-				copy(value, scope) {
-					const expression = read(value, scope);
-					if (expressionSkipsCopy(expression)) {
-						return expr(expression);
-					}
-					if (reified.copy) {
-						// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
-						const [first, after] = reuseExpression(expression, scope);
-						return expr(conditionalExpression(
-							binaryExpression("===", memberExpression(first, identifier("length")), numericLiteral(0)),
-							arrayExpression([]),
-							read(reified.copy(expr(memberExpression(after, numericLiteral(0), true)), scope), scope),
-						));
-					} else {
-						// Nested Optionals of simple value are sliced
-						return expr(callExpression(memberExpression(expression, identifier("slice")), []));
-					}
-				},
-				innerTypes: {},
-			};
-		} else {
-			return {
-				fields: [],
-				functions: {
-					"none": (scope, arg, type) => expr(nullLiteral()),
-					"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
-					"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
-					"flatMap": returnTodo,
-				},
-				possibleRepresentations: PossibleRepresentation.Null | reified.possibleRepresentations,
-				defaultValue() {
-					return expr(nullLiteral());
-				},
-				copy(value, scope) {
-					if (reified.copy) {
-						// Optionals are copied by-value if non-null
-						const expression = read(value, scope);
-						if (expressionSkipsCopy(expression)) {
-							return expr(expression);
-						}
-						const [first, after] = reuseExpression(expression, scope);
-						return expr(conditionalExpression(
-							binaryExpression("===", first, nullLiteral()),
-							nullLiteral(),
-							read(reified.copy(expr(after), scope), scope),
-						));
-					} else {
-						// Optionals of simple value are passed through
-						return value;
-					}
-				},
-				innerTypes: {},
-			};
-		}
+		const optionalType: Type = { kind: "optional", type: typeParameters[0] };
+		return {
+			fields: [],
+			functions: {
+				"none": (scope, arg, type) => expr(emptyOptional(optionalType)),
+				"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
+				"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
+				"flatMap": returnTodo,
+			},
+			possibleRepresentations: PossibleRepresentation.Array,
+			defaultValue() {
+				return expr(emptyOptional(typeParameters[0]));
+			},
+			copy: reified.copy || isNestedOptional(optionalType) ? (value, scope) => {
+				const expression = read(value, scope);
+				if (expressionSkipsCopy(expression)) {
+					return expr(expression);
+				}
+				if (reified.copy) {
+					// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
+					const [first, after] = reuseExpression(expression, scope);
+					return expr(conditionalExpression(
+						optionalIsNone(first, optionalType),
+						emptyOptional(optionalType),
+						read(wrapInOptional(reified.copy(expr(after), scope), optionalType, scope), scope),
+					));
+				} else if (isNestedOptional(optionalType)) {
+					// Nested Optionals of simple value are sliced
+					return expr(callExpression(memberExpression(expression, identifier("slice")), []));
+				} else {
+					// Optionals of simple value are passed through
+					return value;
+				}
+			} : undefined,
+			innerTypes: {},
+		};
 	},
 	// Should be represented as an empty struct, but we currently
 	"_OptionalNilComparisonType": () => primitive(PossibleRepresentation.Null, expr(nullLiteral()), [], {
@@ -272,6 +245,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Dictionary": (globalScope, typeParameters) => {
 		expectLength(typeParameters, 2);
 		const [ keyType, valueType ] = typeParameters;
+		const possibleKeyType: Type = { kind: "optional", type: keyType };
+		const possibleValueType: Type = { kind: "optional", type: valueType };
 		const reifiedKeyType = reifyType(keyType, globalScope);
 		const reifiedValueType = reifyType(valueType, globalScope);
 		function objectDictionaryImplementation(converter?: Identifier): ReifiedType {
@@ -288,11 +263,6 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 						get(scope, arg, type) {
 							const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
 							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-							const resultType = returnType(type);
-							if (resultType.kind !== "optional") {
-								throw new Error(`Dictionary subscript must return an optional!`);
-							}
-							const value = copyValue(expr(memberExpression(dict, index, true)), resultType.type, scope);
 							return expr(conditionalExpression(
 								callExpression(
 									memberExpression(
@@ -304,8 +274,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 									),
 									[dict, index],
 								),
-								isNestedOptional(resultType) ? arrayExpression([read(value, scope)]) : read(value, scope),
-								optionalDefaultValue(resultType),
+								read(wrapInOptional(copyValue(expr(memberExpression(dict, index, true)), valueType, scope), possibleValueType, scope), scope),
+								emptyOptional(possibleValueType),
 							));
 						},
 						set(scope, arg, type) {
@@ -313,16 +283,22 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
 							const valueExpression = read(arg(2, "value"), scope);
 							const remove = unaryExpression("delete", memberExpression(dict, index, true));
-							if (valueExpression.type === "NullLiteral") {
-								return expr(remove);
+							if (valueType.kind === "optional") {
+								if (valueExpression.type === "ArrayExpression" && valueExpression.elements.length === 0) {
+									return expr(remove);
+								}
+							} else {
+								if (valueExpression.type === "NullLiteral") {
+									return expr(remove);
+								}
 							}
-							if (isLiteral(valueExpression)) {
+							if (isLiteral(valueExpression) || valueExpression.type === "ArrayExpression" || valueExpression.type === "ObjectExpression") {
 								return expr(assignmentExpression("=", memberExpression(dict, index, true), valueExpression));
 							}
 							const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
 							return expr(conditionalExpression(
-								binaryExpression("!==", hoistedValue, nullLiteral()),
-								assignmentExpression("=", memberExpression(dict, index, true), hoistedValue),
+								optionalIsSome(hoistedValue, possibleValueType),
+								assignmentExpression("=", memberExpression(dict, index, true), read(copyValue(unwrapOptional(expr(hoistedValue), possibleValueType, scope), valueType, scope), scope)),
 								remove,
 							));
 						},
@@ -351,11 +327,11 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
 								return expr(memberExpression(read(value, scope), identifier("length")));
 							}),
-							field("first", reifyType({ kind: "optional", type: keyType }, globalScope), (value: Value, scope: Scope) => {
+							field("first", reifyType(possibleKeyType, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
 								const stringValue = memberExpression(after, numericLiteral(0), true);
 								const convertedValue = typeof converter !== "undefined" ? callExpression(converter, [stringValue]) : stringValue;
-								return expr(conditionalExpression(memberExpression(first, identifier("length")), convertedValue, nullLiteral()));
+								return expr(conditionalExpression(memberExpression(first, identifier("length")), read(wrapInOptional(expr(convertedValue), possibleKeyType, scope), scope), emptyOptional(possibleKeyType)));
 							}),
 							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
@@ -388,8 +364,33 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	]),
 };
 
-function optionalDefaultValue(type: Type) {
+export function emptyOptional(type: Type) {
 	return isNestedOptional(type) ? arrayExpression([]) : nullLiteral();
+}
+
+export function wrapInOptional(value: Value, type: Type, scope: Scope) {
+	return isNestedOptional(type) ? expr(arrayExpression([read(value, scope)])) : value;
+}
+
+export function unwrapOptional(value: Value, type: Type, scope: Scope) {
+	if (isNestedOptional(type)) {
+		return expr(memberExpression(read(value, scope), numericLiteral(0), true));
+	}
+	return value;
+}
+
+export function optionalIsNone(expression: Expression, type: Type): Expression {
+	if (isNestedOptional(type)) {
+		return binaryExpression("===", memberExpression(expression, identifier("length")), numericLiteral(0));
+	}
+	return binaryExpression("===", expression, nullLiteral());
+}
+
+export function optionalIsSome(expression: Expression, type: Type): Expression {
+	if (isNestedOptional(type)) {
+		return binaryExpression("!==", memberExpression(expression, identifier("length")), numericLiteral(0));
+	}
+	return binaryExpression("!==", expression, nullLiteral());
 }
 
 function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier | ThisExpression): Statement {

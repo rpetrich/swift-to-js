@@ -3,7 +3,7 @@ import { arrayExpression, assignmentExpression, binaryExpression, blockStatement
 import { functionize, insertFunction } from "./functions";
 import { reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
-import { parse as parseType, Type } from "./types";
+import { Function, parse as parseType, Type } from "./types";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -51,10 +51,13 @@ export function statements(statements: Statement[]): StatementsValue | ReturnTyp
 export interface CallableValue {
 	kind: "callable";
 	call: (scope: Scope, arg: ArgGetter) => Value;
-	type: Type;
+	type: Function;
 }
 
 export function callable(call: (scope: Scope, arg: ArgGetter) => Value, type: Type): CallableValue {
+	if (type.kind !== "function") {
+		throw new TypeError(`Expected a function type when constructing a callable, got a ${type.kind}!`);
+	}
 	return { kind: "callable", call, type };
 }
 
@@ -86,10 +89,10 @@ export interface FunctionValue {
 	kind: "function";
 	name: string;
 	parentType: Type | undefined;
-	type: Type;
+	type: Function;
 }
 
-export function functionValue(name: string, parentType: Type | undefined, type: Type): FunctionValue {
+export function functionValue(name: string, parentType: Type | undefined, type: Function): FunctionValue {
 	return { kind: "function", name, parentType, type };
 }
 
@@ -322,5 +325,8 @@ export function stringifyType(type: Type): string {
 }
 
 export function isNestedOptional(type: Type): boolean {
-	return type.kind === "optional" && type.type.kind === "optional";
+	if (type.kind !== "optional") {
+		throw new Error(`Expected an optional, instead got a ${type.kind}!`);
+	}
+	return type.type.kind === "optional";
 }

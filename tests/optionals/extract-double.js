@@ -3,7 +3,7 @@ export function description_of_double$option$(option) {
   let doubleUnwrapped;
 
   if (unwrapped = option[0], option.length !== 0) {
-    if ((doubleUnwrapped = unwrapped) !== null) {
+    if (doubleUnwrapped = unwrapped, unwrapped !== null) {
       if (doubleUnwrapped) {
         return "True";
       }

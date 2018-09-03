@@ -1,15 +1,15 @@
 import { parse as parseAST, Property, Term } from "./ast";
-import { newScopeWithBuiltins } from "./builtins";
+import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
-import { parse as parseType, Type } from "./types";
+import { Function, parse as parseType, Type } from "./types";
 import { expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -102,7 +102,7 @@ function constructTypeFromNames(baseType: string, typeParameters?: ReadonlyArray
 	}
 }
 
-function extractReference(term: Term, scope: Scope, type?: Type): Value {
+function extractReference(term: Term, scope: Scope, type?: Function): Value {
 	const decl = nameForDeclRefExpr(term);
 	const declaration = parseDeclaration(decl);
 	if (typeof declaration.local === "string") {
@@ -112,13 +112,10 @@ function extractReference(term: Term, scope: Scope, type?: Type): Value {
 		return variable(lookup(declaration.local, scope));
 	}
 	if (typeof declaration.member === "string") {
-		if (type === undefined) {
-			type = getType(term);
-		}
 		const functionType = declaration.type ? constructTypeFromNames(declaration.type, declaration.substitutions) : undefined;
 		const functions = functionType ? reifyType(functionType, scope).functions : scope.functions;
 		if (Object.hasOwnProperty.call(functions, declaration.member)) {
-			return functionValue(declaration.member, functionType, type);
+			return functionValue(declaration.member, functionType, type || getFunctionType(term));
 		}
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
@@ -138,6 +135,14 @@ function getType(term: Term) {
 		console.log(term);
 		throw e;
 	}
+}
+
+function getFunctionType(term: Term) {
+	const result = getType(term);
+	if (result.kind !== "function") {
+		throw new TypeError(`Expected a function, got ${stringifyType(result)}`);
+	}
+	return result;
 }
 
 function collapseToExpression(expressions: Expression[]): Expression {
@@ -168,16 +173,9 @@ export function compileTermToProgram(root: Term): Program {
 			case "optional_some_element": { // Swift 4.1
 				expectLength(term.children, 1);
 				const type = getType(term);
-				if (type.kind !== "optional") {
-					throw new TypeError(`Expected optional, got ${stringifyType(type)}`);
-				}
-				if (isNestedOptional(type)) {
-					const [first, second] = reuseExpression(value, scope);
-					const assign = translatePattern(term.children[0], memberExpression(first, numericLiteral(0), true), scope);
-					const hasLength = binaryExpression("!==", memberExpression(second, identifier("length")), numericLiteral(0));
-					return sequenceExpression([assign, hasLength]);
-				}
-				return binaryExpression("!==", translatePattern(term.children[0], value, scope), nullLiteral());
+				const [first, second] = reuseExpression(value, scope);
+				const assign = translatePattern(term.children[0], read(unwrapOptional(expr(first), type, scope), scope), scope);
+				return sequenceExpression([assign, optionalIsSome(second, type)]);
 			}
 			case "case_label_item":
 			case "pattern_let": {
@@ -278,7 +276,7 @@ export function compileTermToProgram(root: Term): Program {
 			case "subscript_expr": {
 				expectLength(term.children, 2);
 				const type = getType(term);
-				const getterType: Type = {
+				const getterType: Function = {
 					kind: "function",
 					arguments: {
 						kind: "tuple",
@@ -293,7 +291,7 @@ export function compileTermToProgram(root: Term): Program {
 				};
 				const getter = extractReference(term, scope, getterType);
 				// TODO: Define the setter type
-				const setterType: Type = {
+				const setterType: Function = {
 					kind: "function",
 					arguments: {
 						kind: "tuple",
@@ -447,20 +445,12 @@ export function compileTermToProgram(root: Term): Program {
 				const value = translateTermToValue(term.children[0], scope);
 				const [first, after] = reuseExpression(read(value, scope), scope);
 				// TODO: Optimize some cases where we can prove it to be a .some
-				const failed = read(call(functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, parseType("() throws -> ()")), undefinedValue, [], scope), scope);
-				if (isNestedOptional(getType(term.children[0]))) {
-					return expr(conditionalExpression(
-						binaryExpression("!==", memberExpression(first, identifier("length")), numericLiteral(0)),
-						memberExpression(after, numericLiteral(0), true),
-						failed,
-					));
-				} else {
-					return expr(conditionalExpression(
-						binaryExpression("!==", first, nullLiteral()),
-						after,
-						failed,
-					));
-				}
+				const type = getType(term.children[0]);
+				return expr(conditionalExpression(
+					optionalIsSome(first, type),
+					read(unwrapOptional(expr(after), type, scope), scope),
+					read(call(forceUnwrapFailed, undefinedValue, [], scope), scope),
+				));
 			}
 			case "erasure_expr": {
 				// TODO: Support runtime Any type that can be inspected
@@ -555,7 +545,7 @@ export function compileTermToProgram(root: Term): Program {
 					scope.functions[name] = fn;
 				} else if (!isConstructor && term.properties.access === "public") {
 					functions[name] = noinline(fn);
-					insertFunction(name, scope, getType(term), fn, true);
+					insertFunction(name, scope, getFunctionType(term), fn, true);
 				} else {
 					functions[name] = isConstructor ? fn : noinline(fn);
 				}
@@ -638,12 +628,22 @@ export function compileTermToProgram(root: Term): Program {
 			case "enum_decl": {
 				console.log(term);
 				expectLength(term.args, 1);
+				if (getProperty(term, "inherits", isString) !== "Int") {
+					throw new TypeError(`Only Int enums are supported!`);
+				}
+				const members: FunctionMap = {};
+				termsWithName(term.children, "enum_case_decl").forEach((caseDecl, index) => {
+					const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
+					expectLength(elementDecl.args, 1);
+					// TODO: Extract the actual rawValue and use this as the discriminator
+					members[elementDecl.args[0]] = () => expr(numericLiteral(index));
+				});
 				scope.types[term.args[0]] = () => {
 					return {
 						fields: [
 							field("rawValue", reifyType("Int", scope), (value) => value),
 						],
-						functions: {},
+						functions: members,
 						possibleRepresentations: PossibleRepresentation.Number,
 						defaultValue() {
 							throw new Error(`Unable to default instantiate enums`);
@@ -665,7 +665,7 @@ export function compileTermToProgram(root: Term): Program {
 							expectLength(child.children, 1);
 							layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
 								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-								return call(call(functionValue(declaration.args[0], undefined, getType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 							statements = concat(statements, translateStatement(child.children[0], scope, methods));
 						} else {
