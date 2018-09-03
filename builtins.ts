@@ -158,19 +158,13 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		const [ keyType, valueType ] = typeParameters;
 		const reifiedKeyType = reifyType(keyType, globalScope);
 		const reifiedValueType = reifyType(valueType, globalScope);
-		function objectDictionaryImplementation(converterName?: string): ReifiedType {
+		function objectDictionaryImplementation(converter?: Identifier): ReifiedType {
 			const reifiedKeysType = reifyType({ kind: "array", type: keyType }, globalScope);
 			return {
 				fields: [
 					field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]), identifier("length")))),
 					field("keys", reifiedKeysType, (value: Value, scope: Scope) => {
-						const stringKeys = callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]);
-						if (typeof converterName === "string") {
-							const convertedKeys = callExpression(memberExpression(stringKeys, identifier("map")), [identifier(converterName)]);
-							return expr(convertedKeys);
-						} else {
-							return expr(stringKeys);
-						}
+						return expr(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]));
 					}),
 				],
 				possibleRepresentations: PossibleRepresentation.Object,
@@ -198,7 +192,9 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							}),
 							field("first", reifyType({ kind: "optional", type: keyType }, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
-								return expr(conditionalExpression(memberExpression(first, identifier("length")), memberExpression(after, numericLiteral(0), true), nullLiteral()));
+								const stringValue = memberExpression(after, numericLiteral(0), true);
+								const convertedValue = typeof converter !== "undefined" ? callExpression(converter, [stringValue]) : stringValue;
+								return expr(conditionalExpression(memberExpression(first, identifier("length")), convertedValue, nullLiteral()));
 							}),
 							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
@@ -219,9 +215,9 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			case PossibleRepresentation.String:
 				return objectDictionaryImplementation();
 			case PossibleRepresentation.Boolean:
-				return objectDictionaryImplementation("Boolean");
+				return objectDictionaryImplementation(identifier("Boolean"));
 			case PossibleRepresentation.Number:
-				return objectDictionaryImplementation("Number");
+				return objectDictionaryImplementation(identifier("Number"));
 			default:
 				throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
 		}
