@@ -154,6 +154,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			fields: [],
 			functions: {
 				"none": (scope, arg, type) => expr(emptyOptional(optionalType)),
+				"some": wrapped((scope, arg, type) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
 				"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
 				"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
 				"flatMap": returnTodo,

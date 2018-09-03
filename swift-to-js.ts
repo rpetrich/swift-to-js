@@ -1,5 +1,5 @@
 import { parse as parseAST, Property, Term } from "./ast";
-import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional } from "./builtins";
+import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
@@ -384,7 +384,10 @@ export function compileTermToProgram(root: Term): Program {
 					translateExpression(term.children[2], scope),
 				));
 			}
-			case "inject_into_optional":
+			case "inject_into_optional": {
+				expectLength(term.children, 1);
+				return wrapInOptional(translateTermToValue(term.children[0], scope), getType(term), scope);
+			}
 			case "function_conversion_expr": {
 				expectLength(term.children, 1);
 				return translateTermToValue(term.children[0], scope);
