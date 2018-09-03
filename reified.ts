@@ -19,10 +19,15 @@ export enum PossibleRepresentation {
 
 export interface ReifiedType {
 	fields: ReadonlyArray<Field>;
+	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	defaultValue(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
 	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
+}
+
+export interface TypeMap {
+	[name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType;
 }
 
 export type Field = {
@@ -41,27 +46,33 @@ function representationForFields(storedFields: ReadonlyArray<Field>) {
 	}
 }
 
-export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = []): ReifiedType {
+const emptyTypes: ReadonlyArray<Type> = [];
+const emptyFields: ReadonlyArray<Field> = [];
+const noInnerTypes: Readonly<TypeMap> = {};
+
+export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
 		possibleRepresentations,
 		defaultValue() {
 			return defaultValue;
 		},
+		innerTypes,
 	};
 }
 
-function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>) {
+export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		fields,
 		possibleRepresentations: type.possibleRepresentations,
 		defaultValue: type.defaultValue,
 		copy: type.copy,
 		store: type.store,
+		innerTypes,
 	};
 }
 
-export function struct(fields: ReadonlyArray<Field>): ReifiedType {
+export function struct(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	const onlyStored = storedFields(fields);
 	switch (onlyStored.length) {
 		case 0:
@@ -71,10 +82,11 @@ export function struct(fields: ReadonlyArray<Field>): ReifiedType {
 				defaultValue() {
 					return undefinedValue;
 				},
+				innerTypes,
 			};
 		case 1:
 			// TODO: Map fields appropriately on unary structs
-			return inheritLayout(onlyStored[0].type, fields);
+			return inheritLayout(onlyStored[0].type, fields, innerTypes);
 		default:
 			return {
 				fields,
@@ -107,17 +119,19 @@ export function struct(fields: ReadonlyArray<Field>): ReifiedType {
 				// 		return existing.concat(storeValue(mangleName(fieldLayout.name), getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope));
 				// 	}, [] as Expression[]);
 				// },
+				innerTypes,
 			};
 	}
 }
 
-export function newClass(fields: ReadonlyArray<Field>): ReifiedType {
+export function newClass(fields: ReadonlyArray<Field>, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue() {
 			throw new Error(`Cannot default instantiate a class!`);
 		},
+		innerTypes,
 	};
 }
 
@@ -188,21 +202,20 @@ export function defaultInstantiateType(type: Type, scope: Scope, consume: (field
 	return reifyType(type, scope).defaultValue(scope, consume);
 }
 
-
-export function reifyType(typeOrTypeName: Type | string, scope: Scope): ReifiedType {
+export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArguments: ReadonlyArray<Type> = emptyTypes, types: Readonly<TypeMap> = scope.types): ReifiedType {
 	const type = typeof typeOrTypeName === "string" ? parseType(typeOrTypeName) : typeOrTypeName;
 	switch (type.kind) {
 		case "name":
-			if (Object.hasOwnProperty.call(scope.types, type.name)) {
-				return scope.types[type.name](type, scope);
+			if (Object.hasOwnProperty.call(types, type.name)) {
+				return types[type.name](scope, typeArguments);
 			}
 			throw new TypeError(`Cannot resolve type named ${type.name}`);
 		case "array":
-			return scope.types.Array(type, scope);
+			return scope.types.Array(scope, [type.type]);
 		case "modified":
 			return reifyType(type.type, scope);
 		case "dictionary":
-			return scope.types.Dictionary(type, scope);
+			return scope.types.Dictionary(scope, [type.keyType, type.valueType]);
 		case "tuple":
 			const reifiedTypes = type.types.map((inner) => reifyType(inner, scope));
 			switch (type.types.length) {
@@ -230,26 +243,19 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope): ReifiedT
 								return elementType.copy ? read(elementType.copy(expr(field), innerScope), innerScope) : field;
 							})));
 						} : undefined,
+						innerTypes: noInnerTypes,
 					};
 			}
 		case "generic":
-			// TODO: Handle generics!
-			if (type.base.kind === "name") {
-				if (Object.hasOwnProperty.call(scope.types, type.base.name)) {
-					return scope.types[type.base.name](type, scope);
-				}
-				throw new TypeError(`Cannot resolve type named ${type.base.name}`);
-			}
-			throw new TypeError(`Unable to reify a generic of ${type.kind}!`);
+			return reifyType(type.base, scope, typeArguments);
 		case "metatype":
 			return primitive(PossibleRepresentation.Object, expr(objectExpression([])));
 		case "function":
 			return primitive(PossibleRepresentation.Function, undefinedValue);
 		case "namespaced":
-			// TODO: Handle namespacing!
-			return reifyType(type.type, scope);
+			return reifyType(type.type, scope, emptyTypes, reifyType(type.namespace, scope, typeArguments).innerTypes);
 		case "optional":
-			return scope.types.Optional(type, scope);
+			return scope.types.Optional(scope, [type.type]);
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}

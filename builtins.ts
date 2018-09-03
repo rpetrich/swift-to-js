@@ -1,7 +1,8 @@
 import { FunctionBuilder, GetterSetterBuilder, noinline, returnType, wrapped } from "./functions";
-import { copyValue, expressionSkipsCopy, field, Field, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
+import { copyValue, expressionSkipsCopy, field, Field, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
+import { expectLength } from "./utils";
 import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
@@ -32,38 +33,42 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
 }
 
-export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) => ReifiedType } = {
+export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType } = {
 	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false))),
 	"Int": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
 	"Int64": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
 	"Float": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
 	"Double": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
-	"String": (type, globalScope) => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
-		field("unicodeScalars", reifyType("UnicodeScalarView", globalScope), (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
-		field("utf16", reifyType("UTF16View", globalScope), (value) => value),
-		field("utf8", reifyType("UTF8View", globalScope), (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
-	]),
-	"UnicodeScalarView": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
-		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(numericLiteral(0))),
-		field("endIndex", reifyType("Int64", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	]),
-	"UTF16View": (type, globalScope) => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
-		field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	]),
-	"UTF8View": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
-		field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
-		field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	]),
-	"Optional": (type, globalScope) => {
-		if (type.kind !== "optional") {
-			throw new TypeError(`Expected an optional when inspecting the value types of an Optional, instead got a ${stringifyType(type)} (a ${type.kind})`);
-		}
-		const reified = reifyType(type.type, globalScope);
-		if (isNestedOptional(type)) {
+	"String": (globalScope, typeParameters) => {
+		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+			field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(numericLiteral(0))),
+			field("endIndex", reifyType("Int64", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		]);
+		const UTF16View = primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+			field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		]);
+		const UTF8View = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+			field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+		]);
+		return primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+			field("unicodeScalars", UnicodeScalarView, (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
+			field("utf16", UTF16View, (value) => value),
+			field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
+		], {
+			"UnicodeScalarView": () => UnicodeScalarView,
+			"UTF16View": () => UTF16View,
+			"UTF8View": () => UTF8View,
+		});
+	},
+	"Optional": (globalScope, typeParameters) => {
+		expectLength(typeParameters, 1);
+		const reified = reifyType(typeParameters[0], globalScope);
+		if (typeParameters[0].kind === "optional") {
 			return {
 				fields: [],
 				possibleRepresentations: PossibleRepresentation.Array,
@@ -88,6 +93,7 @@ export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) =>
 						return expr(callExpression(memberExpression(expression, identifier("slice")), []));
 					}
 				},
+				innerTypes: {},
 			};
 		} else {
 			return {
@@ -114,14 +120,13 @@ export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) =>
 						return value;
 					}
 				},
+				innerTypes: {},
 			};
 		}
 	},
-	"Array": (type, globalScope) => {
-		if (type.kind !== "array") {
-			throw new TypeError(`Expected an array when inspecting the value types of an Array, instead got a ${stringifyType(type)} (a ${type.kind})`);
-		}
-		const reified = reifyType(type.type, globalScope);
+	"Array": (globalScope, typeParameters) => {
+		expectLength(typeParameters, 1);
+		const reified = reifyType(typeParameters[0], globalScope);
 		return {
 			fields: [
 				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -145,13 +150,12 @@ export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) =>
 					return expr(callExpression(memberExpression(expression, identifier("slice")), []));
 				}
 			},
+			innerTypes: {},
 		};
 	},
-	"Dictionary": (type, globalScope) => {
-		if (type.kind !== "dictionary") {
-			throw new TypeError(`Expected Dictionary to be instantiated with a dictionary type, got a ${type.kind}`);
-		}
-		const { keyType, valueType } = type;
+	"Dictionary": (globalScope, typeParameters) => {
+		expectLength(typeParameters, 2);
+		const [ keyType, valueType ] = typeParameters;
 		const reifiedKeyType = reifyType(keyType, globalScope);
 		const reifiedValueType = reifyType(valueType, globalScope);
 		function objectDictionaryImplementation(converterName?: string): ReifiedType {
@@ -183,6 +187,32 @@ export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) =>
 					}
 					return expr(callExpression(memberExpression(identifier("Object"), identifier("assign")), [objectExpression([]), expression]));
 				},
+				innerTypes: {
+					Keys: () => {
+						return inheritLayout(reifiedKeysType, [
+							field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => {
+								return expr(memberExpression(read(value, scope), identifier("length")));
+							}),
+							field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
+								return expr(memberExpression(read(value, scope), identifier("length")));
+							}),
+							field("first", reifyType({ kind: "optional", type: keyType }, globalScope), (value: Value, scope: Scope) => {
+								const [first, after] = reuseExpression(read(value, scope), scope);
+								return expr(conditionalExpression(memberExpression(first, identifier("length")), after, nullLiteral()));
+							}),
+							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
+								const [first, after] = reuseExpression(read(value, scope), scope);
+								return expr(binaryExpression("!==", memberExpression(first, identifier("length")), numericLiteral(0)));
+							}),
+							field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
+								return expr(numericLiteral(0));
+							}),
+							field("underestimatedCount", reifyType("Int", globalScope), (value: Value, scope: Scope) => {
+								return expr(memberExpression(read(value, scope), identifier("length")));
+							}),
+						]);
+					},
+				},
 			};
 		}
 		switch (reifiedKeyType.possibleRepresentations) {
@@ -196,7 +226,7 @@ export const defaultTypes: { [name: string]: (type: Type, globalScope: Scope) =>
 				throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
 		}
 	},
-	"Collection": (type, globalScope) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	]),
 };

@@ -4,6 +4,7 @@ import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { copyValue, defaultInstantiateType, field, Field, newClass, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { parse as parseType, Type } from "./types";
+import { expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
@@ -112,16 +113,6 @@ function extractReference(term: Term, scope: Scope, type?: Type): Value {
 		return functionValue(extensionStripped, type || getType(term));
 	}
 	throw new Error(`Unable to parse declaration: ${decl}`);
-}
-
-function expectLength<T extends any[]>(array: T, ...lengths: number[]) {
-	for (const length of lengths) {
-		if (array.length === length) {
-			return;
-		}
-	}
-	console.error(array);
-	throw new Error(`Expected ${lengths.join(" or ")} items, but got ${array.length}`);
 }
 
 function nameForDeclRefExpr(term: Term) {

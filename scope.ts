@@ -1,7 +1,7 @@
 import { Declaration, exportNamedDeclaration, Expression, identifier, Identifier, Statement, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
-import { ReifiedType } from "./reified";
+import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
 
 export const undefinedLiteral = identifier("undefined");
@@ -9,7 +9,7 @@ export const undefinedLiteral = identifier("undefined");
 export interface Scope {
 	name: string;
 	declarations: { [name: string]: Declaration | undefined };
-	types: { [name: string]: (type: Type, scope: Scope) => ReifiedType };
+	types: TypeMap;
 	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: ThisExpression | Identifier };
