@@ -1,3 +1,5 @@
 export function oneInt$key$value$(key, value) {
-  return {};
+  return {
+    [key]: value
+  };
 }

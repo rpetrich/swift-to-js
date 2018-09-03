@@ -9,7 +9,7 @@ import { expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, memberExpression, MemberExpression, newExpression, numericLiteral, objectExpression, objectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -350,10 +350,27 @@ export function compileTermToProgram(root: Term): Program {
 				return expr(stringLiteral(getProperty(term, "value", isString)));
 			}
 			case "array_expr": {
+				const type = getType(term);
+				if (type.kind !== "array") {
+					throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
+				}
 				return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => translateExpression(child, scope))));
 			}
 			case "dictionary_expr": {
-				return expr(objectExpression([]));
+				const type = getType(term);
+				if (type.kind !== "dictionary") {
+					throw new TypeError(`Expected a dictionary type, got a ${stringifyType(type)}`);
+				}
+				reifyType(type, scope);
+				const properties: ObjectProperty[] = [];
+				for (const child of term.children.filter(noSemanticExpressions)) {
+					if (child.name !== "tuple_expr") {
+						throw new TypeError(`Expected a tuple_expr, got a ${child.name}`);
+					}
+					expectLength(child.children, 2);
+					properties.push(objectProperty(translateExpression(child.children[0], scope), translateExpression(child.children[1], scope), true));
+				}
+				return expr(objectExpression(properties));
 			}
 			case "paren_expr": {
 				expectLength(term.children, 1);
