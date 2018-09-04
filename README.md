@@ -5,7 +5,7 @@ This is an experimental JavaScript backend for the standard Swift compiler. It's
 Installation
 ------------
 #### Install Swift
-Choose a compatible Swift developer snapshot from [swift.org/downloads](https://swift.org/downloads). [2018-08-26](https://swift.org/builds/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2018-08-26-a/swift-DEVELOPMENT-SNAPSHOT-2018-08-26-a-osx.pkg)'s build is known tobe compatible.
+Choose and install a compatible Swift development snapshot from [swift.org/downloads](https://swift.org/downloads). [2018-08-26](https://swift.org/builds/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2018-08-26-a/swift-DEVELOPMENT-SNAPSHOT-2018-08-26-a-osx.pkg)'s snapshot build is known to be compatible. For macOS, the latest Xcode is required.
 
 #### Install Node & NPM
 You know what to do...
@@ -20,6 +20,9 @@ $ node . test.swift
 ```
 
 #### Run the tests
+```bash
+$ npm test
+```
 
 ## Development Notes
 Approach used in swift-to-js is to translate the AST produced by `swiftc -dump-ast -- file.swift` incrementally using the type information provided by the compiler at each step to determine how to translate. Walking each AST node produces a partially-translated value on which peephole optimization can be performed before baking into the node to insert into an ever-growing babylon AST. Generated code uses ES6 features including module syntax. Basic support for tracing of source has been implemented, but not integrated with Babel's source map support.
