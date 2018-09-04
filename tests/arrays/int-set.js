@@ -1,6 +1,7 @@
+function $$arrayBoundsFailed() {
+  throw new RangeError("Array index out of range");
+}
+
 export function arraySet$array$index$value$(array, index, value) {
-  (function () {
-    if (index >= array.length || index < 0) throw new RangeError("Array index out of range");
-    return array[index] = value;
-  })();
+  array[array.length >= index && index >= 0 ? index : $$arrayBoundsFailed()] = value;
 }

@@ -1,7 +1,7 @@
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
-import { reifyType } from "./reified";
+import { ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 
@@ -88,11 +88,11 @@ export function boxed(contents: Value): BoxedValue {
 export interface FunctionValue {
 	kind: "function";
 	name: string;
-	parentType: Type | undefined;
+	parentType: ReifiedType | undefined;
 	type: Function;
 }
 
-export function functionValue(name: string, parentType: Type | undefined, type: Function): FunctionValue {
+export function functionValue(name: string, parentType: ReifiedType | undefined, type: Function): FunctionValue {
 	return { kind: "function", name, parentType, type };
 }
 
@@ -165,7 +165,7 @@ export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
 		case "function":
-			const functions = typeof value.parentType !== "undefined" ? reifyType(value.parentType, scope) : scope.functions;
+			const functions = typeof value.parentType !== "undefined" ? value.parentType.functions : scope.functions;
 			return insertFunction(value.name, scope, value.type, scope.functions[value.name]);
 		case "tuple":
 			switch (value.values.length) {
@@ -213,7 +213,7 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 	};
 	switch (target.kind) {
 		case "function":
-			const functions = typeof target.parentType !== "undefined" ? reifyType(target.parentType, scope).functions : scope.functions;
+			const functions = typeof target.parentType !== "undefined" ? target.parentType.functions : scope.functions;
 			if (Object.hasOwnProperty.call(functions, target.name)) {
 				const fn = functions[target.name];
 				switch (type) {

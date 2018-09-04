@@ -28,8 +28,21 @@ export interface ReifiedType {
 	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
 }
 
+export interface TypeParameterHost {
+	(parameterCount: 0): [];
+	(parameterCount: 1): [Type];
+	(parameterCount: 2): [Type, Type];
+	(parameterCount: 3): [Type, Type, Type];
+	(parameterCount: 4): [Type, Type, Type, Type];
+	(parameterCount: 5): [Type, Type, Type, Type, Type];
+	(parameterCount: 6): [Type, Type, Type, Type, Type, Type];
+	(parameterCount: 7): [Type, Type, Type, Type, Type, Type, Type];
+	(parameterCount: 8): [Type, Type, Type, Type, Type, Type, Type, Type];
+	(parameterCount: number): Type[];
+}
+
 export interface TypeMap {
-	[name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType;
+	[name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType;
 }
 
 export interface FunctionMap {
@@ -52,6 +65,7 @@ function representationForFields(storedFields: ReadonlyArray<Field>) {
 	}
 }
 
+const emptyTypeParameters: ReadonlyArray<string> = [];
 const emptyTypes: ReadonlyArray<Type> = [];
 const emptyFields: ReadonlyArray<Field> = [];
 const noFunctions: Readonly<FunctionMap> = {};
@@ -214,20 +228,26 @@ export function defaultInstantiateType(type: Type, scope: Scope, consume: (field
 	return reifyType(type, scope).defaultValue(scope, consume);
 }
 
+function typeArgumentsForArray(args: ReadonlyArray<Type>) {
+	return ((count: number) => {
+		return args.slice(0, count) as any;
+	}) as TypeParameterHost;
+}
+
 export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArguments: ReadonlyArray<Type> = emptyTypes, types: Readonly<TypeMap> = scope.types): ReifiedType {
 	const type = typeof typeOrTypeName === "string" ? parseType(typeOrTypeName) : typeOrTypeName;
 	switch (type.kind) {
 		case "name":
 			if (Object.hasOwnProperty.call(types, type.name)) {
-				return types[type.name](scope, typeArguments);
+				return types[type.name](scope, typeArgumentsForArray(typeArguments));
 			}
 			throw new TypeError(`Cannot resolve type named ${type.name}`);
 		case "array":
-			return scope.types.Array(scope, [type.type]);
+			return scope.types.Array(scope, typeArgumentsForArray([type.type]));
 		case "modified":
 			return reifyType(type.type, scope);
 		case "dictionary":
-			return scope.types.Dictionary(scope, [type.keyType, type.valueType]);
+			return scope.types.Dictionary(scope, typeArgumentsForArray([type.keyType, type.valueType]));
 		case "tuple":
 			const reifiedTypes = type.types.map((inner) => reifyType(inner, scope));
 			switch (type.types.length) {
@@ -268,7 +288,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 		case "namespaced":
 			return reifyType(type.type, scope, emptyTypes, reifyType(type.namespace, scope, typeArguments).innerTypes);
 		case "optional":
-			return scope.types.Optional(scope, [type.type]);
+			return scope.types.Optional(scope, typeArgumentsForArray([type.type]));
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}

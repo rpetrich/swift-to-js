@@ -1,7 +1,7 @@
-import { noinline, returnType, wrapped } from "./functions";
-import { copyValue, expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct } from "./reified";
+import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
+import { copyValue, expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
-import { parse as parseType, Type } from "./types";
+import { parse as parseType, Tuple, Type } from "./types";
 import { expectLength } from "./utils";
 import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
@@ -33,11 +33,23 @@ function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&
 	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
 }
 
-const voidType: Type = { kind: "tuple", types: [] };
+const readLengthField = (name: string, globalScope: Scope) => field("count", reifyType("Int", globalScope), (value, scope) => {
+	return expr(memberExpression(read(value, scope), identifier("length")));
+});
+
+const isEmptyFromLength = (globalScope: Scope) => field("isEmpty", reifyType("Bool", globalScope), (value, scope) => {
+	return expr(binaryExpression("!==", memberExpression(read(value, scope), identifier("length")), numericLiteral(0)));
+});
+
+const startIndexOfZero = (globalScope: Scope) => field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
+	return expr(numericLiteral(0));
+});
+
+const voidType: Tuple = { kind: "tuple", types: [] };
 
 export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
 
-export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: ReadonlyArray<Type>) => ReifiedType } = {
+export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
 	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
@@ -115,7 +127,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"*=": assignmentBuiltin("*="),
 		"/=": assignmentBuiltin("/="),
 	}),
-	"String": (globalScope, typeParameters) => {
+	"String": (globalScope) => {
 		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 			field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(numericLiteral(0))),
@@ -147,9 +159,9 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		});
 	},
 	"Optional": (globalScope, typeParameters) => {
-		expectLength(typeParameters, 1);
-		const reified = reifyType(typeParameters[0], globalScope);
-		const optionalType: Type = { kind: "optional", type: typeParameters[0] };
+		const [ wrappedType ] = typeParameters(1);
+		const reified = reifyType(wrappedType, globalScope);
+		const optionalType: Type = { kind: "optional", type: wrappedType };
 		return {
 			fields: [],
 			functions: {
@@ -161,7 +173,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			},
 			possibleRepresentations: PossibleRepresentation.Array,
 			defaultValue() {
-				return expr(emptyOptional(typeParameters[0]));
+				return expr(emptyOptional(wrappedType));
 			},
 			copy: reified.copy || isNestedOptional(optionalType) ? (value, scope) => {
 				const expression = read(value, scope);
@@ -192,34 +204,113 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"init(nilLiteral:)": wrapped((scope, arg, type) => expr(nullLiteral())),
 	}),
 	"Array": (globalScope, typeParameters) => {
-		expectLength(typeParameters, 1);
-		const reified = reifyType(typeParameters[0], globalScope);
+		const [ valueType ] = typeParameters(1);
+		const reified = reifyType(valueType, globalScope);
+		const optionalValueType: Type = { kind: "optional", type: valueType };
+		const reifiedOptional = reifyType(optionalValueType, globalScope);
 		return {
 			fields: [
-				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+				readLengthField("count", globalScope),
+				isEmptyFromLength(globalScope),
+				readLengthField("capacity", globalScope),
+				startIndexOfZero(globalScope),
+				readLengthField("endIndex", globalScope),
+				field("first", reifiedOptional, (value: Value, scope: Scope) => {
+					const [first, after] = reuseExpression(read(value, scope), scope);
+					return expr(conditionalExpression(
+						memberExpression(first, identifier("length")),
+						read(wrapInOptional(expr(memberExpression(after, numericLiteral(0), true)), optionalValueType, scope), scope),
+						emptyOptional(optionalValueType),
+					));
+				}),
+				field("last", reifiedOptional, (value: Value, scope: Scope) => {
+					const [first, after] = reuseExpression(read(value, scope), scope);
+					return expr(conditionalExpression(
+						memberExpression(first, identifier("length")),
+						read(wrapInOptional(expr(memberExpression(after, binaryExpression("-", memberExpression(after, identifier("length")), numericLiteral(1)), true)), optionalValueType, scope), scope),
+						emptyOptional(optionalValueType),
+					));
+				}),
 			],
 			functions: {
-				init: wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
-				count: returnLength,
-				subscript: {
-					get(scope, arg, type) {
-						const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
-						const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-						return statements([
-							arrayBoundsCheck(array, index),
-							returnStatement(memberExpression(array, index, true)),
-						]);
+				"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
+				"count": returnLength,
+				"subscript": {
+					get(scope, arg) {
+						return arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "read");
 					},
-					set(scope, arg, type) {
-						const array = hoistToIdentifier(read(arg(0, "array"), scope), scope, "array");
-						const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
-						const value = hoistToIdentifier(read(arg(2, "value"), scope), scope, "value");
-						return statements([
-							arrayBoundsCheck(array, index),
-							returnStatement(assignmentExpression("=", memberExpression(array, index, true), value)),
-						]);
+					set(scope, arg) {
+						return expr(assignmentExpression("=", read(arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "write"), scope), read(copyValue(arg(2, "value"), valueType, scope), scope)));
 					},
 				},
+				"append()": wrapped((scope, arg) => {
+					const pushExpression = expr(memberExpression(read(arg(0, "array"), scope), identifier("push")));
+					const newElement = copyValue(arg(1, "newElement"), valueType, scope);
+					return call(pushExpression, undefinedValue, [newElement], scope);
+				}),
+				"insert(at:)": wrapped((scope, arg) => {
+					const array = arg(0, "array");
+					const newElement = copyValue(arg(1, "newElement"), valueType, scope);
+					const i = arg(2, "i");
+					return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [array, newElement, i], scope);
+				}),
+				"remove(at:)": wrapped((scope, arg) => {
+					const array = arg(0, "array");
+					const i = arg(1, "i");
+					return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [array, i], scope);
+				}),
+				"removeFirst()": wrapped((scope, arg) => {
+					const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("shift")), []), scope);
+					return expr(conditionalExpression(
+						binaryExpression("!==", first, read(undefinedValue, scope)),
+						after,
+						read(arrayBoundsFailed(scope), scope),
+					));
+				}),
+				"removeLast()": wrapped((scope, arg) => {
+					const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("pop")), []), scope);
+					return expr(conditionalExpression(
+						binaryExpression("!==", first, read(undefinedValue, scope)),
+						after,
+						read(arrayBoundsFailed(scope), scope),
+					));
+				}),
+				"popLast()": wrapped((scope, arg) => {
+					const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("pop")), []), scope);
+					return expr(conditionalExpression(
+						binaryExpression("!==", first, read(undefinedValue, scope)),
+						read(wrapInOptional(expr(after), optionalValueType, scope), scope),
+						emptyOptional(optionalValueType),
+					));
+				}),
+				"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
+					return expr(assignmentExpression("=", memberExpression(read(arg(0, "array"), scope), identifier("length")), numericLiteral(0)));
+				}),
+				"reserveCapacity()": wrapped((scope, arg) => undefinedValue),
+				"index(after:)": wrapped((scope, arg) => {
+					const array = arg(0, "array");
+					const i = arg(1, "i");
+					const [first, after] = reuseExpression(read(i, scope), scope);
+					return expr(conditionalExpression(
+						binaryExpression("<", read(array, scope), first),
+						binaryExpression("+", after, numericLiteral(1)),
+						read(arrayBoundsFailed(scope), scope),
+					));
+				}),
+				"index(before:)": wrapped((scope, arg) => {
+					const i = arg(1, "i");
+					const [first, after] = reuseExpression(read(i, scope), scope);
+					return expr(conditionalExpression(
+						binaryExpression(">", first, numericLiteral(0)),
+						binaryExpression("-", after, numericLiteral(1)),
+						read(arrayBoundsFailed(scope), scope),
+					));
+				}),
+				"distance(from:to:)": wrapped((scope, arg) => {
+					const start = arg(1, "start");
+					const end = arg(2, "end");
+					return expr(binaryExpression("-", read(end, scope), read(start, scope)));
+				}),
 			},
 			possibleRepresentations: PossibleRepresentation.Array,
 			defaultValue() {
@@ -244,8 +335,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		};
 	},
 	"Dictionary": (globalScope, typeParameters) => {
-		expectLength(typeParameters, 2);
-		const [ keyType, valueType ] = typeParameters;
+		const [ keyType, valueType ] = typeParameters(2);
 		const possibleKeyType: Type = { kind: "optional", type: keyType };
 		const possibleValueType: Type = { kind: "optional", type: valueType };
 		const reifiedKeyType = reifyType(keyType, globalScope);
@@ -322,23 +412,15 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				innerTypes: {
 					Keys: () => {
 						return inheritLayout(reifiedKeysType, [
-							field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => {
-								return expr(memberExpression(read(value, scope), identifier("length")));
-							}),
-							field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
-								return expr(memberExpression(read(value, scope), identifier("length")));
-							}),
+							readLengthField("count", globalScope),
+							isEmptyFromLength(globalScope),
+							startIndexOfZero(globalScope),
+							readLengthField("endIndex", globalScope),
 							field("first", reifyType(possibleKeyType, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
 								const stringKey = memberExpression(after, numericLiteral(0), true);
 								const convertedKey = typeof converter !== "undefined" ? callExpression(converter, [stringKey]) : stringKey;
 								return expr(conditionalExpression(memberExpression(first, identifier("length")), read(wrapInOptional(expr(convertedKey), possibleKeyType, scope), scope), emptyOptional(possibleKeyType)));
-							}),
-							field("isEmpty", reifyType("Bool", globalScope), (value: Value, scope: Scope) => {
-								return expr(binaryExpression("!==", memberExpression(read(value, scope), identifier("length")), numericLiteral(0)));
-							}),
-							field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
-								return expr(numericLiteral(0));
 							}),
 							field("underestimatedCount", reifyType("Int", globalScope), (value: Value, scope: Scope) => {
 								return expr(memberExpression(read(value, scope), identifier("length")));
@@ -361,7 +443,24 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	},
 	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-	]),
+	], {
+		map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
+	}),
+	"BidirectionalCollection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
+	], {
+		"joined(separator:)": (scope, arg, type): Value => {
+			const collection = read(arg(0, "collection"), scope);
+			return callable((innerScope, innerArg) => {
+				const separator = read(innerArg(0, "separator"), scope);
+				return expr(callExpression(memberExpression(collection, identifier("join")), [separator]));
+			}, returnFunctionType(type));
+		},
+	}),
+	"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([]))),
+	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [], {
+		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
+	}),
 };
 
 export function emptyOptional(type: Type) {
@@ -393,26 +492,91 @@ export function optionalIsSome(expression: Expression, type: Type): Expression {
 	return binaryExpression("!==", expression, nullLiteral());
 }
 
-function arrayBoundsCheck(array: Identifier | ThisExpression, index: Identifier | ThisExpression): Statement {
-	return ifStatement(
-		logicalExpression(
-			"||",
-			binaryExpression(">=", index, memberExpression(array, identifier("length"))),
-			binaryExpression("<", index, numericLiteral(0)),
+function arrayBoundsFailed(scope: Scope) {
+	return call(functionValue("Swift.(swift-to-js).arrayBoundsFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope);
+}
+
+function arrayBoundsCheck(array: Value, index: Value, scope: Scope, mode: "read" | "write") {
+	const [firstArray, remainingArray] = reuseExpression(read(array, scope), scope);
+	const [firstIndex, remainingIndex] = reuseExpression(read(index, scope), scope);
+	return variable(memberExpression(
+		firstArray,
+		conditionalExpression(
+			logicalExpression(
+				"&&",
+				binaryExpression(mode === "write" ? ">=" : ">", memberExpression(remainingArray, identifier("length")), firstIndex),
+				binaryExpression(">=", remainingIndex, numericLiteral(0)),
+			),
+			remainingIndex,
+			read(arrayBoundsFailed(scope), scope),
 		),
-		throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")])),
-	);
+		true,
+	));
 }
 
 export const functions: FunctionMap = {
 	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [stringLiteral("Unexpectedly found nil while unwrapping an Optional value")]))])),
+	"Swift.(swift-to-js).arrayBoundsFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")]))])),
+	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {
+		return statements([
+			ifStatement(
+				logicalExpression("||",
+					binaryExpression(">",
+						read(arg(2, "i"), scope),
+						memberExpression(read(arg(0, "array"), scope), identifier("length")),
+					),
+					binaryExpression("<",
+						read(arg(2, "i"), scope),
+						numericLiteral(0),
+					),
+				),
+				expressionStatement(read(arrayBoundsFailed(scope), scope)),
+			),
+			// TODO: Remove use of splice, since it's slow
+			expressionStatement(callExpression(
+				memberExpression(read(arg(0, "array"), scope), identifier("splice")),
+				[
+					read(arg(2, "i"), scope),
+					numericLiteral(0),
+					read(arg(1, "newElement"), scope),
+				],
+			)),
+		]);
+	}),
+	"Swift.(swift-to-js).arrayRemoveAt()": noinline((scope, arg) => {
+		return statements([
+			ifStatement(
+				logicalExpression("||",
+					binaryExpression(">=",
+						read(arg(1, "i"), scope),
+						memberExpression(read(arg(0, "array"), scope), identifier("length")),
+					),
+					binaryExpression("<",
+						read(arg(1, "i"), scope),
+						numericLiteral(0),
+					),
+				),
+				expressionStatement(read(arrayBoundsFailed(scope), scope)),
+			),
+			// TODO: Remove use of splice, since it's slow
+			returnStatement(
+				memberExpression(
+					callExpression(
+						memberExpression(read(arg(0, "array"), scope), identifier("splice")),
+						[
+							read(arg(1, "i"), scope),
+							numericLiteral(1),
+						],
+					),
+					numericLiteral(0),
+					true,
+				),
+			),
+		]);
+	}),
 	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
 		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
-	"Strideable....": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
-	"Collection.count": returnLength,
-	"Collection.map": (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
-	"BidirectionalCollection.joined(separator:)": (scope, arg) => expr(callExpression(memberExpression(read(arg("this"), scope), identifier("join")), [read(arg(0), scope)])),
 	"??": returnTodo,
 	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
 	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),

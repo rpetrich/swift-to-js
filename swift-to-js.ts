@@ -87,15 +87,21 @@ function constructTypeFromNames(baseType: string, typeParameters?: ReadonlyArray
 	}
 	switch (baseType) {
 		case "Optional":
-			expectLength(typeParameters, 1);
+			if (typeParameters.length < 1) {
+				throw new TypeError(`Expected at least one type parameter for Optional`);
+			}
 			return { kind: "optional", type: parseType(typeParameters[0]) };
 		case "Tuple":
 			return { kind: "tuple", types: typeParameters.map((type) => parseType(type)) };
 		case "Array":
-			expectLength(typeParameters, 1);
+			if (typeParameters.length < 1) {
+				throw new TypeError(`Expected at least one type parameter for Array`);
+			}
 			return { kind: "array", type: parseType(typeParameters[0]) };
 		case "Dictionary":
-			expectLength(typeParameters, 2);
+			if (typeParameters.length < 2) {
+				throw new TypeError(`Expected at least two type parameters for Dictionary`);
+			}
 			return { kind: "dictionary", keyType: parseType(typeParameters[0]), valueType: parseType(typeParameters[1]) };
 		default:
 			return { kind: "generic", base: parseType(baseType), arguments: typeParameters.map((type) => parseType(type)) };
@@ -103,7 +109,7 @@ function constructTypeFromNames(baseType: string, typeParameters?: ReadonlyArray
 }
 
 function extractReference(term: Term, scope: Scope, type?: Function): Value {
-	const decl = nameForDeclRefExpr(term);
+	const decl = getProperty(term, "decl", isString);
 	const declaration = parseDeclaration(decl);
 	if (typeof declaration.local === "string") {
 		if (declaration.local === "$match") {
@@ -112,20 +118,13 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 		return variable(lookup(declaration.local, scope));
 	}
 	if (typeof declaration.member === "string") {
-		const functionType = declaration.type ? constructTypeFromNames(declaration.type, declaration.substitutions) : undefined;
-		const functions = functionType ? reifyType(functionType, scope).functions : scope.functions;
-		if (Object.hasOwnProperty.call(functions, declaration.member)) {
+		const functionType = typeof declaration.type === "string" ? reifyType(constructTypeFromNames(declaration.type, declaration.substitutions), scope) : undefined;
+		if (Object.hasOwnProperty.call(functionType !== undefined ? functionType.functions : scope.functions, declaration.member)) {
 			return functionValue(declaration.member, functionType, type || getFunctionType(term));
 		}
+		return variable(lookup(declaration.member, scope));
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
-}
-
-function nameForDeclRefExpr(term: Term) {
-	if (hasOwnProperty(term.properties, "discriminator")) {
-		return getProperty(term, "discriminator", isString);
-	}
-	return getProperty(term, "decl", isString);
 }
 
 function getType(term: Term) {

@@ -83,10 +83,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 
 export function wrapped(fn: FunctionBuilder): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
-		const innerType = returnType(type);
-		if (innerType.kind !== "function") {
-			throw new Error(`Expected ${name} to be a function that returns a function, instead it returns ${stringifyType(innerType)}`);
-		}
+		const innerType = returnFunctionType(type);
 		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, name), innerType);
 	};
 }
@@ -96,4 +93,12 @@ export function returnType(type: Type) {
 		return type.return;
 	}
 	throw new Error(`Expected a function type, got a ${type.kind} type`);
+}
+
+export function returnFunctionType(type: Type): Function {
+	const result = returnType(type);
+	if (result.kind !== "function") {
+		throw new Error(`Expected to recieve a function that returns a function, instead it returns ${stringifyType(result)}`);
+	}
+	return result;
 }
