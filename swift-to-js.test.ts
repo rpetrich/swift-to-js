@@ -3,7 +3,7 @@ import { compile } from "./swift-to-js";
 import { readdirSync, readFile as readFile_, statSync, writeFile as writeFile_ } from "fs";
 import { promisify } from "util";
 
-const writeOutput = true;
+const writeOutput = false;
 
 const readFile = promisify(readFile_);
 const writeFile = promisify(writeFile_);
