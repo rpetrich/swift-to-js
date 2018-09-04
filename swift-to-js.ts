@@ -6,10 +6,10 @@ import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass,
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { expectLength } from "./utils";
-import { ArgGetter, boxed, call, callable, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -163,15 +163,67 @@ function returnUndef() {
 	return undefined;
 }
 
-function translatePattern(term: Term, value: Expression, scope: Scope): Expression {
+interface PatternOutput {
+	prefix: Statement[];
+	value: Value;
+}
+
+const trueValue = expr(booleanLiteral(true));
+
+const emptyPattern: PatternOutput = {
+	prefix: [],
+	value: trueValue,
+};
+
+function mergePatterns(first: PatternOutput, second: PatternOutput, scope: Scope): PatternOutput {
+	const firstExpression = read(first.value, scope);
+	const prefix = first.prefix.concat(second.prefix);
+	if (firstExpression.type === "BooleanLiteral" && firstExpression.value === true) {
+		return {
+			prefix,
+			value: second.value,
+		};
+	}
+	const secondExpression = read(second.value, scope);
+	if (secondExpression.type === "BooleanLiteral" && secondExpression.value === true) {
+		return {
+			prefix,
+			value: expr(firstExpression),
+		};
+	}
+	return {
+		prefix,
+		value: expr(logicalExpression("&&", firstExpression, secondExpression)),
+	};
+}
+
+export function convertToPattern(value: Value): PatternOutput {
+	let prefix: Statement[] = [];
+	if (value.kind === "statements") {
+		const returningIndex = value.statements.findIndex((statements) => statements.type === "ReturnStatement");
+		if (returningIndex === value.statements.length - 1) {
+			prefix = value.statements.slice(0, value.statements.length - 1);
+			value = expr((value.statements[value.statements.length - 1] as ReturnStatement).argument);
+		}
+	}
+	return {
+		prefix,
+		value,
+	};
+}
+
+function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput {
 	switch (term.name) {
 		case "pattern_optional_some": // Development
 		case "optional_some_element": { // Swift 4.1
 			expectLength(term.children, 1);
 			const type = getType(term);
-			const [first, second] = reuseExpression(value, scope);
-			const assign = translatePattern(term.children[0], read(unwrapOptional(expr(first), type, scope), scope), scope);
-			return sequenceExpression([assign, optionalIsSome(second, type)]);
+			const [first, second] = reuseExpression(read(value, scope), scope);
+			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope);
+			return mergePatterns(assign, {
+				prefix: [],
+				value: expr(optionalIsSome(second, type)),
+			}, scope);
 		}
 		case "case_label_item":
 		case "pattern_let": {
@@ -180,7 +232,10 @@ function translatePattern(term: Term, value: Expression, scope: Scope): Expressi
 		}
 		case "pattern_expr": {
 			expectLength(term.children, 1);
-			return translateExpression(term.children[0], scope);
+			return {
+				prefix: [],
+				value: translateTermToValue(term.children[0], scope),
+			};
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
@@ -192,10 +247,17 @@ function translatePattern(term: Term, value: Expression, scope: Scope): Expressi
 			const name = mangleName(term.args[0]);
 			const type = getType(term);
 			if (Object.hasOwnProperty.call(scope.declarations, name)) {
-				return collapseToExpression(storeValue(name, expr(value), type, scope));
+				return {
+					prefix: storeValue(name, value, type, scope).map((expression) => expressionStatement(expression)),
+					value: trueValue,
+				};
 			} else {
 				addVariable(scope, name);
-				return assignmentExpression("=", name, read(copyValue(expr(value), type, scope), scope));
+				const pattern = convertToPattern(value);
+				return {
+					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copyValue(pattern.value, type, scope), scope)))]),
+					value: trueValue,
+				};
 			}
 		}
 		case "pattern_tuple": {
@@ -203,28 +265,35 @@ function translatePattern(term: Term, value: Expression, scope: Scope): Expressi
 			if (type.kind !== "tuple") {
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(type)}`);
 			}
-			switch (type.types.length) {
-				case 0:
-					return undefinedLiteral;
-				case 1:
-					return value;
-				default:
-					const [first, second] = reuseExpression(value, scope);
-					return collapseToExpression(term.children.map((child, i) => translatePattern(child, memberExpression(i ? second : first, numericLiteral(i), true), scope)));
-			}
+			const [first, second] = reuseExpression(read(value, scope), scope);
+			let prefix: Statement[] = [];
+			return term.children.reduce((existing, child, i) => {
+				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, numericLiteral(i), true)), scope);
+				return mergePatterns(existing, childPattern, scope);
+			}, emptyPattern);
 		}
 		case "pattern_any": {
-			return booleanLiteral(true);
+			return emptyPattern;
 		}
 		default: {
 			console.log(term);
-			return identifier("unknown_pattern_type$" + term.name);
+			return {
+				prefix: [],
+				value: expr(identifier("unknown_pattern_type$" + term.name)),
+			};
 		}
 	}
 }
 
 function translateExpression(term: Term, scope: Scope): Expression {
 	return read(translateTermToValue(term, scope), scope);
+}
+
+function valueForPattern(pattern: PatternOutput, scope: Scope): Value {
+	if (pattern.prefix.length) {
+		return statements(pattern.prefix.concat([returnStatement(read(pattern.value, scope))]));
+	}
+	return pattern.value;
 }
 
 function translateTermToValue(term: Term, scope: Scope): Value {
@@ -405,7 +474,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "pattern": {
 			expectLength(term.children, 2);
-			return expr(translatePattern(term.children[0], translateExpression(term.children[1], scope), scope));
+			return valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope), scope), scope);
 		}
 		case "closure_expr":
 		case "autoclosure_expr": {
@@ -631,7 +700,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				if (childTerm.children.length < 1) {
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
-				const predicate = childTerm.children.slice(0, childTerm.children.length - 1).map((child) => translatePattern(child, identifier("$match"), scope)).reduce((left, right) => logicalExpression("||", left, right));
+				const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
+				const patterns = remainingChildren.map((child) => translatePattern(child, expr(identifier("$match")), scope));
+				const expressions = patterns.map((pattern) => read(valueForPattern(pattern, scope), scope));
+				const predicate = expressions.reduce((left, right) => logicalExpression("||", left, right));
 				const body = blockStatement(translateStatement(childTerm.children[childTerm.children.length - 1], scope, functions));
 				// Basic optimization for else case in switch statement
 				if (typeof previous === "undefined" && predicate.type === "BooleanLiteral" && predicate.value === true) {
@@ -696,7 +768,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 		}
 		case "pattern_binding_decl": {
 			if (term.children.length === 2) {
-				return [expressionStatement(translatePattern(term.children[0], translateExpression(term.children[1], scope), scope))];
+				const value = translateTermToValue(term.children[1], scope);
+				const pattern = translatePattern(term.children[0], value, scope);
+				const expression = read(pattern.value, scope);
+				if (isPure(expression)) {
+					return pattern.prefix;
+				} else {
+					return pattern.prefix.concat([expressionStatement(expression)]);
+				}
 			}
 			if (term.children.length === 1) {
 				return emptyStatements;

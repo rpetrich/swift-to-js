@@ -252,7 +252,7 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 	}
 }
 
-function isPure(expression: Expression): boolean {
+export function isPure(expression: Expression): boolean {
 	switch (expression.type) {
 		case "Identifier":
 		case "StringLiteral":
