@@ -17,3 +17,15 @@ export function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): Reado
 		return tail;
 	}
 }
+
+export function cached<T>(fn: () => T): () => T {
+	let populated = false;
+	let value: T | undefined;
+	return () => {
+		if (!populated) {
+			value = fn();
+			populated = true;
+		}
+		return value as T;
+	};
+}

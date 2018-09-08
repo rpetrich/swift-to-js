@@ -2,7 +2,7 @@ import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { copyValue, expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Tuple, Type } from "./types";
-import { expectLength } from "./utils";
+import { cached, expectLength } from "./utils";
 import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
@@ -50,16 +50,16 @@ const voidType: Tuple = { kind: "tuple", types: [] };
 export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
 
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
-	"Bool": () => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
+	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
 		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
 		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
-	}),
-	"SignedNumeric": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	})),
+	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
-	}),
-	"Int": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	})),
+	"Int": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
@@ -78,14 +78,14 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"+=": assignmentBuiltin("+="),
 		"-=": assignmentBuiltin("-="),
 		"*=": assignmentBuiltin("*="),
-	}),
-	"Int64": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0))),
-	"FloatingPoint": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	})),
+	"Int64": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)))),
+	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 		"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
-	}),
-	"Float": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	})),
+	"Float": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
@@ -105,8 +105,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"-=": assignmentBuiltin("-="),
 		"*=": assignmentBuiltin("*="),
 		"/=": assignmentBuiltin("/="),
-	}),
-	"Double": () => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	})),
+	"Double": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
@@ -126,7 +126,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"-=": assignmentBuiltin("-="),
 		"*=": assignmentBuiltin("*="),
 		"/=": assignmentBuiltin("/="),
-	}),
+	})),
 	"String": (globalScope) => {
 		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -200,9 +200,9 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		};
 	},
 	// Should be represented as an empty struct, but we currently
-	"_OptionalNilComparisonType": () => primitive(PossibleRepresentation.Null, expr(nullLiteral()), [], {
+	"_OptionalNilComparisonType": cached(() => primitive(PossibleRepresentation.Null, expr(nullLiteral()), [], {
 		"init(nilLiteral:)": wrapped((scope, arg, type) => expr(nullLiteral())),
-	}),
+	})),
 	"Array": (globalScope, typeParameters) => {
 		const [ valueType ] = typeParameters(1);
 		const reified = reifyType(valueType, globalScope);
