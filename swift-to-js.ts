@@ -5,7 +5,7 @@ import { insertFunction, noinline, returnType, wrapped } from "./functions";
 import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
-import { expectLength } from "./utils";
+import { concat, expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
@@ -15,16 +15,6 @@ import { readdirSync } from "fs";
 import { argv } from "process";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
-
-function concat<T>(head: T[], tail: T[]): T[];
-function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T>;
-function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T> | T[] {
-	if (head.length) {
-		return tail.length ? head.concat(tail) : head;
-	} else {
-		return tail;
-	}
-}
 
 function getField(value: Value, field: Field, scope: Scope) {
 	if (field.stored) {

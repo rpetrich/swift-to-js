@@ -1,6 +1,7 @@
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
+import { concat } from "./utils";
 import { expr, read, reuseExpression, undefinedValue, Value } from "./values";
 
 import { arrayExpression, assignmentExpression, booleanLiteral, Expression, Identifier, isLiteral, memberExpression, MemberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, stringLiteral } from "babel-types";
@@ -280,7 +281,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 					};
 			}
 		case "generic":
-			return reifyType(type.base, scope, typeArguments.concat(type.arguments));
+			return reifyType(type.base, scope, concat(typeArguments, type.arguments));
 		case "metatype":
 			return primitive(PossibleRepresentation.Object, expr(objectExpression([])));
 		case "function":

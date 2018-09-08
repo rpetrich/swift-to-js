@@ -4,6 +4,7 @@ import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
+import { concat } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -38,7 +39,7 @@ export function statements(statements: Statement[]): StatementsValue | ReturnTyp
 			}
 			const exceptLast = statements.slice(0, statements.length - 1);
 			if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
-				return expr(sequenceExpression(exceptLast.map((statement) => (statement as ExpressionStatement).expression).concat(last)));
+				return expr(sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [last])));
 			}
 		}
 	}
@@ -153,7 +154,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			return expr(assignmentExpression(operator, dest.ref, read(source, scope)));
 		case "subscript":
 			const value = operator === "=" ? source : expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(dest, scope), read(source, scope)));
-			return call(dest.setter, undefinedValue, dest.args.concat([source]), scope, "set");
+			return call(dest.setter, undefinedValue, concat(dest.args, [source]), scope, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
@@ -201,7 +202,7 @@ export function read(value: Value, scope: Scope): Expression {
 
 export const undefinedValue = expr(undefinedLiteral);
 
-export function call(target: Value, thisArgument: Value, args: Value[], scope: Scope, type: "call" | "get" | "set" = "call"): Value {
+export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Value>, scope: Scope, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
 		if (i === "this") {
 			return thisArgument;
@@ -246,7 +247,7 @@ export function call(target: Value, thisArgument: Value, args: Value[], scope: S
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
 	if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
-		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), [thisArgument as Value].concat(args).map((value) => read(value, scope))));
+		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))));
 	} else {
 		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
 	}
