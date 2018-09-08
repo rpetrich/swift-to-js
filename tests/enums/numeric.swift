@@ -34,3 +34,7 @@ public func describe(divisible: Divisible) -> String {
 public func rawValue(of divisible: Divisible) -> Int {
     return divisible.rawValue
 }
+
+public func hashValue(of divisible: Divisible) -> Int {
+    return divisible.hashValue
+}

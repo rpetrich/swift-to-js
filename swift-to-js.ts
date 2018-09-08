@@ -647,7 +647,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			const fn = constructCallable(parameterLists[0], parameterLists.slice(1), getType(term));
 			if (/^anonname=/.test(name)) {
 				scope.functions[name] = fn;
-			} else if (!isConstructor && term.properties.access === "public") {
+			} else if (!isConstructor && term.properties.access === "public" && functions === scope.functions) {
 				functions[name] = noinline(fn);
 				insertFunction(name, scope, getFunctionType(term), fn, true);
 			} else {
@@ -737,21 +737,21 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			if (getProperty(term, "inherits", isString) !== "Int") {
 				throw new TypeError(`Only Int enums are supported!`);
 			}
-			const members: FunctionMap = {};
+			let statements = emptyStatements;
+			const methods: FunctionMap = {};
+			const layout: Field[] = [];
 			const cases = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
 				const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
 				expectLength(elementDecl.args, 1);
 				// TODO: Extract the actual rawValue and use this as the discriminator
 				const name = elementDecl.args[0];
-				members[name] = () => expr(numericLiteral(index));
+				methods[name] = () => expr(numericLiteral(index));
 				return name;
 			});
 			scope.types[term.args[0]] = () => {
 				return {
-					fields: [
-						field("rawValue", reifyType("Int", scope), (value) => value),
-					],
-					functions: members,
+					fields: layout,
+					functions: methods,
 					possibleRepresentations: PossibleRepresentation.Number,
 					defaultValue() {
 						throw new Error(`Unable to default instantiate enums`);
@@ -760,7 +760,30 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					cases,
 				};
 			};
-			return emptyStatements;
+			for (const child of term.children) {
+				if (child.name === "var_decl") {
+					expectLength(child.args, 1);
+					if (requiresGetter(child)) {
+						expectLength(child.children, 1);
+						const fieldName = child.args[0];
+						if (fieldName === "rawValue" || fieldName === "hashValue") {
+							// The built-in hashValue and rawValue accessors don't have proper pattern matching :(
+							layout.push(field(fieldName, reifyType("Int", scope), (value) => value));
+						} else {
+							layout.push(field(fieldName, reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
+								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+							}));
+						}
+						statements = concat(statements, translateStatement(child.children[0], scope, methods));
+					} else {
+						throw new TypeError(`Enums should not have any stored fields`);
+					}
+				} else if (child.name !== "enum_case_decl" && child.name !== "enum_element_decl" && child.name !== "typealias") {
+					statements = concat(statements, translateStatement(child, scope, methods));
+				}
+			}
+			return statements;
 		}
 		case "struct_decl": {
 			expectLength(term.args, 1);

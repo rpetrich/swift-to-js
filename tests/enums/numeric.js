@@ -27,3 +27,6 @@ export function describe$divisible$(divisible) {
 export function rawValue$of$(divisible) {
   return divisible;
 }
+export function hashValue$of$(divisible) {
+  return divisible;
+}

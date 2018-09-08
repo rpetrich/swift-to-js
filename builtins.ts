@@ -461,6 +461,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [], {
 		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
 	}),
+	"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [
+	], {
+		"finalize()": wrapped((scope, arg, type): Value => {
+			return arg(0, "hash");
+		}),
+	})),
 };
 
 export function emptyOptional(type: Type) {
