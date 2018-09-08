@@ -202,6 +202,18 @@ export function convertToPattern(value: Value): PatternOutput {
 	};
 }
 
+function discriminantForPatternTerm(term: Term): string {
+	for (const key of Object.keys(term.properties)) {
+		if (term.properties[key] === true) {
+			const match = key.match(/\.(.+?)$/);
+			if (match) {
+				return match[1];
+			}
+		}
+	}
+	throw new Error(`Expected to have a discriminant property!`);
+}
+
 function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput {
 	switch (term.name) {
 		case "pattern_optional_some": // Development
@@ -261,6 +273,23 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, numericLiteral(i), true)), scope);
 				return mergePatterns(existing, childPattern, scope);
 			}, emptyPattern);
+		}
+		case "pattern_enum_element": {
+			const type = getType(term);
+			const reified = reifyType(type, scope);
+			const cases = reified.cases;
+			if (typeof cases === "undefined") {
+				throw new TypeError(`Expected ${stringifyType(type)} to be an enum, but it didn't have any cases.`);
+			}
+			const discriminant = discriminantForPatternTerm(term);
+			const index = cases.indexOf(discriminant);
+			if (index === -1) {
+				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}`);
+			}
+			return {
+				prefix: [],
+				value: expr(binaryExpression("===", read(value, scope), numericLiteral(index))),
+			};
 		}
 		case "pattern_any": {
 			return emptyPattern;
@@ -704,17 +733,18 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			return typeof cases !== "undefined" ? [declaration, cases] : [declaration];
 		}
 		case "enum_decl": {
-			console.log(term);
 			expectLength(term.args, 1);
 			if (getProperty(term, "inherits", isString) !== "Int") {
 				throw new TypeError(`Only Int enums are supported!`);
 			}
 			const members: FunctionMap = {};
-			termsWithName(term.children, "enum_case_decl").forEach((caseDecl, index) => {
+			const cases = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
 				const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
 				expectLength(elementDecl.args, 1);
 				// TODO: Extract the actual rawValue and use this as the discriminator
-				members[elementDecl.args[0]] = () => expr(numericLiteral(index));
+				const name = elementDecl.args[0];
+				members[name] = () => expr(numericLiteral(index));
+				return name;
 			});
 			scope.types[term.args[0]] = () => {
 				return {
@@ -727,6 +757,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 						throw new Error(`Unable to default instantiate enums`);
 					},
 					innerTypes: {},
+					cases,
 				};
 			};
 			return emptyStatements;

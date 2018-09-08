@@ -8,7 +8,7 @@ export interface Term {
 	location: Location;
 }
 
-export type Property = string | Range | string[];
+export type Property = true | string | Range | string[];
 
 export interface Range {
 	from: string;

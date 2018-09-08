@@ -24,6 +24,7 @@ export interface ReifiedType {
 	functions: FunctionMap;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
+	cases?: string[];
 	defaultValue(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
 	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
