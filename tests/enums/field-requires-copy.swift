@@ -17,3 +17,7 @@ public func makeCopy(ofPosition position: Position) -> Position {
 	let copy = position
 	return copy
 }
+
+public func makeCopyDirect(ofPosition position: Position) -> Position {
+	return position
+}

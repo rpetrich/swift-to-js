@@ -9,3 +9,12 @@ export function makeCopy$ofPosition$(position) {
   }] : position.slice();
   return copy;
 }
+export function makeCopyDirect$ofPosition$(position) {
+  return position[0] === 2 ? [2, {
+    x: position[1].x,
+    y: position[1].y
+  }, position[2]] : position[0] === 1 ? [1, {
+    x: position[1].x,
+    y: position[1].y
+  }] : position.slice();
+}
