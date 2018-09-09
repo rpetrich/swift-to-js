@@ -50,7 +50,7 @@ SingleQuotedString "singlequote string"
   = "'" content:(EscapeSequence / [^'])* "'" { return content.join(""); }
 
 List "list"
-  = CommaSeparatedBareString / BracketedList / EmptyBracketedList
+  = BracketedList / CommaSeparatedBareString / EmptyBracketedList
 
 CommaSeparatedBareString
   = head:(SingleQuotedString / BareString) tail:CommaPrefixedBareString+ { return [head].concat(tail); }
@@ -58,9 +58,9 @@ CommaPrefixedBareString
   = ',' str:(SingleQuotedString / BareString) { return str; }
 
 BracketedList
-  = '[' _ head:BareString tail:BracketedListTail* _ ']' { return [head].concat(tail); }
+  = '[' _ head:BareStringNoWhitespace tail:BracketedListTail* _ ']' { return [head].concat(tail); }
 BracketedListTail
-  = ',' _ string:BareString { return string; }
+  = ',' _ string:BareStringNoWhitespace { return string; }
 
 EmptyBracketedList
   = '[]' { return []; }
@@ -82,6 +82,13 @@ BareStringSquarePair "subscripted bare string"
   = ws: _ '[' body:BareStringTailWhitespace* ']' { return ws + "[" + body.join("") + "]"; }
 BareStringExtension
   = ' extension.' // Special case for extension methods. At some point we will need declaration parsing in here
+
+BareStringNoWhitespace "bare string no whitespace"
+  = prefix:BareStringNoWhitespaceToken remaining:BareStringNoWhitespaceTail* { return prefix + remaining.join(""); }
+BareStringNoWhitespaceToken
+  = [a-zA-Z0-9_.:@*<>~$%&+\-!?/]
+BareStringNoWhitespaceTail
+  = BareStringNoWhitespaceToken
 
 ParenthesizedBareString "parenthesized bare string"
   = all:('(' BareString ')') { return all.join(""); }
