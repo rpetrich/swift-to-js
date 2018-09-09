@@ -1,21 +1,28 @@
-export function make$empty$(empty) {
+export function makeEmpty() {
   return [0];
 }
-export function make$upc$(value) {
-  return [1, value];
+export function makeUpc$numberSystem$manufacturer$product$check$(numberSystem, manufacturer, product, check) {
+  return [1, numberSystem, manufacturer, product, check];
 }
-export function make$qrCode$(value) {
+export function makeQr$value$(value) {
   return [2, value];
 }
 export function describe$barcode$(barcode) {
   let value;
+  let numberSystem;
+  let manufacturer;
+  let product;
+  let check;
   var $match = barcode;
 
   if ($match[0] === 0) {
     return "Empty";
   } else if ($match[0] === 1) {
-    value = $match[1];
-    return "UPC:" + String(value);
+    numberSystem = $match[1];
+    manufacturer = $match[2];
+    product = $match[3];
+    check = $match[4];
+    return "UPC:" + String(numberSystem) + "-" + String(manufacturer) + "-" + String(product) + "-" + String(check);
   } else if ($match[0] === 2) {
     value = $match[1];
     return "QR:" + value;

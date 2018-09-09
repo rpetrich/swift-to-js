@@ -280,7 +280,6 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(type)}`);
 			}
 			const [first, second] = reuseExpression(read(value, scope), scope);
-			let prefix: Statement[] = [];
 			return term.children.reduce((existing, child, i) => {
 				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, numericLiteral(i), true)), scope);
 				return mergePatterns(existing, childPattern, scope);
@@ -310,25 +309,46 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				};
 			}
 			const child = term.children[0];
-			if (child.name !== "pattern_paren") {
-				throw new TypeError(`Expected a pattern_paren, got a ${child.name}`);
-			}
-			expectLength(child.children, 1);
+			//expectLength(child.children, 1);
 			let patternExpression: Expression;
 			switch (cases[index].fieldTypes.length) {
 				case 0:
 					throw new Error(`Tried to use a pattern on an enum case that has no fields`);
 				case 1:
+					// Index 1 to account for the discriminant
 					patternExpression = memberExpression(after, numericLiteral(1), true);
+					// Special-case pattern matching using pattern_paren on a enum case with one field
+					if (child.name === "pattern_paren") {
+						return {
+							prefix: emptyStatements,
+							test,
+							next: translatePattern(child.children[0], expr(patternExpression), scope),
+						};
+					}
 					break;
 				default:
+					// Special-case pattern matching using pattern_tuple on a enum case with more than one field
+					if (child.name === "pattern_tuple") {
+						const next = child.children.reduce((existing, tupleChild, i) => {
+							// Offset by 1 to account for the discriminant
+							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, numericLiteral(i + 1), true)), scope);
+							return mergePatterns(existing, childPattern, scope);
+						}, emptyPattern);
+						return {
+							prefix: emptyStatements,
+							test,
+							next,
+						};
+					}
+					// Remove the discriminant
 					patternExpression = callExpression(memberExpression(after, identifier("slice")), [numericLiteral(1)]);
 					break;
 			}
+			// General case pattern matching on an enum
 			return {
 				prefix: emptyStatements,
 				test,
-				next: translatePattern(child.children[0], expr(patternExpression), scope),
+				next: translatePattern(child, expr(patternExpression), scope),
 			};
 		}
 		case "pattern_any": {

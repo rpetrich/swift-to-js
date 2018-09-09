@@ -1,18 +1,18 @@
 public enum Barcode {
 	case empty
-    case upc(Int)
+    case upc(Int, Int, Int, Int)
     case qrCode(String)
 }
 
-public func make(empty: ()) -> Barcode {
+public func makeEmpty() -> Barcode {
 	return .empty
 }
 
-public func make(upc value: Int) -> Barcode {
-	return .upc(value)
+public func makeUpc(numberSystem: Int, manufacturer: Int, product: Int, check: Int) -> Barcode {
+	return .upc(numberSystem, manufacturer, product, check)
 }
 
-public func make(qrCode value: String) -> Barcode {
+public func makeQr(value: String) -> Barcode {
 	return .qrCode(value)
 }
 
@@ -20,8 +20,8 @@ public func describe(barcode: Barcode) -> String {
 	switch barcode {
 		case .empty:
 			return "Empty"
-		case .upc(let value):
-			return "UPC:" + String(value)
+		case .upc(let numberSystem, let manufacturer, let product, let check):
+			return "UPC:" + String(numberSystem) + "-" + String(manufacturer) + "-" + String(product) + "-" + String(check)
 		case .qrCode(let value):
 			return "QR:" + value
 	}
