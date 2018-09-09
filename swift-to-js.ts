@@ -1,7 +1,7 @@
 import { parse as parseAST, Property, Term } from "./ast";
 import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
-import { insertFunction, noinline, returnType, wrapped } from "./functions";
+import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
@@ -237,10 +237,18 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				next: assign,
 			};
 		}
-		case "case_label_item":
-		case "pattern_let": {
+		case "case_label_item": {
 			expectLength(term.children, 1);
 			return translatePattern(term.children[0], value, scope);
+		}
+		case "pattern_let": {
+			expectLength(term.children, 1);
+			// TODO: Figure out how to avoid the copy here since it should only be necessary on var patterns
+			return translatePattern(term.children[0], copy(value, getType(term)), scope);
+		}
+		case "pattern_var": {
+			expectLength(term.children, 1);
+			return translatePattern(term.children[0], copy(value, getType(term)), scope);
 		}
 		case "pattern_expr": {
 			expectLength(term.children, 1);
@@ -269,7 +277,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				}
 				const pattern = convertToPattern(value);
 				return {
-					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copy(pattern.test, type), scope)))]),
+					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(pattern.test, scope)))]),
 					test: trueValue,
 				};
 			}
@@ -295,7 +303,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			const discriminant = discriminantForPatternTerm(term);
 			const index = cases.findIndex((possibleCase) => possibleCase.name === discriminant);
 			if (index === -1) {
-				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}`);
+				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
 			}
 			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
 			const [first, after] = reuseExpression(read(value, scope), scope);
@@ -862,10 +870,83 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			const baseType = typeof inherits === "string" ? parseType(inherits) : undefined;
 			const baseReifiedType = typeof baseType !== "undefined" ? reifyType(baseType, scope) : undefined;
 			let statements = emptyStatements;
-			const methods: FunctionMap = {};
+			const enumName = term.args[0];
+			const copyFunctionName = `${enumName}.copy`;
+			const methods: FunctionMap = {
+				[copyFunctionName]: noinline((innerScope, arg) => copyHelper(arg(0, "source"), innerScope)),
+			};
+			function copyHelper(value: Value, innerScope: Scope): Value {
+				// Passthrough to the underlying type, which should generally be simple
+				if (baseReifiedType) {
+					return baseReifiedType.copy ? baseReifiedType.copy(value, innerScope) : value;
+				}
+				const expression = read(value, innerScope);
+				if (expressionSkipsCopy(expression)) {
+					return expr(expression);
+				}
+				if (requiresCopyHelper) {
+					// Emit checks for cases that have field that require copying
+					const [first, after] = reuseExpression(expression, scope);
+					let usedFirst = false;
+					return expr(cases.reduce(
+						(previous, enumCase, i) => {
+							if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
+								const test = binaryExpression("===", memberExpression(usedFirst ? after : first, numericLiteral(0), true), numericLiteral(i));
+								usedFirst = true;
+								const copyCase = arrayExpression(concat([numericLiteral(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
+									// if (fieldType === baseReifiedType) {
+										// TODO: Avoid resetting this each time
+										// methods["$copy"] = noinline((innermostScope, arg) => copyHelper(arg(0), innermostScope));
+									// }
+									const fieldExpression = memberExpression(after, numericLiteral(fieldIndex + 1), true);
+									return fieldType.copy ? read(fieldType.copy(expr(fieldExpression), scope), scope) : fieldExpression;
+								})));
+								return conditionalExpression(test, copyCase, previous);
+							} else {
+								return previous;
+							}
+						},
+						// Fallback to slicing the array for remaining simple cases
+						callExpression(memberExpression(after, identifier("slice")), []) as Expression,
+					));
+				} else {
+					return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
+				}
+			}
 			const layout: Field[] = [];
 			let requiresCopyHelper: boolean = false;
-			const cases: EnumCase[] = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
+			const cases: EnumCase[] = [];
+			const selfType: Type = {
+				kind: "name",
+				name: enumName,
+			};
+			// Reify self
+			const reifiedSelfType: ReifiedType = {
+				fields: layout,
+				functions: methods,
+				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
+				defaultValue() {
+					throw new Error(`Unable to default instantiate enums`);
+				},
+				innerTypes: {},
+				copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
+					// Skip the copy if we can—must be done on this side of the inlining boundary
+					const expression = read(value, scope);
+					if (expressionSkipsCopy(expression)) {
+						return expr(expression);
+					}
+					if (!requiresCopyHelper) {
+						return copyHelper(expr(expression), innerScope);
+					}
+					// Dispatch through the function so that recursion doesn't kill us
+					const copyFunctionType: Function = { kind: "function", arguments: { kind: "tuple", types: [selfType] }, return: selfType, throws: false, rethrows: false, attributes: [] };
+					return call(functionValue(copyFunctionName, reifiedSelfType, copyFunctionType), undefinedValue, [expr(expression)], scope);
+				},
+				cases,
+			};
+			scope.types[enumName] = () => reifiedSelfType;
+			// Populate each case
+			termsWithName(term.children, "enum_case_decl").forEach((caseDecl, index) => {
 				const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
 				expectLength(elementDecl.args, 1);
 				// TODO: Extract the actual rawValue and use this as the discriminator
@@ -876,7 +957,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 						const args = type.arguments.types.map((argType, argIndex) => read(copy(arg(argIndex), argType), innerScope));
 						return expr(arrayExpression(concat([numericLiteral(index)], args)));
 					});
-					return {
+					cases.push({
 						name,
 						fieldTypes: type.arguments.types.map((argType) => {
 							const reified = reifyType(argType, scope);
@@ -885,7 +966,8 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 							}
 							return reified;
 						}),
-					};
+					});
+					return;
 				}
 				if (baseType) {
 					// TODO: Extract the underlying value, which may actually not be numeric!
@@ -893,52 +975,12 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				} else {
 					methods[name] = () => expr(arrayExpression([numericLiteral(index)]));
 				}
-				return {
+				cases.push({
 					name,
 					fieldTypes: [],
-				};
+				});
 			});
-			const enumName = term.args[0];
-			scope.types[enumName] = () => {
-				return {
-					fields: layout,
-					functions: methods,
-					possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
-					defaultValue() {
-						throw new Error(`Unable to default instantiate enums`);
-					},
-					innerTypes: {},
-					copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
-						const expression = read(value, innerScope);
-						if (expressionSkipsCopy(expression)) {
-							return expr(expression);
-						}
-						if (requiresCopyHelper) {
-							const [first, after] = reuseExpression(expression, scope);
-							let usedFirst = false;
-							return expr(cases.reduce(
-								(previous, enumCase, i) => {
-									if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
-										const test = binaryExpression("===", memberExpression(usedFirst ? after : first, numericLiteral(0), true), numericLiteral(i));
-										usedFirst = true;
-										const copyCase = arrayExpression(concat([numericLiteral(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
-											const fieldExpression = memberExpression(after, numericLiteral(fieldIndex + 1), true);
-											return fieldType.copy ? read(fieldType.copy(expr(fieldExpression), scope), scope) : fieldExpression;
-										})));
-										return conditionalExpression(test, copyCase, previous);
-									} else {
-										return previous;
-									}
-								},
-								callExpression(memberExpression(after, identifier("slice")), []) as Expression,
-							));
-						} else {
-							return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
-						}
-					},
-					cases,
-				};
-			};
+			// Populate fields and members
 			for (const child of term.children) {
 				if (child.name === "var_decl") {
 					expectLength(child.args, 1);
