@@ -9,7 +9,7 @@ import { concat, expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -371,10 +371,6 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 	}
 }
 
-function translateExpression(term: Term, scope: Scope): Expression {
-	return read(translateTermToValue(term, scope), scope);
-}
-
 function valueForPattern(pattern: PatternOutput, scope: Scope): Value {
 	let test: Value;
 	if (typeof pattern.next !== "undefined") {
@@ -449,7 +445,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				return translateTermToValue(child, scope);
 			}
 			return variable(memberExpression(
-				translateExpression(child, scope),
+				read(translateTermToValue(child, scope), scope),
 				numericLiteral(+getProperty(term, "field", isString)),
 				true,
 			));
@@ -543,7 +539,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			if (type.kind !== "array") {
 				throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
 			}
-			return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => translateExpression(child, scope))));
+			return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => read(translateTermToValue(child, scope), scope))));
 		}
 		case "dictionary_expr": {
 			const type = getType(term);
@@ -557,7 +553,9 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 					throw new TypeError(`Expected a tuple_expr, got a ${child.name}`);
 				}
 				expectLength(child.children, 2);
-				properties.push(objectProperty(translateExpression(child.children[0], scope), translateExpression(child.children[1], scope), true));
+				const keyChild = child.children[0];
+				const valueChild = child.children[1];
+				properties.push(objectProperty(read(translateTermToValue(keyChild, scope), scope), read(translateTermToValue(valueChild, scope), scope), true));
 			}
 			return expr(objectExpression(properties));
 		}
@@ -568,9 +566,9 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		case "if_expr": {
 			expectLength(term.children, 3);
 			return expr(conditionalExpression(
-				translateExpression(term.children[0], scope),
-				translateExpression(term.children[1], scope),
-				translateExpression(term.children[2], scope),
+				read(translateTermToValue(term.children[0], scope), scope),
+				read(translateTermToValue(term.children[1], scope), scope),
+				read(translateTermToValue(term.children[2], scope), scope),
 			));
 		}
 		case "inject_into_optional": {
@@ -663,6 +661,12 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
+			expectLength(term.children, 1, 2);
+			return translateTermToValue(term.children[term.children.length - 1], scope);
+		}
+		case "normal_conformance": {
+			// TODO: Wrap with runtime type information
+			expectLength(term.children, 1);
 			return translateTermToValue(term.children[0], scope);
 		}
 		default: {
@@ -717,7 +721,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 									if (children[0].name === "member_ref_expr") {
 										if (parseDeclaration(getProperty(children[0], "decl", isString)).member === fieldName) {
 											body.shift();
-											return translateExpression(children[1], childScope);
+											return read(translateTermToValue(children[1], childScope), childScope);
 										}
 									}
 								}
@@ -822,13 +826,16 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 		}
 		case "while_stmt": {
 			expectLength(term.children, 2);
-			return [whileStatement(translateExpression(term.children[0], scope), blockStatement(translateStatement(term.children[1], scope, functions)))];
+			const testTerm = term.children[0];
+			const bodyTerm = term.children[1];
+			return [whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateStatement(bodyTerm, scope, functions)))];
 		}
 		case "switch_stmt": {
 			if (term.children.length < 1) {
 				throw new Error(`Expected at least one term, got ${term.children.length}`);
 			}
-			const declaration = variableDeclaration("var", [variableDeclarator(identifier("$match"), translateExpression(term.children[0], scope))]);
+			const discriminantTerm = term.children[0];
+			const declaration = variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope), scope))]);
 			const cases = term.children.slice(1).reduceRight((previous: Statement | undefined, childTerm: Term): Statement => {
 				if (childTerm.name !== "case_stmt") {
 					throw new Error(`Expected a case_stmt, got a ${childTerm.name}`);
@@ -863,6 +870,11 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				return pendingStatement;
 			}, undefined);
 			return typeof cases !== "undefined" ? [declaration, cases] : [declaration];
+		}
+		case "throw_stmt": {
+			expectLength(term.children, 1);
+			const expressionTerm = term.children[0];
+			return [throwStatement(read(translateTermToValue(expressionTerm, scope), scope))];
 		}
 		case "enum_decl": {
 			expectLength(term.args, 1);
@@ -1090,7 +1102,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			return [classDeclaration(mangleName(term.args[0]), undefined, classBody([]), [])];
 		}
 		default: {
-			return [expressionStatement(translateExpression(term, scope))];
+			return [expressionStatement(read(translateTermToValue(term, scope), scope))];
 		}
 	}
 }

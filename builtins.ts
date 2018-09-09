@@ -446,6 +446,10 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
 		}
 	},
+	"Error": (globalScope) => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [
+		field("hashValue", reifyType("Int", globalScope), (value) => value),
+	], {
+	}),
 	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	], {
