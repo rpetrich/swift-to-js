@@ -309,7 +309,6 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				};
 			}
 			const child = term.children[0];
-			//expectLength(child.children, 1);
 			let patternExpression: Expression;
 			switch (cases[index].fieldTypes.length) {
 				case 0:
@@ -861,6 +860,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			let statements = emptyStatements;
 			const methods: FunctionMap = {};
 			const layout: Field[] = [];
+			let requiresCopyHelper: boolean = false;
 			const cases: EnumCase[] = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
 				const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
 				expectLength(elementDecl.args, 1);
@@ -874,7 +874,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					});
 					return {
 						name,
-						fieldTypes: type.arguments.types.map((argType) => reifyType(argType, scope)),
+						fieldTypes: type.arguments.types.map((argType) => {
+							const reified = reifyType(argType, scope);
+							if (reified.copy) {
+								requiresCopyHelper = true;
+							}
+							return reified;
+						}),
 					};
 				}
 				if (baseType) {
@@ -903,8 +909,28 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 						if (expressionSkipsCopy(expression)) {
 							return expr(expression);
 						}
-						// TODO: Implement proper copy behaviour that deep copies properly
-						return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
+						if (requiresCopyHelper) {
+							const [first, after] = reuseExpression(expression, scope);
+							let usedFirst = false;
+							return expr(cases.reduce(
+								(previous, enumCase, i) => {
+									if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
+										const test = binaryExpression("===", memberExpression(usedFirst ? after : first, numericLiteral(0), true), numericLiteral(i));
+										usedFirst = true;
+										const copyCase = arrayExpression(concat([numericLiteral(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
+											const fieldExpression = memberExpression(after, numericLiteral(fieldIndex + 1), true);
+											return fieldType.copy ? read(fieldType.copy(expr(fieldExpression), scope), scope) : fieldExpression;
+										})));
+										return conditionalExpression(test, copyCase, previous);
+									} else {
+										return previous;
+									}
+								},
+								callExpression(memberExpression(after, identifier("slice")), []) as Expression,
+							));
+						} else {
+							return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
+						}
 					},
 					cases,
 				};
