@@ -913,6 +913,12 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			const expressionTerm = term.children[0];
 			return [throwStatement(read(translateTermToValue(expressionTerm, scope), scope))];
 		}
+		case "guard_stmt": {
+			expectLength(term.children, 2);
+			const testTerm = term.children[0];
+			const bodyTerm = term.children[1];
+			return [ifStatement(unaryExpression("!", read(translateTermToValue(testTerm, scope), scope)), blockStatement(translateAllStatements(bodyTerm.children, scope, functions)))];
+		}
 		case "do_catch_stmt": {
 			if (term.children.length < 2) {
 				expectLength(term.children, 2);
