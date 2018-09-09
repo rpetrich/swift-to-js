@@ -45,7 +45,7 @@ Array types are implemented as JavaScript arrays, with deep copying of embedded 
 
 Dictionary types are implemented as a JavaScript object and support only primitive keys. For non-string keys, appropriate conversion functions are implemented when reading keys. swift-to-js may migrate to using ES6 Maps for some types, but will need a custom map to support compound value types as keys.
 
-Simple enums are implemented as a number representing each case. Future work will have enums implemented similar to tuples, with the discriminator stored in the first field. Potentially even later enums containing values with disjoint representations could even be stored unboxed. This requires more research.
+Simple enums are implemented as a number representing each case. Enums that contain fields are implemented as an array with the first element representing the discriminant index and case fields stored starting at element index 1. If any field of any case requires copying a deep copy helper will be emitted for every assignment, otherwise a simple call to `slice`. In the future it may be possible that enums containing values with disjoint representations could even be stored unboxed. This requires more research.
 
 Exceptions will be implemented as normal JavaScript exceptions and try/catch blocks (was in previous SSA-based implementation). Panics are, unfortunately, also implemented as exceptions leading to collisions in any code that recovers from an exception.
 
