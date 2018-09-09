@@ -663,7 +663,8 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				read(call(forceUnwrapFailed, undefinedValue, [], scope), scope),
 			));
 		}
-		case "try_expr": {
+		case "try_expr":
+		case "force_try_expr": {
 			expectLength(term.children, 1);
 			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
 			return translateTermToValue(term.children[0], scope);
