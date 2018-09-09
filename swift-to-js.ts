@@ -9,7 +9,7 @@ import { concat, expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -852,7 +852,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					return value.statements;
 				}
 				const expression = read(value, scope);
-				if (expression.type === "Identifier" && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
+				if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
 					return [returnStatement(expression)];
 				}
 				const copied = copy(expr(expression), getType(term.children[0]));
@@ -928,7 +928,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				for (const child of remainingChildren) {
 					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), scope), scope);
 					mergedPrefix = concat(mergedPrefix, prefix);
-					if (mergedTest.type === "BooleanLiteral" && mergedTest.value === false) {
+					if (isBooleanLiteral(mergedTest) && mergedTest.value === false) {
 						mergedTest = test;
 					} else if (!isTrueExpression(mergedTest)) {
 						mergedTest = logicalExpression("||", mergedTest, test);
@@ -1219,7 +1219,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			return [classDeclaration(mangleName(term.args[0]), undefined, classBody([]), [])];
 		}
 		default: {
-			return [expressionStatement(read(translateTermToValue(term, scope), scope))];
+			const value = translateTermToValue(term, scope);
+			const pattern = convertToPattern(value);
+			const { prefix, test, suffix } = flattenPattern(pattern, scope);
+			return concat(concat(prefix, isPure(test) ? emptyStatements : [expressionStatement(test)]), suffix);
 		}
 	}
 }
