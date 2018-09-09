@@ -7,7 +7,9 @@ Term
       if (typeof token == "string") {
         args.push(token);
       } else {
-        props[token.key] = token.value;
+        if (token.value !== true || !Object.hasOwnProperty.call(props, token.key)) {
+          props[token.key] = token.value;
+        }
       }
     }
     headTokens.forEach(addToken);
