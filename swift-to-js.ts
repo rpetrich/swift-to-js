@@ -422,7 +422,7 @@ function flattenPattern(pattern: PatternOutput, scope: Scope): { prefix: Stateme
 	};
 }
 
-function translateTermToValue(term: Term, scope: Scope): Value {
+function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value: Value, optionalType: Type) => Value): Value {
 	switch (term.name) {
 		case "member_ref_expr": {
 			expectLength(term.children, 1);
@@ -435,7 +435,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			}
 			for (const field of reifyType(type, scope).fields) {
 				if (field.name === member) {
-					return getField(translateTermToValue(term.children[0], scope), field, scope);
+					return getField(translateTermToValue(term.children[0], scope, bindingContext), field, scope);
 				}
 			}
 			throw new TypeError(`Could not find ${member} in ${stringifyType(type)}`);
@@ -448,17 +448,17 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(tupleType)}`);
 			}
 			if (tupleType.types.length === 1) {
-				return translateTermToValue(child, scope);
+				return translateTermToValue(child, scope, bindingContext);
 			}
 			return variable(memberExpression(
-				read(translateTermToValue(child, scope), scope),
+				read(translateTermToValue(child, scope, bindingContext), scope),
 				numericLiteral(+getProperty(term, "field", isString)),
 				true,
 			));
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
-			return translateTermToValue(term.children[0], scope);
+			return translateTermToValue(term.children[0], scope, bindingContext);
 		}
 		case "declref_expr": {
 			expectLength(term.children, 0);
@@ -496,7 +496,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				location: type.location,
 			};
 			const setter = extractReference(term, scope, setterType);
-			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope)));
+			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)));
 		}
 		case "prefix_unary_expr":
 		case "call_expr":
@@ -506,9 +506,9 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			expectLength(term.children, 2);
 			const target = term.children[0];
 			const args = term.children[1];
-			const peekedTarget = translateTermToValue(target, scope);
+			const peekedTarget = translateTermToValue(target, scope, bindingContext);
 			const type = getType(args);
-			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope) : tuple([translateTermToValue(args, scope)]);
+			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
 			if (argsValue.kind === "tuple") {
 				return call(peekedTarget, undefinedValue, argsValue.values, scope);
 			} else {
@@ -517,11 +517,11 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "tuple_expr": {
 			if (term.children.length === 1) {
-				return translateTermToValue(term.children[0], scope);
+				return translateTermToValue(term.children[0], scope, bindingContext);
 			}
 			return {
 				kind: "tuple",
-				values: term.children.map((child) => translateTermToValue(child, scope)),
+				values: term.children.map((child) => translateTermToValue(child, scope, bindingContext)),
 			};
 		}
 		case "type_expr": {
@@ -545,7 +545,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			if (type.kind !== "array") {
 				throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
 			}
-			return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => read(translateTermToValue(child, scope), scope))));
+			return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => read(translateTermToValue(child, scope, bindingContext), scope))));
 		}
 		case "dictionary_expr": {
 			const type = getType(term);
@@ -559,48 +559,48 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				expectLength(child.children, 2);
 				const keyChild = child.children[0];
 				const valueChild = child.children[1];
-				properties.push(objectProperty(read(translateTermToValue(keyChild, scope), scope), read(translateTermToValue(valueChild, scope), scope), true));
+				properties.push(objectProperty(read(translateTermToValue(keyChild, scope, bindingContext), scope), read(translateTermToValue(valueChild, scope, bindingContext), scope), true));
 			}
 			return expr(objectExpression(properties));
 		}
 		case "paren_expr": {
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope);
+			return translateTermToValue(term.children[0], scope, bindingContext);
 		}
 		case "if_expr": {
 			expectLength(term.children, 3);
 			return expr(conditionalExpression(
-				read(translateTermToValue(term.children[0], scope), scope),
-				read(translateTermToValue(term.children[1], scope), scope),
-				read(translateTermToValue(term.children[2], scope), scope),
+				read(translateTermToValue(term.children[0], scope, bindingContext), scope),
+				read(translateTermToValue(term.children[1], scope, bindingContext), scope),
+				read(translateTermToValue(term.children[2], scope, bindingContext), scope),
 			));
 		}
 		case "inject_into_optional": {
 			expectLength(term.children, 1);
-			return wrapInOptional(translateTermToValue(term.children[0], scope), getType(term), scope);
+			return wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getType(term), scope);
 		}
 		case "function_conversion_expr": {
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope);
+			return translateTermToValue(term.children[0], scope, bindingContext);
 		}
 		case "load_expr": {
 			expectLength(term.children, 1);
-			return unbox(translateTermToValue(term.children[0], scope), scope);
+			return unbox(translateTermToValue(term.children[0], scope, bindingContext), scope);
 		}
 		case "assign_expr": {
 			expectLength(term.children, 2);
 			const type = getType(term.children[0]);
-			const dest = translateTermToValue(term.children[0], scope);
-			const source = translateTermToValue(term.children[1], scope);
+			const dest = translateTermToValue(term.children[0], scope, bindingContext);
+			const source = translateTermToValue(term.children[1], scope, bindingContext);
 			return set(dest, source, scope);
 		}
 		case "inout_expr": {
 			expectLength(term.children, 1);
-			return boxed(translateTermToValue(term.children[0], scope));
+			return boxed(translateTermToValue(term.children[0], scope, bindingContext));
 		}
 		case "pattern": {
 			expectLength(term.children, 2);
-			return valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope), scope), scope);
+			return valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope, bindingContext), scope), scope);
 		}
 		case "closure_expr":
 		case "autoclosure_expr": {
@@ -612,7 +612,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 					const name = param.args[0];
 					childScope.mapping[name] = hoistToIdentifier(read(arg(index, name), childScope), childScope, name);
 				});
-				return translateTermToValue(term.children[1], childScope);
+				return translateTermToValue(term.children[1], childScope, bindingContext);
 			}, getType(term));
 		}
 		case "tuple_shuffle_expr": {
@@ -642,7 +642,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 						if (Number.isNaN(index) || index < 0 || index >= term.children.length) {
 							throw new Error(`Invalid variadic index`);
 						}
-						return translateTermToValue(term.children[index], scope);
+						return translateTermToValue(term.children[index], scope, bindingContext);
 					}
 					case -3: // CallerDefaultInitialize
 					default: {
@@ -653,7 +653,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		}
 		case "force_value_expr": {
 			expectLength(term.children, 1);
-			const value = translateTermToValue(term.children[0], scope);
+			const value = translateTermToValue(term.children[0], scope, bindingContext);
 			const [first, after] = reuseExpression(read(value, scope), scope);
 			// TODO: Optimize some cases where we can prove it to be a .some
 			const type = getType(term.children[0]);
@@ -667,7 +667,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		case "force_try_expr": {
 			expectLength(term.children, 1);
 			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
-			return translateTermToValue(term.children[0], scope);
+			return translateTermToValue(term.children[0], scope, bindingContext);
 		}
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
@@ -676,7 +676,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			if (!Object.hasOwnProperty.call(scope.declarations, tempIdentifier.name)) {
 				addVariable(scope, tempIdentifier);
 			}
-			const bodyExpression = read(wrapInOptional(translateTermToValue(term.children[0], scope), type, scope), scope);
+			const bodyExpression = read(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope);
 			return statements([
 				tryStatement(
 					blockStatement([
@@ -690,12 +690,38 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
 			expectLength(term.children, 1, 2);
-			return translateTermToValue(term.children[term.children.length - 1], scope);
+			return translateTermToValue(term.children[term.children.length - 1], scope, bindingContext);
 		}
 		case "normal_conformance": {
 			// TODO: Wrap with runtime type information
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope);
+			return translateTermToValue(term.children[0], scope, bindingContext);
+		}
+		case "optional_evaluation_expr": {
+			expectLength(term.children, 1);
+			const optionalType = getType(term);
+			let testExpression: Expression | undefined;
+			const someCase = translateTermToValue(term.children[0], scope, (value: Value, innerOptionalType: Type) => {
+				if (typeof testExpression !== "undefined") {
+					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
+				}
+				const [first, after] = reuseExpression(read(value, scope), scope);
+				testExpression = optionalIsSome(first, innerOptionalType);
+				return unwrapOptional(expr(after), innerOptionalType, scope);
+			});
+			if (typeof testExpression === "undefined") {
+				throw new Error(`Expected a binding expression to bind to this optional evaluation`);
+			}
+			return expr(conditionalExpression(testExpression, read(someCase, scope), emptyOptional(optionalType)));
+		}
+		case "bind_optional_expr": {
+			if (typeof bindingContext !== "function") {
+				throw new Error(`Expected a binding context in order to bind an optional expression`);
+			}
+			expectLength(term.children, 1);
+			const expressionTerm = term.children[0];
+			const wrappedValue = translateTermToValue(expressionTerm, scope);
+			return bindingContext(wrappedValue, getType(expressionTerm));
 		}
 		default: {
 			console.log(term);
