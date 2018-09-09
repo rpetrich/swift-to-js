@@ -1,9 +1,9 @@
 import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
-import { copyValue, expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
+import { expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
-import { ArgGetter, call, callable, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
@@ -245,17 +245,17 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 						return arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "read");
 					},
 					set(scope, arg) {
-						return expr(assignmentExpression("=", read(arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "write"), scope), read(copyValue(arg(2, "value"), valueType, scope), scope)));
+						return expr(assignmentExpression("=", read(arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "write"), scope), read(copy(arg(2, "value"), valueType), scope)));
 					},
 				},
 				"append()": wrapped((scope, arg) => {
 					const pushExpression = expr(memberExpression(read(arg(0, "array"), scope), identifier("push")));
-					const newElement = copyValue(arg(1, "newElement"), valueType, scope);
+					const newElement = copy(arg(1, "newElement"), valueType);
 					return call(pushExpression, undefinedValue, [newElement], scope);
 				}),
 				"insert(at:)": wrapped((scope, arg) => {
 					const array = arg(0, "array");
-					const newElement = copyValue(arg(1, "newElement"), valueType, scope);
+					const newElement = copy(arg(1, "newElement"), valueType);
 					const i = arg(2, "i");
 					return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [array, newElement, i], scope);
 				}),
@@ -370,7 +370,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 									),
 									[dict, index],
 								),
-								read(wrapInOptional(copyValue(expr(memberExpression(dict, index, true)), valueType, scope), possibleValueType, scope), scope),
+								read(wrapInOptional(copy(expr(memberExpression(dict, index, true)), valueType), possibleValueType, scope), scope),
 								emptyOptional(possibleValueType),
 							));
 						},
@@ -394,7 +394,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
 							return expr(conditionalExpression(
 								optionalIsSome(hoistedValue, possibleValueType),
-								assignmentExpression("=", memberExpression(dict, index, true), read(copyValue(unwrapOptional(expr(hoistedValue), possibleValueType, scope), valueType, scope), scope)),
+								assignmentExpression("=", memberExpression(dict, index, true), read(copy(unwrapOptional(expr(hoistedValue), possibleValueType, scope), valueType), scope)),
 								remove,
 							));
 						},

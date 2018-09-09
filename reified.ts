@@ -2,7 +2,7 @@ import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { concat } from "./utils";
-import { expr, read, reuseExpression, undefinedValue, Value } from "./values";
+import { copy, expr, read, reuseExpression, undefinedValue, Value } from "./values";
 
 import { arrayExpression, assignmentExpression, booleanLiteral, Expression, Identifier, isLiteral, memberExpression, MemberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, stringLiteral } from "babel-types";
 
@@ -205,29 +205,12 @@ export function expressionSkipsCopy(expr: Expression): boolean {
 	}
 }
 
-export function copyValue(value: Value, type: Type, scope: Scope): Value {
-	// if (value.kind === "expression") {
-	// 	if (expressionSkipsCopy(value.expression)) {
-	// 		return value;
-	// 	} else {
-	// 		// console.log("copy required for expression", value.expression);
-	// 	}
-	// } else {
-	// 	// console.log("copy required for value", value);
-	// }
-	const reified = reifyType(type, scope);
-	if (reified.copy) {
-		return reified.copy(value, scope);
-	}
-	return value;
-}
-
 export function storeValue(dest: Identifier | MemberExpression, value: Value, type: Type, scope: Scope): Expression[] {
 	const reified = reifyType(type, scope);
 	if (reified.store) {
 		return reified.store(dest, value, scope);
 	} else {
-		return [assignmentExpression("=", dest, read(copyValue(value, type, scope), scope))];
+		return [assignmentExpression("=", dest, read(copy(value, type), scope))];
 	}
 }
 

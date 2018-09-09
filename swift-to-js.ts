@@ -2,11 +2,11 @@ import { parse as parseAST, Property, Term } from "./ast";
 import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
-import { copyValue, defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
-import { ArgGetter, boxed, call, callable, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -269,7 +269,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				}
 				const pattern = convertToPattern(value);
 				return {
-					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copyValue(pattern.test, type, scope), scope)))]),
+					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copy(pattern.test, type), scope)))]),
 					test: trueValue,
 				};
 			}
@@ -759,7 +759,11 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				if (value.kind === "statements") {
 					return value.statements;
 				}
-				const copied = copyValue(value, getType(term.children[0]), scope);
+				const expression = read(value, scope);
+				if (expression.type === "Identifier" && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
+					return [returnStatement(expression)];
+				}
+				const copied = copy(expr(expression), getType(term.children[0]));
 				return [returnStatement(read(copied, scope))];
 			} else if (term.properties.implicit) {
 				return [returnStatement(lookup("self", scope))];
@@ -869,7 +873,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				const type = returnType(getType(elementDecl));
 				if (type.kind === "function") {
 					methods[name] = wrapped((innerScope, arg) => {
-						const args = type.arguments.types.map((argType, argIndex) => read(copyValue(arg(argIndex), argType, innerScope), innerScope));
+						const args = type.arguments.types.map((argType, argIndex) => read(copy(arg(argIndex), argType), innerScope));
 						return expr(arrayExpression(concat([numericLiteral(index)], args)));
 					});
 					return {
@@ -945,7 +949,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 						if (fieldName === "rawValue") {
 							// The built-in rawValue accessors don't have proper pattern matching :(
 							if (baseReifiedType) {
-								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copyValue(value, baseType!, innerScope)));
+								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copy(value, baseType!)));
 							} else {
 								throw new TypeError(`Unable to synthesize rawValue for ${enumName}`);
 							}

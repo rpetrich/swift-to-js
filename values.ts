@@ -120,7 +120,22 @@ export function subscript(getter: Value, setter: Value, args: Value[]): Subscrip
 }
 
 
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue;
+export interface CopiedValue {
+	kind: "copied";
+	value: Value;
+	type: Type;
+}
+
+export function copy(value: Value, type: Type): CopiedValue {
+	return {
+		kind: "copied",
+		value,
+		type,
+	};
+}
+
+
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue;
 
 
 
@@ -165,6 +180,12 @@ export function read(value: VariableValue, scope: Scope): Identifier | MemberExp
 export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
+		case "copied":
+			const reified = reifyType(value.type, scope);
+			if (reified.copy) {
+				return read(reified.copy(value.value, scope), scope);
+			}
+			return read(value.value, scope);
 		case "function":
 			const functions = typeof value.parentType !== "undefined" ? value.parentType.functions : scope.functions;
 			return insertFunction(value.name, scope, value.type, scope.functions[value.name]);
