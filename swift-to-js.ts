@@ -209,6 +209,9 @@ export function convertToPattern(value: Value): PatternOutput {
 		if (returningIndex === value.statements.length - 1) {
 			prefix = value.statements.slice(0, value.statements.length - 1);
 			value = expr((value.statements[value.statements.length - 1] as ReturnStatement).argument);
+		} else if (returningIndex === -1) {
+			prefix = value.statements;
+			value = expr(identifier("undefined"));
 		}
 	}
 	return {
@@ -618,23 +621,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "tuple_shuffle_expr": {
 			const elements = getProperty(term, "elements", Array.isArray);
 			const variadicSources = getProperty(term, "variadic_sources", Array.isArray).slice();
-			expectLength(term.children, variadicSources.length);
 			const type = getType(term);
 			if (type.kind !== "tuple") {
 				throw new Error(`Expected a tuple type, got ${stringifyType(type)}`);
 			}
-			const valueTypes = type.types.slice();
-			return tuple(elements.map((source) => {
-				switch (parseInt(source, 10)) {
+			const values = term.children.map((childTerm) => translateTermToValue(childTerm, scope, bindingContext));
+			const valueTypes = type.types;
+			return tuple(elements.map((source, i) => {
+				const numeric = parseInt(source, 10);
+				switch (numeric) {
 					case -1: { // DefaultInitialize
-						if (valueTypes.length) {
-							return defaultInstantiateType(valueTypes.shift()!, scope, returnUndef);
-						} else {
-							throw new Error(`Tried to default instantiate more types than we have in the tuple`);
-						}
+						return defaultInstantiateType(valueTypes[i], scope, returnUndef);
 					}
 					case -2: { // Variadic
-						valueTypes.shift();
 						if (variadicSources.length === 0) {
 							throw new Error(`Used more variadic sources than we have`);
 						}
@@ -642,11 +641,27 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						if (Number.isNaN(index) || index < 0 || index >= term.children.length) {
 							throw new Error(`Invalid variadic index`);
 						}
-						return translateTermToValue(term.children[index], scope, bindingContext);
+						return values[index];
 					}
-					case -3: // CallerDefaultInitialize
+					case -3: { // CallerDefaultInitialize
+						return defaultInstantiateType(valueTypes[i], scope, returnUndef);
+					}
 					default: {
-						throw new Error(`Unknown variadic element type ${source}`);
+						if (numeric < 0) {
+							throw new Error(`Unknown variadic element type ${source}`);
+						}
+						if (values.length < 1) {
+							expectLength(values, 1);
+						}
+						const firstValue = values[0];
+						if (firstValue.kind === "tuple") {
+							if (firstValue.values.length <= numeric) {
+								expectLength(firstValue.values, 1);
+							}
+							return firstValue.values[numeric];
+						} else {
+							return expr(memberExpression(read(firstValue, scope), numericLiteral(numeric), true));
+						}
 					}
 				}
 			}));

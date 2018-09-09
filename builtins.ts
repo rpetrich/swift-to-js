@@ -179,6 +179,9 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			"UTF8View": () => UTF8View,
 		});
 	},
+	"StaticString": cached(() => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+	], {
+	})),
 	"Optional": (globalScope, typeParameters) => {
 		const [ wrappedType ] = typeParameters(1);
 		const reified = reifyType(wrappedType, globalScope);
@@ -611,6 +614,18 @@ export const functions: FunctionMap = {
 	"??": returnTodo,
 	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
 	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
+	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
+		ifStatement(
+			unaryExpression("!", read(call(arg(0, "condition"), undefinedValue, [], scope), scope)),
+			blockStatement([
+				throwStatement(newExpression(identifier("Error"), [
+					read(call(arg(1, "message"), undefinedValue, [], scope), scope),
+					read(arg(2, "file"), scope),
+					read(arg(3, "line"), scope),
+				])),
+			]),
+		),
+	]),
 };
 
 export function newScopeWithBuiltins(): Scope {
