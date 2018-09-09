@@ -24,7 +24,7 @@ export interface ReifiedType {
 	functions: FunctionMap;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
-	cases?: string[];
+	cases?: ReadonlyArray<EnumCase>;
 	defaultValue(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
 	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
@@ -55,6 +55,11 @@ export type Field = {
 	name: string;
 	type: ReifiedType;
 } & ({ stored: true } | { stored: false; getter: (target: Value, scope: Scope) => Value; });
+
+export interface EnumCase {
+	name: string;
+	fieldTypes: ReadonlyArray<ReifiedType>;
+}
 
 function representationForFields(storedFields: ReadonlyArray<Field>) {
 	switch (storedFields.length) {

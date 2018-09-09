@@ -1,7 +1,9 @@
 export function description_of$option$(option) {
   let unwrapped;
 
-  if (unwrapped = option, option !== null) {
+  if (option !== null) {
+    unwrapped = option;
+
     if (unwrapped) {
       return "True";
     }

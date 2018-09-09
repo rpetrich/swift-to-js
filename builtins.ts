@@ -59,26 +59,31 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
 	})),
-	"Int": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
-		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-		"+": binaryBuiltin("+"),
-		"-": binaryBuiltin("-"),
-		"*": binaryBuiltin("*"),
-		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
-		"%": binaryBuiltin("%"),
-		"<": binaryBuiltin("<"),
-		">": binaryBuiltin(">"),
-		"<=": binaryBuiltin("<="),
-		">=": binaryBuiltin(">="),
-		"&": binaryBuiltin("&"),
-		"|": binaryBuiltin("|"),
-		"^": binaryBuiltin("^"),
-		"==": binaryBuiltin("==="),
-		"!=": binaryBuiltin("!=="),
-		"+=": assignmentBuiltin("+="),
-		"-=": assignmentBuiltin("-="),
-		"*=": assignmentBuiltin("*="),
-	})),
+	"Int": cached(() => {
+		const fields: Field[] = [];
+		const result = primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), fields, {
+			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+			"+": binaryBuiltin("+"),
+			"-": binaryBuiltin("-"),
+			"*": binaryBuiltin("*"),
+			"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
+			"%": binaryBuiltin("%"),
+			"<": binaryBuiltin("<"),
+			">": binaryBuiltin(">"),
+			"<=": binaryBuiltin("<="),
+			">=": binaryBuiltin(">="),
+			"&": binaryBuiltin("&"),
+			"|": binaryBuiltin("|"),
+			"^": binaryBuiltin("^"),
+			"==": binaryBuiltin("==="),
+			"!=": binaryBuiltin("!=="),
+			"+=": assignmentBuiltin("+="),
+			"-=": assignmentBuiltin("-="),
+			"*=": assignmentBuiltin("*="),
+		});
+		fields.push(field("hashValue", result, (value) => value));
+		return result;
+	}),
 	"Int64": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)))),
 	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"==": binaryBuiltin("==="),

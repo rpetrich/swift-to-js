@@ -2,7 +2,7 @@ import { parse as parseAST, Property, Term } from "./ast";
 import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { insertFunction, noinline, returnType, wrapped } from "./functions";
-import { copyValue, defaultInstantiateType, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { copyValue, defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
@@ -155,40 +155,49 @@ function returnUndef() {
 
 interface PatternOutput {
 	prefix: Statement[];
-	value: Value;
+	test: Value;
+	next?: PatternOutput;
 }
 
 const trueValue = expr(booleanLiteral(true));
 
+function isTrueExpression(expression: Expression) {
+	return expression.type === "BooleanLiteral" && expression.value === true;
+}
+
 const emptyPattern: PatternOutput = {
-	prefix: [],
-	value: trueValue,
+	prefix: emptyStatements,
+	test: trueValue,
 };
 
 function mergePatterns(first: PatternOutput, second: PatternOutput, scope: Scope): PatternOutput {
-	const firstExpression = read(first.value, scope);
-	const prefix = first.prefix.concat(second.prefix);
-	if (firstExpression.type === "BooleanLiteral" && firstExpression.value === true) {
+	const prefix = concat(first.prefix, second.prefix);
+	const next = first.next ? (second.next ? mergePatterns(first.next, second.next, scope) : first.next) : second.next;
+	const firstExpression = read(first.test, scope);
+	if (isTrueExpression(firstExpression)) {
 		return {
 			prefix,
-			value: second.value,
+			test: second.test,
+			next,
 		};
 	}
-	const secondExpression = read(second.value, scope);
-	if (secondExpression.type === "BooleanLiteral" && secondExpression.value === true) {
+	const secondExpression = read(second.test, scope);
+	if (isTrueExpression(secondExpression)) {
 		return {
 			prefix,
-			value: expr(firstExpression),
+			test: expr(firstExpression),
+			next,
 		};
 	}
 	return {
 		prefix,
-		value: expr(logicalExpression("&&", firstExpression, secondExpression)),
+		test: expr(logicalExpression("&&", firstExpression, secondExpression)),
+		next,
 	};
 }
 
 export function convertToPattern(value: Value): PatternOutput {
-	let prefix: Statement[] = [];
+	let prefix: Statement[] = emptyStatements;
 	if (value.kind === "statements") {
 		const returningIndex = value.statements.findIndex((statements) => statements.type === "ReturnStatement");
 		if (returningIndex === value.statements.length - 1) {
@@ -198,7 +207,7 @@ export function convertToPattern(value: Value): PatternOutput {
 	}
 	return {
 		prefix,
-		value,
+		test: value,
 	};
 }
 
@@ -222,10 +231,11 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			const type = getType(term);
 			const [first, second] = reuseExpression(read(value, scope), scope);
 			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope);
-			return mergePatterns(assign, {
-				prefix: [],
-				value: expr(optionalIsSome(second, type)),
-			}, scope);
+			return {
+				prefix: emptyStatements,
+				test: expr(optionalIsSome(second, type)),
+				next: assign,
+			};
 		}
 		case "case_label_item":
 		case "pattern_let": {
@@ -235,8 +245,8 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 		case "pattern_expr": {
 			expectLength(term.children, 1);
 			return {
-				prefix: [],
-				value: translateTermToValue(term.children[0], scope),
+				prefix: emptyStatements,
+				test: translateTermToValue(term.children[0], scope),
 			};
 		}
 		case "pattern_typed": {
@@ -251,14 +261,16 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			if (Object.hasOwnProperty.call(scope.declarations, name)) {
 				return {
 					prefix: storeValue(name, value, type, scope).map((expression) => expressionStatement(expression)),
-					value: trueValue,
+					test: trueValue,
 				};
 			} else {
-				addVariable(scope, name);
+				if (!scope.mapping[name.name]) {
+					addVariable(scope, name);
+				}
 				const pattern = convertToPattern(value);
 				return {
-					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copyValue(pattern.value, type, scope), scope)))]),
-					value: trueValue,
+					prefix: pattern.prefix.concat([expressionStatement(assignmentExpression("=", name, read(copyValue(pattern.test, type, scope), scope)))]),
+					test: trueValue,
 				};
 			}
 		}
@@ -282,13 +294,41 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				throw new TypeError(`Expected ${stringifyType(type)} to be an enum, but it didn't have any cases.`);
 			}
 			const discriminant = discriminantForPatternTerm(term);
-			const index = cases.indexOf(discriminant);
+			const index = cases.findIndex((possibleCase) => possibleCase.name === discriminant);
 			if (index === -1) {
 				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}`);
 			}
+			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
+			const [first, after] = reuseExpression(read(value, scope), scope);
+			const discriminantExpression = isDirectRepresentation ? first : memberExpression(first, numericLiteral(0), true);
+			const test = expr(binaryExpression("===", discriminantExpression, numericLiteral(index)));
+			expectLength(term.children, 0, 1);
+			if (term.children.length === 0) {
+				return {
+					prefix: emptyStatements,
+					test,
+				};
+			}
+			const child = term.children[0];
+			if (child.name !== "pattern_paren") {
+				throw new TypeError(`Expected a pattern_paren, got a ${child.name}`);
+			}
+			expectLength(child.children, 1);
+			let patternExpression: Expression;
+			switch (cases[index].fieldTypes.length) {
+				case 0:
+					throw new Error(`Tried to use a pattern on an enum case that has no fields`);
+				case 1:
+					patternExpression = memberExpression(after, numericLiteral(1), true);
+					break;
+				default:
+					patternExpression = callExpression(memberExpression(after, identifier("slice")), [numericLiteral(1)]);
+					break;
+			}
 			return {
-				prefix: [],
-				value: expr(binaryExpression("===", read(value, scope), numericLiteral(index))),
+				prefix: emptyStatements,
+				test,
+				next: translatePattern(child.children[0], expr(patternExpression), scope),
 			};
 		}
 		case "pattern_any": {
@@ -297,8 +337,8 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 		default: {
 			console.log(term);
 			return {
-				prefix: [],
-				value: expr(identifier("unknown_pattern_type$" + term.name)),
+				prefix: emptyStatements,
+				test: expr(identifier("unknown_pattern_type$" + term.name)),
 			};
 		}
 	}
@@ -309,10 +349,48 @@ function translateExpression(term: Term, scope: Scope): Expression {
 }
 
 function valueForPattern(pattern: PatternOutput, scope: Scope): Value {
-	if (pattern.prefix.length) {
-		return statements(pattern.prefix.concat([returnStatement(read(pattern.value, scope))]));
+	let test: Value;
+	if (typeof pattern.next !== "undefined") {
+		const currentExpression = read(pattern.test, scope);
+		const nextExpression = read(valueForPattern(pattern.next, scope), scope);
+		test = expr(logicalExpression("&&", currentExpression, nextExpression));
+	} else {
+		test = pattern.test;
 	}
-	return pattern.value;
+	if (pattern.prefix.length) {
+		return statements(pattern.prefix.concat([returnStatement(read(test, scope))]));
+	}
+	return test;
+}
+
+function flattenPattern(pattern: PatternOutput, scope: Scope): { prefix: Statement[]; test: Expression; suffix: Statement[] } {
+	let prefix: Statement[] = emptyStatements;
+	let test: Expression = booleanLiteral(true);
+	let currentPattern: PatternOutput | undefined = pattern;
+	while (currentPattern) {
+		prefix = concat(prefix, currentPattern.prefix);
+		const currentTest = read(currentPattern.test, scope);
+		currentPattern = currentPattern.next;
+		if (!isTrueExpression(currentTest)) {
+			test = currentTest;
+			break;
+		}
+	}
+	let suffix: Statement[] = emptyStatements;
+	while (currentPattern) {
+		suffix = concat(suffix, currentPattern.prefix);
+		const currentTest = read(currentPattern.test, scope);
+		currentPattern = currentPattern.next;
+		if (!isTrueExpression(currentTest)) {
+			test = logicalExpression("&&", test, read(statements(concat(suffix, [returnStatement(currentTest)])), scope));
+			suffix = emptyStatements;
+		}
+	}
+	return {
+		prefix,
+		test,
+		suffix,
+	};
 }
 
 function translateTermToValue(term: Term, scope: Scope): Value {
@@ -695,13 +773,21 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 		}
 		case "if_stmt": {
 			const children = term.children;
-			if (children.length === 3) {
-				return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope, functions)), blockStatement(translateStatement(children[2], scope, functions)))];
+			expectLength(children, 2, 3);
+			let pattern: PatternOutput;
+			const testTerm = children[0];
+			if (testTerm.name === "pattern") {
+				pattern = translatePattern(testTerm.children[0], translateTermToValue(testTerm.children[1], scope), scope);
+			} else {
+				pattern = convertToPattern(translateTermToValue(testTerm, scope));
 			}
-			if (children.length === 2) {
-				return [ifStatement(translateExpression(children[0], scope), blockStatement(translateStatement(children[1], scope, functions)))];
+			const { test, prefix, suffix } = flattenPattern(pattern, scope);
+			const consequent = concat(suffix, translateStatement(children[1], scope, functions));
+			if (isTrueExpression(test)) {
+				return concat(prefix, consequent);
 			}
-			throw new Error(`Expected 2 or 3 terms, got ${children.length}`);
+			const alternate = children.length === 3 ? blockStatement(translateStatement(children[2], scope, functions)) : undefined;
+			return concat(prefix, [ifStatement(test, blockStatement(consequent), alternate)]);
 		}
 		case "while_stmt": {
 			expectLength(term.children, 2);
@@ -720,43 +806,86 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
 				const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
-				const patterns = remainingChildren.map((child) => translatePattern(child, expr(identifier("$match")), scope));
-				const expressions = patterns.map((pattern) => read(valueForPattern(pattern, scope), scope));
-				const predicate = expressions.reduce((left, right) => logicalExpression("||", left, right));
-				const body = blockStatement(translateStatement(childTerm.children[childTerm.children.length - 1], scope, functions));
-				// Basic optimization for else case in switch statement
-				if (typeof previous === "undefined" && predicate.type === "BooleanLiteral" && predicate.value === true) {
-					return body;
+				let mergedPrefix: Statement[] = emptyStatements;
+				let mergedTest: Expression = booleanLiteral(false);
+				let mergedSuffix: Statement[] = emptyStatements;
+				for (const child of remainingChildren) {
+					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), scope), scope);
+					mergedPrefix = concat(mergedPrefix, prefix);
+					if (mergedTest.type === "BooleanLiteral" && mergedTest.value === false) {
+						mergedTest = test;
+					} else if (!isTrueExpression(mergedTest)) {
+						mergedTest = logicalExpression("||", mergedTest, test);
+					}
+					mergedSuffix = concat(mergedSuffix, suffix);
 				}
-				return ifStatement(predicate, body, previous);
+				const body = concat(mergedSuffix, translateStatement(childTerm.children[childTerm.children.length - 1], scope, functions));
+				// Basic optimization for else case in switch statement
+				if (typeof previous === "undefined" && isTrueExpression(mergedTest)) {
+					return blockStatement(concat(mergedPrefix, body));
+				}
+				// Push the if statement into a block if the test required prefix statements
+				const pendingStatement = ifStatement(mergedTest, blockStatement(body), previous);
+				if (mergedPrefix.length) {
+					return blockStatement(concat(mergedPrefix, [pendingStatement]));
+				}
+				return pendingStatement;
 			}, undefined);
 			return typeof cases !== "undefined" ? [declaration, cases] : [declaration];
 		}
 		case "enum_decl": {
 			expectLength(term.args, 1);
-			if (getProperty(term, "inherits", isString) !== "Int") {
-				throw new TypeError(`Only Int enums are supported!`);
-			}
+			const inherits = term.properties.inherits;
+			const baseType = typeof inherits === "string" ? parseType(inherits) : undefined;
+			const baseReifiedType = typeof baseType !== "undefined" ? reifyType(baseType, scope) : undefined;
 			let statements = emptyStatements;
 			const methods: FunctionMap = {};
 			const layout: Field[] = [];
-			const cases = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
+			const cases: EnumCase[] = termsWithName(term.children, "enum_case_decl").map((caseDecl, index) => {
 				const elementDecl = termWithName(caseDecl.children, "enum_element_decl");
 				expectLength(elementDecl.args, 1);
 				// TODO: Extract the actual rawValue and use this as the discriminator
-				const name = elementDecl.args[0];
-				methods[name] = () => expr(numericLiteral(index));
-				return name;
+				const name = elementDecl.args[0].match(/^[^\(]*/)![0];
+				const type = returnType(getType(elementDecl));
+				if (type.kind === "function") {
+					methods[name] = wrapped((innerScope, arg) => {
+						const args = type.arguments.types.map((argType, argIndex) => read(copyValue(arg(argIndex), argType, innerScope), innerScope));
+						return expr(arrayExpression(concat([numericLiteral(index)], args)));
+					});
+					return {
+						name,
+						fieldTypes: type.arguments.types.map((argType) => reifyType(argType, scope)),
+					};
+				}
+				if (baseType) {
+					// TODO: Extract the underlying value, which may actually not be numeric!
+					methods[name] = () => expr(numericLiteral(index));
+				} else {
+					methods[name] = () => expr(arrayExpression([numericLiteral(index)]));
+				}
+				return {
+					name,
+					fieldTypes: [],
+				};
 			});
-			scope.types[term.args[0]] = () => {
+			const enumName = term.args[0];
+			scope.types[enumName] = () => {
 				return {
 					fields: layout,
 					functions: methods,
-					possibleRepresentations: PossibleRepresentation.Number,
+					possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
 					defaultValue() {
 						throw new Error(`Unable to default instantiate enums`);
 					},
 					innerTypes: {},
+					copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
+						const expression = read(value, innerScope);
+						if (expressionSkipsCopy(expression)) {
+							return expr(expression);
+						}
+						// TODO: Implement proper copy behaviour that deep copies properly
+						return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
+					},
 					cases,
 				};
 			};
@@ -765,13 +894,28 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					expectLength(child.args, 1);
 					if (requiresGetter(child)) {
 						expectLength(child.children, 1);
+						const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 						const fieldName = child.args[0];
-						if (fieldName === "rawValue" || fieldName === "hashValue") {
-							// The built-in hashValue and rawValue accessors don't have proper pattern matching :(
-							layout.push(field(fieldName, reifyType("Int", scope), (value) => value));
+						if (fieldName === "rawValue") {
+							// The built-in rawValue accessors don't have proper pattern matching :(
+							if (baseReifiedType) {
+								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copyValue(value, baseType!, innerScope)));
+							} else {
+								throw new TypeError(`Unable to synthesize rawValue for ${enumName}`);
+							}
+						} else if (fieldName === "hashValue") {
+							// The built-in hashValue accessors don't have proper pattern matching :(
+							if (baseReifiedType) {
+								const passthroughField = baseReifiedType.fields.find((field) => field.name === "hashValue");
+								if (!passthroughField) {
+									throw new Error(`Unable to synthsize hashValue for ${enumName} because underlying type ${inherits} does not have a hashValue`);
+								}
+								layout.push(passthroughField);
+							} else {
+								throw new TypeError(`Unable to synthesize hashValue for ${enumName}`);
+							}
 						} else {
 							layout.push(field(fieldName, reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
-								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
 							}));
 						}
@@ -814,7 +958,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			if (term.children.length === 2) {
 				const value = translateTermToValue(term.children[1], scope);
 				const pattern = translatePattern(term.children[0], value, scope);
-				const expression = read(pattern.value, scope);
+				if (typeof pattern.next !== "undefined") {
+					throw new Error(`Chained patterns are not supported on binding declarations`);
+				}
+				const expression = read(pattern.test, scope);
 				if (isPure(expression)) {
 					return pattern.prefix;
 				} else {
