@@ -2,12 +2,17 @@ export function attempt$shouldThrow$(shouldThrow) {
   if (shouldThrow) {
     throw 0;
   }
+
+  return true;
 }
 export function recover$shouldThrow$(shouldThrow) {
+  let $try;
+
   try {
-    attempt$shouldThrow$(shouldThrow);
-    return 1;
-  } catch (error) {
-    return 0;
+    $try = attempt$shouldThrow$(shouldThrow);
+  } catch (e) {
+    $try = null;
   }
+
+  return $try;
 }

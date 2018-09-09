@@ -1,5 +1,5 @@
 import { parse as parseAST, Property, Term } from "./ast";
-import { forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
+import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
@@ -668,6 +668,24 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
 			return translateTermToValue(term.children[0], scope);
 		}
+		case "optional_try_expr": {
+			expectLength(term.children, 1);
+			const type = getType(term);
+			const tempIdentifier = identifier("$try");
+			if (!Object.hasOwnProperty.call(scope.declarations, tempIdentifier.name)) {
+				addVariable(scope, tempIdentifier);
+			}
+			const bodyExpression = read(wrapInOptional(translateTermToValue(term.children[0], scope), type, scope), scope);
+			return statements([
+				tryStatement(
+					blockStatement([
+						expressionStatement(assignmentExpression("=", tempIdentifier, bodyExpression)),
+					]),
+					catchClause(identifier("e"), blockStatement([expressionStatement(assignmentExpression("=", tempIdentifier, emptyOptional(type)))])),
+				),
+				returnStatement(tempIdentifier),
+			]);
+		}
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
 			expectLength(term.children, 1, 2);
@@ -902,7 +920,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				const catchBodyTerm = catchTerm.children[1];
 				checkTermName(catchBodyTerm, "brace_stmt", "as only child of a catch clause");
 				const catchBodyStatements = translateAllStatements(catchBodyTerm.children, scope, functions);
-				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))]
+				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
 			}, translateAllStatements(bodyTerm.children, scope, functions));
 		}
 		case "enum_decl": {
