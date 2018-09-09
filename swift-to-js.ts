@@ -705,9 +705,20 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 }
 
 function translateAllStatements(terms: Term[], scope: Scope, functions: FunctionMap): Statement[] {
-	return terms.reduce((statements: Statement[], term: Term) => {
-		return concat(statements, translateStatement(term, scope, functions));
-	}, emptyStatements);
+	let tailStatements = emptyStatements;
+	let headStatements = emptyStatements;
+	for (const term of terms) {
+		if (term.name === "defer_stmt") {
+			tailStatements = concat(translateStatement(term, scope, functions), tailStatements);
+		} else {
+			headStatements = concat(headStatements, translateStatement(term, scope, functions));
+		}
+	}
+	if (tailStatements.length) {
+		return headStatements.length ? [tryStatement(blockStatement(headStatements), undefined, blockStatement(tailStatements))] : tailStatements;
+	} else {
+		return headStatements;
+	}
 }
 
 function translateStatement(term: Term, scope: Scope, functions: FunctionMap): Statement[] {
@@ -923,6 +934,17 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				const catchBodyStatements = translateAllStatements(catchBodyTerm.children, scope, functions);
 				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
 			}, translateAllStatements(bodyTerm.children, scope, functions));
+		}
+		case "defer_stmt": {
+			expectLength(term.children, 2);
+			const firstChild = term.children[0];
+			checkTermName(firstChild, "func_decl", "as second child of a defer statement");
+			expectLength(firstChild.children, 2);
+			checkTermName(firstChild.children[0], "parameter_list", "as first child of defer statement function");
+			expectLength(firstChild.children[0].children, 0);
+			checkTermName(firstChild.children[1], "brace_stmt", "as second child of defer statement function");
+			checkTermName(term.children[1], "call_expr", "as second child of a defer statement");
+			return translateAllStatements(firstChild.children[1].children, scope, functions);
 		}
 		case "enum_decl": {
 			expectLength(term.args, 1);
