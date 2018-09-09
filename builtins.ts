@@ -49,6 +49,38 @@ const voidType: Tuple = { kind: "tuple", types: [] };
 
 export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
 
+function buildIntegerType(min: number, max: number): ReifiedType {
+	const fields: Field[] = [];
+	const reifiedType = primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), fields, {
+		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+		"+": binaryBuiltin("+"),
+		"-": binaryBuiltin("-"),
+		"*": binaryBuiltin("*"),
+		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
+		"%": binaryBuiltin("%"),
+		"<": binaryBuiltin("<"),
+		">": binaryBuiltin(">"),
+		"<=": binaryBuiltin("<="),
+		">=": binaryBuiltin(">="),
+		"&": binaryBuiltin("&"),
+		"|": binaryBuiltin("|"),
+		"^": binaryBuiltin("^"),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+		"+=": assignmentBuiltin("+="),
+		"-=": assignmentBuiltin("-="),
+		"*=": assignmentBuiltin("*="),
+	}, {
+		Type: cached(() => primitive(PossibleRepresentation.Object, expr(objectExpression([])), [
+			field("min", reifiedType, () => expr(numericLiteral(min))),
+			field("max", reifiedType, () => expr(numericLiteral(max))),
+		], {
+		})),
+	});
+	fields.push(field("hashValue", reifiedType, (value) => value));
+	return reifiedType;
+}
+
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
 	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
@@ -59,32 +91,16 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
 	})),
-	"Int": cached(() => {
-		const fields: Field[] = [];
-		const result = primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), fields, {
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-			"+": binaryBuiltin("+"),
-			"-": binaryBuiltin("-"),
-			"*": binaryBuiltin("*"),
-			"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
-			"%": binaryBuiltin("%"),
-			"<": binaryBuiltin("<"),
-			">": binaryBuiltin(">"),
-			"<=": binaryBuiltin("<="),
-			">=": binaryBuiltin(">="),
-			"&": binaryBuiltin("&"),
-			"|": binaryBuiltin("|"),
-			"^": binaryBuiltin("^"),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"+=": assignmentBuiltin("+="),
-			"-=": assignmentBuiltin("-="),
-			"*=": assignmentBuiltin("*="),
-		});
-		fields.push(field("hashValue", result, (value) => value));
-		return result;
-	}),
-	"Int64": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)))),
+	"UInt": cached(() => buildIntegerType(0, 4294967295)),
+	"Int": cached(() => buildIntegerType(-2147483648, 2147483647)),
+	"UInt8": cached(() => buildIntegerType(0, 255)),
+	"Int8": cached(() => buildIntegerType(-128, 127)),
+	"UInt16": cached(() => buildIntegerType(0, 65535)),
+	"Int16": cached(() => buildIntegerType(-32768, 32767)),
+	"UInt32": cached(() => buildIntegerType(0, 4294967295)),
+	"Int32": cached(() => buildIntegerType(-2147483648, 2147483647)),
+	"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER)), // 52-bit integers
+	"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)), // 53-bit integers
 	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
