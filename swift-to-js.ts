@@ -9,7 +9,7 @@ import { concat, expectLength } from "./utils";
 import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -53,6 +53,12 @@ function termWithName(terms: Term[], name: string | RegExp): Term {
 		throw new Error(`Could not find ${name} term: ${terms.map((term) => term.name).join(", ")}`);
 	}
 	return result;
+}
+
+function checkTermName(term: Term, expectedName: string, errorPrefix?: string) {
+	if (term.name !== expectedName) {
+		throw new TypeError(`Expected a ${expectedName}${typeof errorPrefix !== "undefined" ? " " + errorPrefix : ""}, got a ${term.name}`);
+	}
 }
 
 function isString(value: any): value is string {
@@ -549,9 +555,7 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 			reifyType(type, scope);
 			const properties: ObjectProperty[] = [];
 			for (const child of term.children.filter(noSemanticExpressions)) {
-				if (child.name !== "tuple_expr") {
-					throw new TypeError(`Expected a tuple_expr, got a ${child.name}`);
-				}
+				checkTermName(child, "tuple_expr", "as child of a dictionary expression");
 				expectLength(child.children, 2);
 				const keyChild = child.children[0];
 				const valueChild = child.children[1];
@@ -658,6 +662,11 @@ function translateTermToValue(term: Term, scope: Scope): Value {
 				read(unwrapOptional(expr(after), type, scope), scope),
 				read(call(forceUnwrapFailed, undefinedValue, [], scope), scope),
 			));
+		}
+		case "try_expr": {
+			expectLength(term.children, 1);
+			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
+			return translateTermToValue(term.children[0], scope);
 		}
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
@@ -837,9 +846,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			const discriminantTerm = term.children[0];
 			const declaration = variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope), scope))]);
 			const cases = term.children.slice(1).reduceRight((previous: Statement | undefined, childTerm: Term): Statement => {
-				if (childTerm.name !== "case_stmt") {
-					throw new Error(`Expected a case_stmt, got a ${childTerm.name}`);
-				}
+				checkTermName(childTerm, "case_stmt", "as child of a switch statement");
 				if (childTerm.children.length < 1) {
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
@@ -875,6 +882,28 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
 			return [throwStatement(read(translateTermToValue(expressionTerm, scope), scope))];
+		}
+		case "do_catch_stmt": {
+			if (term.children.length < 2) {
+				expectLength(term.children, 2);
+			}
+			const bodyTerm = term.children[0];
+			checkTermName(bodyTerm, "brace_stmt", "as first child of a do catch statement");
+			return term.children.slice(1).reduce((statements, catchTerm) => {
+				checkTermName(catchTerm, "catch", "as non-first child of a do catch");
+				expectLength(catchTerm.children, 2);
+				const patternTerm = catchTerm.children[0];
+				checkTermName(patternTerm, "pattern_let", "as child of a catch pattern");
+				expectLength(patternTerm.children, 1);
+				const letPatternChild = patternTerm.children[0];
+				checkTermName(letPatternChild, "pattern_named", "as child of a catch pattern let expression");
+				expectLength(letPatternChild.args, 1);
+				const catchClauseExpression = identifier(letPatternChild.args[0]);
+				const catchBodyTerm = catchTerm.children[1];
+				checkTermName(catchBodyTerm, "brace_stmt", "as only child of a catch clause");
+				const catchBodyStatements = translateAllStatements(catchBodyTerm.children, scope, functions);
+				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))]
+			}, translateAllStatements(bodyTerm.children, scope, functions));
 		}
 		case "enum_decl": {
 			expectLength(term.args, 1);
