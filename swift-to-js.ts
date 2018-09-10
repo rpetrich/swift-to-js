@@ -296,6 +296,15 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			if (type.kind !== "tuple") {
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(type)}`);
 			}
+			if (value.kind === "tuple") {
+				return term.children.reduce((existing, child, i) => {
+					if (value.values.length <= i) {
+						expectLength(value.values, i);
+					}
+					const childPattern = translatePattern(child, value.values[i], scope);
+					return mergePatterns(existing, childPattern, scope);
+				}, emptyPattern);
+			}
 			const [first, second] = reuseExpression(read(value, scope), scope);
 			return term.children.reduce((existing, child, i) => {
 				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, numericLiteral(i), true)), scope);
