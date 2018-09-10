@@ -618,6 +618,7 @@ export const functions: FunctionMap = {
 		ifStatement(
 			unaryExpression("!", read(call(arg(0, "condition"), undefinedValue, [], scope), scope)),
 			blockStatement([
+				expressionStatement(identifier("debugger")),
 				throwStatement(newExpression(identifier("Error"), [
 					read(call(arg(1, "message"), undefinedValue, [], scope), scope),
 					read(arg(2, "file"), scope),
@@ -625,6 +626,14 @@ export const functions: FunctionMap = {
 				])),
 			]),
 		),
+	]),
+	"preconditionFailed(_:file:line:)": (scope, arg, type) => statements([
+		expressionStatement(identifier("debugger")),
+		throwStatement(newExpression(identifier("Error"), [
+			read(call(arg(0, "message"), undefinedValue, [], scope), scope),
+			read(arg(1, "file"), scope),
+			read(arg(2, "line"), scope),
+		])),
 	]),
 };
 
