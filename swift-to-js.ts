@@ -1111,7 +1111,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					// TODO: Extract the underlying value, which may actually not be numeric!
 					methods[name] = () => expr(literal(index));
 				} else {
-					methods[name] = () => expr(arrayExpression([literal(index)]));
+					methods[name] = () => expr(literal([index]));
 				}
 				cases.push({
 					name,

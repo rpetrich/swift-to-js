@@ -1,4 +1,4 @@
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
@@ -315,6 +315,16 @@ export function simplify(expression: Expression): Expression {
 			return logicalExpression(expression.operator, simplify(expression.left), simplify(expression.right));
 		case "BinaryExpression":
 			return binaryExpression(expression.operator, simplify(expression.left), simplify(expression.right));
+		case "MemberExpression":
+			if (!expression.computed && expression.property.type === "Identifier") {
+				const objectValue = valueOfExpression(expression.object);
+				if (typeof objectValue !== "undefined" && objectValue !== null && Object.hasOwnProperty.call(objectValue, expression.property.name)) {
+					const propertyValue = (objectValue as any)[expression.property.name];
+					if (typeof propertyValue === "boolean" || typeof propertyValue === "number" || typeof propertyValue === "string" || typeof propertyValue === "object") {
+						return literal(propertyValue);
+					}
+				}
+			}
 		default:
 			break;
 	}
@@ -432,12 +442,21 @@ export function valueOfExpression(expression: Expression): undefined | boolean |
 	return undefined;
 }
 
+interface LiteralMap {
+	readonly [name: string]: LiteralValue;
+}
+interface LiteralArray extends ReadonlyArray<LiteralValue> {
+}
+type LiteralValue = boolean | number | string | null | LiteralArray | LiteralMap;
+
 export function literal(value: boolean): BooleanLiteral;
 export function literal(value: number): NumericLiteral;
 export function literal(value: string): StringLiteral;
 export function literal(value: null): NullLiteral;
-export function literal(value: boolean | number | string | null): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral;
-export function literal(value: boolean | number | string | null): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral {
+export function literal(value: ReadonlyArray<LiteralValue>): ArrayExpression;
+export function literal(value: LiteralMap): ObjectExpression;
+export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral | ArrayExpression | ObjectExpression;
+export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral | ArrayExpression | ObjectExpression {
 	if (typeof value === "boolean") {
 		return booleanLiteral(value);
 	} else if (typeof value === "number") {
@@ -446,6 +465,10 @@ export function literal(value: boolean | number | string | null): BooleanLiteral
 		return stringLiteral(value);
 	} else if (value === null) {
 		return nullLiteral();
+	} else if (Array.isArray(value)) {
+		return arrayExpression(value.map(literal));
+	} else if (typeof value === "object") {
+		return objectExpression(Object.keys(value).map((key) => objectProperty(identifier(key), literal((value as LiteralMap)[key]))));
 	} else {
 		throw new TypeError(`Expected to receive a valid literal type, instead got ${typeof value}`);
 	}

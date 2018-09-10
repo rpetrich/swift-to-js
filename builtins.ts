@@ -5,7 +5,7 @@ import { parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
 import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, objectExpression, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -71,7 +71,7 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 		"-=": assignmentBuiltin("-="),
 		"*=": assignmentBuiltin("*="),
 	}, {
-		Type: cached(() => primitive(PossibleRepresentation.Object, expr(objectExpression([])), [
+		Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
 			field("min", reifiedType, () => expr(literal(min))),
 			field("max", reifiedType, () => expr(literal(max))),
 		], {
@@ -149,7 +149,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"/=": assignmentBuiltin("/="),
 	})),
 	"String": (globalScope) => {
-		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(literal([])), [
 			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 			field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -159,7 +159,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		]);
-		const UTF8View = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+		const UTF8View = primitive(PossibleRepresentation.Array, expr(literal([])), [
 			field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -338,7 +338,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			},
 			possibleRepresentations: PossibleRepresentation.Array,
 			defaultValue() {
-				return expr(arrayExpression([]));
+				return expr(literal([]));
 			},
 			copy(value, scope) {
 				const expression = read(value, scope);
@@ -421,7 +421,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				},
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue() {
-					return expr(objectExpression([]));
+					return expr(literal({}));
 				},
 				copy(value, scope) {
 					const expression = read(value, scope);
@@ -431,7 +431,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					if (reifiedValueType.copy) {
 						throw new TypeError(`Copying dictionaries with non-simple values is not yet implemented!`);
 					}
-					return expr(callExpression(memberExpression(identifier("Object"), identifier("assign")), [objectExpression([]), expression]));
+					return expr(callExpression(memberExpression(identifier("Object"), identifier("assign")), [literal({}), expression]));
 				},
 				innerTypes: {
 					Keys: () => {
@@ -469,12 +469,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		field("hashValue", reifyType("Int", globalScope), (value) => value),
 	], {
 	}),
-	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	], {
-		map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(arrayExpression([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
+		map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(literal([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
 	}),
-	"BidirectionalCollection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
+	"BidirectionalCollection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	], {
 		"joined(separator:)": (scope, arg, type): Value => {
@@ -485,8 +485,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			}, returnFunctionType(type));
 		},
 	}),
-	"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([]))),
-	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [], {
+	"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([]))),
+	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [], {
 		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
 	}),
 	"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [
@@ -498,7 +498,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 };
 
 export function emptyOptional(type: Type) {
-	return isNestedOptional(type) ? arrayExpression([]) : literal(null);
+	return literal(isNestedOptional(type) ? [] : null);
 }
 
 export function wrapInOptional(value: Value, type: Type, scope: Scope) {

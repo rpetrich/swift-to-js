@@ -272,7 +272,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 		case "generic":
 			return reifyType(type.base, scope, concat(typeArguments, type.arguments));
 		case "metatype":
-			return primitive(PossibleRepresentation.Object, expr(objectExpression([])));
+			return primitive(PossibleRepresentation.Object, expr(literal({})));
 		case "function":
 			return primitive(PossibleRepresentation.Function, undefinedValue);
 		case "namespaced":
