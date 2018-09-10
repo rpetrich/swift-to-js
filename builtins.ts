@@ -3,9 +3,9 @@ import { expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, Possible
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
-import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
+import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, statements, stringifyType, tuple, unbox, undefinedValue, Value, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, returnStatement, Statement, stringLiteral, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, objectExpression, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0);
@@ -38,11 +38,11 @@ const readLengthField = (name: string, globalScope: Scope) => field("count", rei
 });
 
 const isEmptyFromLength = (globalScope: Scope) => field("isEmpty", reifyType("Bool", globalScope), (value, scope) => {
-	return expr(binaryExpression("!==", memberExpression(read(value, scope), identifier("length")), numericLiteral(0)));
+	return expr(binaryExpression("!==", memberExpression(read(value, scope), identifier("length")), literal(0)));
 });
 
 const startIndexOfZero = (globalScope: Scope) => field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => {
-	return expr(numericLiteral(0));
+	return expr(literal(0));
 });
 
 const voidType: Tuple = { kind: "tuple", types: [] };
@@ -51,12 +51,12 @@ export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).force
 
 function buildIntegerType(min: number, max: number): ReifiedType {
 	const fields: Field[] = [];
-	const reifiedType = primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), fields, {
+	const reifiedType = primitive(PossibleRepresentation.Number, expr(literal(0)), fields, {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
 		"*": binaryBuiltin("*"),
-		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), numericLiteral(0))),
+		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), literal(0))),
 		"%": binaryBuiltin("%"),
 		"<": binaryBuiltin("<"),
 		">": binaryBuiltin(">"),
@@ -72,8 +72,8 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 		"*=": assignmentBuiltin("*="),
 	}, {
 		Type: cached(() => primitive(PossibleRepresentation.Object, expr(objectExpression([])), [
-			field("min", reifiedType, () => expr(numericLiteral(min))),
-			field("max", reifiedType, () => expr(numericLiteral(max))),
+			field("min", reifiedType, () => expr(literal(min))),
+			field("max", reifiedType, () => expr(literal(max))),
 		], {
 		})),
 	});
@@ -82,13 +82,13 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 }
 
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
-	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(booleanLiteral(false)), [], {
+	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
 		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
 		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
 	})),
-	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
 	})),
 	"UInt": cached(() => buildIntegerType(0, 4294967295)),
@@ -101,12 +101,12 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Int32": cached(() => buildIntegerType(-2147483648, 2147483647)),
 	"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER)), // 52-bit integers
 	"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)), // 53-bit integers
-	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 		"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
 	})),
-	"Float": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	"Float": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
@@ -127,7 +127,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"*=": assignmentBuiltin("*="),
 		"/=": assignmentBuiltin("/="),
 	})),
-	"Double": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [], {
+	"Double": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
@@ -151,23 +151,23 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"String": (globalScope) => {
 		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-			field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(numericLiteral(0))),
+			field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		]);
-		const UTF16View = primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+		const UTF16View = primitive(PossibleRepresentation.String, expr(literal("")), [
 			field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		]);
 		const UTF8View = primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [
 			field("count", reifyType("Int", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(numericLiteral(0))),
+			field("startIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(literal(0))),
 			field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 		]);
-		return primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+		return primitive(PossibleRepresentation.String, expr(literal("")), [
 			field("unicodeScalars", UnicodeScalarView, (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [value], scope)),
 			field("utf16", UTF16View, (value) => value),
-			field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [stringLiteral("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
+			field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
 		], {
 			"init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0)], scope)),
 			"+": binaryBuiltin("+"),
@@ -179,7 +179,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			"UTF8View": () => UTF8View,
 		});
 	},
-	"StaticString": cached(() => primitive(PossibleRepresentation.String, expr(stringLiteral("")), [
+	"StaticString": cached(() => primitive(PossibleRepresentation.String, expr(literal("")), [
 	], {
 	})),
 	"Optional": (globalScope, typeParameters) => {
@@ -224,8 +224,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		};
 	},
 	// Should be represented as an empty struct, but we currently
-	"_OptionalNilComparisonType": cached(() => primitive(PossibleRepresentation.Null, expr(nullLiteral()), [], {
-		"init(nilLiteral:)": wrapped((scope, arg, type) => expr(nullLiteral())),
+	"_OptionalNilComparisonType": cached(() => primitive(PossibleRepresentation.Null, expr(literal(null)), [], {
+		"init(nilLiteral:)": wrapped((scope, arg, type) => expr(literal(null))),
 	})),
 	"Array": (globalScope, typeParameters) => {
 		const [ valueType ] = typeParameters(1);
@@ -243,7 +243,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					const [first, after] = reuseExpression(read(value, scope), scope);
 					return expr(conditionalExpression(
 						memberExpression(first, identifier("length")),
-						read(wrapInOptional(expr(memberExpression(after, numericLiteral(0), true)), optionalValueType, scope), scope),
+						read(wrapInOptional(expr(memberExpression(after, literal(0), true)), optionalValueType, scope), scope),
 						emptyOptional(optionalValueType),
 					));
 				}),
@@ -251,7 +251,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					const [first, after] = reuseExpression(read(value, scope), scope);
 					return expr(conditionalExpression(
 						memberExpression(first, identifier("length")),
-						read(wrapInOptional(expr(memberExpression(after, binaryExpression("-", memberExpression(after, identifier("length")), numericLiteral(1)), true)), optionalValueType, scope), scope),
+						read(wrapInOptional(expr(memberExpression(after, binaryExpression("-", memberExpression(after, identifier("length")), literal(1)), true)), optionalValueType, scope), scope),
 						emptyOptional(optionalValueType),
 					));
 				}),
@@ -308,7 +308,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					));
 				}),
 				"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
-					return expr(assignmentExpression("=", memberExpression(read(arg(0, "array"), scope), identifier("length")), numericLiteral(0)));
+					return expr(assignmentExpression("=", memberExpression(read(arg(0, "array"), scope), identifier("length")), literal(0)));
 				}),
 				"reserveCapacity()": wrapped((scope, arg) => undefinedValue),
 				"index(after:)": wrapped((scope, arg) => {
@@ -317,7 +317,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					const [first, after] = reuseExpression(read(i, scope), scope);
 					return expr(conditionalExpression(
 						binaryExpression("<", read(array, scope), first),
-						binaryExpression("+", after, numericLiteral(1)),
+						binaryExpression("+", after, literal(1)),
 						read(arrayBoundsFailed(scope), scope),
 					));
 				}),
@@ -325,8 +325,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 					const i = arg(1, "i");
 					const [first, after] = reuseExpression(read(i, scope), scope);
 					return expr(conditionalExpression(
-						binaryExpression(">", first, numericLiteral(0)),
-						binaryExpression("-", after, numericLiteral(1)),
+						binaryExpression(">", first, literal(0)),
+						binaryExpression("-", after, literal(1)),
 						read(arrayBoundsFailed(scope), scope),
 					));
 				}),
@@ -442,7 +442,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 							readLengthField("endIndex", globalScope),
 							field("first", reifyType(possibleKeyType, globalScope), (value: Value, scope: Scope) => {
 								const [first, after] = reuseExpression(read(value, scope), scope);
-								const stringKey = memberExpression(after, numericLiteral(0), true);
+								const stringKey = memberExpression(after, literal(0), true);
 								const convertedKey = typeof converter !== "undefined" ? callExpression(converter, [stringKey]) : stringKey;
 								return expr(conditionalExpression(memberExpression(first, identifier("length")), read(wrapInOptional(expr(convertedKey), possibleKeyType, scope), scope), emptyOptional(possibleKeyType)));
 							}),
@@ -465,7 +465,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
 		}
 	},
-	"Error": (globalScope) => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [
+	"Error": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [
 		field("hashValue", reifyType("Int", globalScope), (value) => value),
 	], {
 	}),
@@ -489,7 +489,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(arrayExpression([])), [], {
 		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
 	}),
-	"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(numericLiteral(0)), [
+	"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [
 	], {
 		"finalize()": wrapped((scope, arg, type): Value => {
 			return arg(0, "hash");
@@ -498,7 +498,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 };
 
 export function emptyOptional(type: Type) {
-	return isNestedOptional(type) ? arrayExpression([]) : nullLiteral();
+	return isNestedOptional(type) ? arrayExpression([]) : literal(null);
 }
 
 export function wrapInOptional(value: Value, type: Type, scope: Scope) {
@@ -507,23 +507,23 @@ export function wrapInOptional(value: Value, type: Type, scope: Scope) {
 
 export function unwrapOptional(value: Value, type: Type, scope: Scope) {
 	if (isNestedOptional(type)) {
-		return expr(memberExpression(read(value, scope), numericLiteral(0), true));
+		return expr(memberExpression(read(value, scope), literal(0), true));
 	}
 	return value;
 }
 
 export function optionalIsNone(expression: Expression, type: Type): Expression {
 	if (isNestedOptional(type)) {
-		return binaryExpression("===", memberExpression(expression, identifier("length")), numericLiteral(0));
+		return binaryExpression("===", memberExpression(expression, identifier("length")), literal(0));
 	}
-	return binaryExpression("===", expression, nullLiteral());
+	return binaryExpression("===", expression, literal(null));
 }
 
 export function optionalIsSome(expression: Expression, type: Type): Expression {
 	if (isNestedOptional(type)) {
-		return binaryExpression("!==", memberExpression(expression, identifier("length")), numericLiteral(0));
+		return binaryExpression("!==", memberExpression(expression, identifier("length")), literal(0));
 	}
-	return binaryExpression("!==", expression, nullLiteral());
+	return binaryExpression("!==", expression, literal(null));
 }
 
 function arrayBoundsFailed(scope: Scope) {
@@ -539,7 +539,7 @@ function arrayBoundsCheck(array: Value, index: Value, scope: Scope, mode: "read"
 			logicalExpression(
 				"&&",
 				binaryExpression(mode === "write" ? ">=" : ">", memberExpression(remainingArray, identifier("length")), firstIndex),
-				binaryExpression(">=", remainingIndex, numericLiteral(0)),
+				binaryExpression(">=", remainingIndex, literal(0)),
 			),
 			remainingIndex,
 			read(arrayBoundsFailed(scope), scope),
@@ -549,8 +549,8 @@ function arrayBoundsCheck(array: Value, index: Value, scope: Scope, mode: "read"
 }
 
 export const functions: FunctionMap = {
-	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [stringLiteral("Unexpectedly found nil while unwrapping an Optional value")]))])),
-	"Swift.(swift-to-js).arrayBoundsFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("RangeError"), [stringLiteral("Array index out of range")]))])),
+	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [literal("Unexpectedly found nil while unwrapping an Optional value")]))])),
+	"Swift.(swift-to-js).arrayBoundsFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("RangeError"), [literal("Array index out of range")]))])),
 	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {
 		return statements([
 			ifStatement(
@@ -561,7 +561,7 @@ export const functions: FunctionMap = {
 					),
 					binaryExpression("<",
 						read(arg(2, "i"), scope),
-						numericLiteral(0),
+						literal(0),
 					),
 				),
 				expressionStatement(read(arrayBoundsFailed(scope), scope)),
@@ -571,7 +571,7 @@ export const functions: FunctionMap = {
 				memberExpression(read(arg(0, "array"), scope), identifier("splice")),
 				[
 					read(arg(2, "i"), scope),
-					numericLiteral(0),
+					literal(0),
 					read(arg(1, "newElement"), scope),
 				],
 			)),
@@ -587,7 +587,7 @@ export const functions: FunctionMap = {
 					),
 					binaryExpression("<",
 						read(arg(1, "i"), scope),
-						numericLiteral(0),
+						literal(0),
 					),
 				),
 				expressionStatement(read(arrayBoundsFailed(scope), scope)),
@@ -599,10 +599,10 @@ export const functions: FunctionMap = {
 						memberExpression(read(arg(0, "array"), scope), identifier("splice")),
 						[
 							read(arg(1, "i"), scope),
-							numericLiteral(1),
+							literal(1),
 						],
 					),
-					numericLiteral(0),
+					literal(0),
 					true,
 				),
 			),

@@ -10,7 +10,11 @@ export function dictGet$key$(dict, key) {
   return Object.hasOwnProperty.call(dict, key) ? dict[key] : null;
 }
 export function dictSet$key$value$(dict, key, value) {
-  value !== null ? dict[key] = value : delete dict[key];
+  if (value !== null) {
+    dict[key] = value;
+  } else {
+    delete dict[key];
+  }
 }
 export function count(dict) {
   return Object.keys(dict).length;

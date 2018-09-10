@@ -2,9 +2,9 @@ import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { concat } from "./utils";
-import { copy, expr, read, reuseExpression, undefinedValue, Value } from "./values";
+import { copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 
-import { arrayExpression, assignmentExpression, booleanLiteral, Expression, Identifier, isLiteral, memberExpression, MemberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, stringLiteral } from "babel-types";
+import { arrayExpression, assignmentExpression, Expression, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
 export enum PossibleRepresentation {
 	None,
@@ -262,7 +262,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 							const [first, after] = reuseExpression(expression, innerScope);
 							return expr(arrayExpression(reifiedTypes.map((elementType, index) => {
 								const identifier = usedFirst ? after : (usedFirst = true, first);
-								const field = memberExpression(identifier, numericLiteral(index), true);
+								const field = memberExpression(identifier, literal(index), true);
 								return elementType.copy ? read(elementType.copy(expr(field), innerScope), innerScope) : field;
 							})));
 						} : undefined,

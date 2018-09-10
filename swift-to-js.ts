@@ -6,7 +6,7 @@ import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, Fu
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
-import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, hoistToIdentifier, isNestedOptional, isPure, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, variable, VariableValue } from "./values";
+import { ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, isPure, literal, newPointer, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -165,7 +165,7 @@ interface PatternOutput {
 	next?: PatternOutput;
 }
 
-const trueValue = expr(booleanLiteral(true));
+const trueValue = expr(literal(true));
 
 function isTrueExpression(expression: Expression) {
 	return expression.type === "BooleanLiteral" && expression.value === true;
@@ -307,7 +307,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			}
 			const [first, second] = reuseExpression(read(value, scope), scope);
 			return term.children.reduce((existing, child, i) => {
-				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, numericLiteral(i), true)), scope);
+				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, literal(i), true)), scope);
 				return mergePatterns(existing, childPattern, scope);
 			}, emptyPattern);
 		}
@@ -325,8 +325,8 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			}
 			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
 			const [first, after] = reuseExpression(read(value, scope), scope);
-			const discriminantExpression = isDirectRepresentation ? first : memberExpression(first, numericLiteral(0), true);
-			const test = expr(binaryExpression("===", discriminantExpression, numericLiteral(index)));
+			const discriminantExpression = isDirectRepresentation ? first : memberExpression(first, literal(0), true);
+			const test = expr(binaryExpression("===", discriminantExpression, literal(index)));
 			expectLength(term.children, 0, 1);
 			if (term.children.length === 0) {
 				return {
@@ -341,7 +341,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 					throw new Error(`Tried to use a pattern on an enum case that has no fields`);
 				case 1:
 					// Index 1 to account for the discriminant
-					patternExpression = memberExpression(after, numericLiteral(1), true);
+					patternExpression = memberExpression(after, literal(1), true);
 					// Special-case pattern matching using pattern_paren on a enum case with one field
 					if (child.name === "pattern_paren") {
 						return {
@@ -356,7 +356,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 					if (child.name === "pattern_tuple") {
 						const next = child.children.reduce((existing, tupleChild, i) => {
 							// Offset by 1 to account for the discriminant
-							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, numericLiteral(i + 1), true)), scope);
+							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, literal(i + 1), true)), scope);
 							return mergePatterns(existing, childPattern, scope);
 						}, emptyPattern);
 						return {
@@ -366,7 +366,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 						};
 					}
 					// Remove the discriminant
-					patternExpression = callExpression(memberExpression(after, identifier("slice")), [numericLiteral(1)]);
+					patternExpression = callExpression(memberExpression(after, identifier("slice")), [literal(1)]);
 					break;
 			}
 			// General case pattern matching on an enum
@@ -406,7 +406,7 @@ function valueForPattern(pattern: PatternOutput, scope: Scope): Value {
 
 function flattenPattern(pattern: PatternOutput, scope: Scope): { prefix: Statement[]; test: Expression; suffix: Statement[] } {
 	let prefix: Statement[] = emptyStatements;
-	let test: Expression = booleanLiteral(true);
+	let test: Expression = literal(true);
 	let currentPattern: PatternOutput | undefined = pattern;
 	while (currentPattern) {
 		prefix = concat(prefix, currentPattern.prefix);
@@ -464,7 +464,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			return variable(memberExpression(
 				read(translateTermToValue(child, scope, bindingContext), scope),
-				numericLiteral(+getProperty(term, "field", isString)),
+				literal(+getProperty(term, "field", isString)),
 				true,
 			));
 		}
@@ -542,15 +542,15 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "boolean_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(booleanLiteral(getProperty(term, "value", isString) === "true"));
+			return expr(literal(getProperty(term, "value", isString) === "true"));
 		}
 		case "integer_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(numericLiteral(+getProperty(term, "value", isString)));
+			return expr(literal(+getProperty(term, "value", isString)));
 		}
 		case "string_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(stringLiteral(getProperty(term, "value", isString)));
+			return expr(literal(getProperty(term, "value", isString)));
 		}
 		case "array_expr": {
 			const type = getType(term);
@@ -669,7 +669,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 							}
 							return firstValue.values[numeric];
 						} else {
-							return expr(memberExpression(read(firstValue, scope), numericLiteral(numeric), true));
+							return expr(memberExpression(read(firstValue, scope), literal(numeric), true));
 						}
 					}
 				}
@@ -932,12 +932,12 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				}
 				const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
 				let mergedPrefix: Statement[] = emptyStatements;
-				let mergedTest: Expression = booleanLiteral(false);
+				let mergedTest: Expression = literal(false);
 				let mergedSuffix: Statement[] = emptyStatements;
 				for (const child of remainingChildren) {
 					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), scope), scope);
 					mergedPrefix = concat(mergedPrefix, prefix);
-					if (isBooleanLiteral(mergedTest) && mergedTest.value === false) {
+					if (valueOfExpression(mergedTest) === false) {
 						mergedTest = test;
 					} else if (!isTrueExpression(mergedTest)) {
 						mergedTest = logicalExpression("||", mergedTest, test);
@@ -1029,14 +1029,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					return expr(cases.reduce(
 						(previous, enumCase, i) => {
 							if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
-								const test = binaryExpression("===", memberExpression(usedFirst ? after : first, numericLiteral(0), true), numericLiteral(i));
+								const test = binaryExpression("===", memberExpression(usedFirst ? after : first, literal(0), true), literal(i));
 								usedFirst = true;
-								const copyCase = arrayExpression(concat([numericLiteral(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
+								const copyCase = arrayExpression(concat([literal(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
 									// if (fieldType === baseReifiedType) {
 										// TODO: Avoid resetting this each time
 										// methods["$copy"] = noinline((innermostScope, arg) => copyHelper(arg(0), innermostScope));
 									// }
-									const fieldExpression = memberExpression(after, numericLiteral(fieldIndex + 1), true);
+									const fieldExpression = memberExpression(after, literal(fieldIndex + 1), true);
 									return fieldType.copy ? read(fieldType.copy(expr(fieldExpression), scope), scope) : fieldExpression;
 								})));
 								return conditionalExpression(test, copyCase, previous);
@@ -1093,7 +1093,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				if (type.kind === "function") {
 					methods[name] = wrapped((innerScope, arg) => {
 						const args = type.arguments.types.map((argType, argIndex) => read(copy(arg(argIndex), argType), innerScope));
-						return expr(arrayExpression(concat([numericLiteral(index)], args)));
+						return expr(arrayExpression(concat([literal(index)], args)));
 					});
 					cases.push({
 						name,
@@ -1109,9 +1109,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				}
 				if (baseType) {
 					// TODO: Extract the underlying value, which may actually not be numeric!
-					methods[name] = () => expr(numericLiteral(index));
+					methods[name] = () => expr(literal(index));
 				} else {
-					methods[name] = () => expr(arrayExpression([numericLiteral(index)]));
+					methods[name] = () => expr(arrayExpression([literal(index)]));
 				}
 				cases.push({
 					name,
@@ -1231,7 +1231,19 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			const value = translateTermToValue(term, scope);
 			const pattern = convertToPattern(value);
 			const { prefix, test, suffix } = flattenPattern(pattern, scope);
-			return concat(concat(prefix, isPure(test) ? emptyStatements : [expressionStatement(test)]), suffix);
+			let result = prefix;
+			if (!isPure(test)) {
+				if (test.type === "ConditionalExpression") {
+					result = concat(result, [ifStatement(
+						test.test,
+						blockStatement(isPure(test.consequent) ? [] : [expressionStatement(test.consequent)]),
+						isPure(test.alternate) ? undefined : blockStatement([expressionStatement(test.alternate)]),
+					)]);
+				} else {
+					result = concat(result, [expressionStatement(test)]);
+				}
+			}
+			return concat(result, suffix);
 		}
 	}
 }

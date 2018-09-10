@@ -1,4 +1,4 @@
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, thisExpression, ThisExpression } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
@@ -20,7 +20,7 @@ export function expr(expression: Expression, pointer: boolean = false): Expressi
 	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
 		return variable(expression);
 	}
-	return { kind: "expression", expression, pointer };
+	return { kind: "expression", expression: simplify(expression), pointer };
 }
 
 
@@ -299,13 +299,166 @@ export function isPure(expression: Expression): boolean {
 	}
 }
 
+export function simplify(expression: Expression): Expression {
+	const value = valueOfExpression(expression);
+	if (typeof value !== "undefined") {
+		return literal(value);
+	}
+	switch (expression.type) {
+		case "ConditionalExpression":
+			const testValue = valueOfExpression(expression.test);
+			if (typeof testValue !== "undefined") {
+				return simplify(testValue ? expression.consequent : expression.alternate);
+			}
+			return conditionalExpression(simplify(expression.test), simplify(expression.consequent), simplify(expression.alternate));
+		case "LogicalExpression":
+			return logicalExpression(expression.operator, simplify(expression.left), simplify(expression.right));
+		case "BinaryExpression":
+			return binaryExpression(expression.operator, simplify(expression.left), simplify(expression.right));
+		default:
+			break;
+	}
+	return expression;
+}
+
+export function valueOfExpression(expression: Expression): undefined | boolean | number | string | null {
+	switch (expression.type) {
+		case "BooleanLiteral":
+		case "NumericLiteral":
+		case "StringLiteral":
+			return expression.value;
+		case "NullLiteral":
+			return null;
+		case "UnaryExpression": {
+			const value = valueOfExpression(expression.argument);
+			if (typeof value !== "undefined") {
+				switch (expression.operator) {
+					case "!":
+						return !value;
+					case "-":
+						return -(value as number);
+					case "+":
+						return -(value as number);
+					case "~":
+						return ~(value as number);
+					case "typeof":
+						return typeof value;
+					case "void":
+						return undefined;
+					default:
+						break;
+				}
+			}
+			break;
+		}
+		case "LogicalExpression":
+		case "BinaryExpression": {
+			const left = valueOfExpression(expression.left);
+			if (typeof left !== "undefined") {
+				const right = valueOfExpression(expression.right);
+				if (typeof right !== "undefined") {
+					switch (expression.operator) {
+						case "&&":
+							return left && right;
+						case "||":
+							return left || right;
+						case "+":
+							return (left as number) + (right as number);
+						case "-":
+							return (left as number) - (right as number);
+						case "*":
+							return (left as number) * (right as number);
+						case "/":
+							return (left as number) / (right as number);
+						case "%":
+							return (left as number) % (right as number);
+						case "**":
+							return (left as number) ** (right as number);
+						case "&":
+							return (left as number) & (right as number);
+						case "|":
+							return (left as number) | (right as number);
+						case ">>":
+							return (left as number) >> (right as number);
+						case ">>>":
+							return (left as number) >>> (right as number);
+						case "<<":
+							return (left as number) << (right as number);
+						case "^":
+							return (left as number) ^ (right as number);
+						case "==":
+							// tslint:disable-next-line:triple-equals
+							return left == right;
+						case "===":
+							return left === right;
+						case "!=":
+							// tslint:disable-next-line:triple-equals
+							return left != right;
+						case "!==":
+							return left !== right;
+						case "<":
+							return (left as number) < (right as number);
+						case "<=":
+							return (left as number) <= (right as number);
+						case "<":
+							return (left as number) > (right as number);
+						case ">=":
+							return (left as number) >= (right as number);
+						default:
+							break;
+					}
+				}
+			}
+			break;
+		}
+		case "ConditionalExpression": {
+			const test = valueOfExpression(expression.test);
+			if (typeof test !== "undefined") {
+				return valueOfExpression(test ? expression.consequent : expression.alternate);
+			}
+			break;
+		}
+		case "SequenceExpression": {
+			for (const ignoredExpression of expression.expressions.slice(expression.expressions.length - 1)) {
+				if (typeof valueOfExpression(ignoredExpression) === "undefined") {
+					return undefined;
+				}
+			}
+			return valueOfExpression(expression.expressions[expression.expressions.length - 1]);
+		}
+		default:
+			break;
+	}
+	return undefined;
+}
+
+export function literal(value: boolean): BooleanLiteral;
+export function literal(value: number): NumericLiteral;
+export function literal(value: string): StringLiteral;
+export function literal(value: null): NullLiteral;
+export function literal(value: boolean | number | string | null): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral;
+export function literal(value: boolean | number | string | null): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral {
+	if (typeof value === "boolean") {
+		return booleanLiteral(value);
+	} else if (typeof value === "number") {
+		return numericLiteral(value);
+	} else if (typeof value === "string") {
+		return stringLiteral(value);
+	} else if (value === null) {
+		return nullLiteral();
+	} else {
+		throw new TypeError(`Expected to receive a valid literal type, instead got ${typeof value}`);
+	}
+}
+
 export function reuseExpression(expression: Expression, scope: Scope): [Expression, Expression] {
-	if (isPure(expression)) {
-		return [expression, expression];
+	const simplified = simplify(expression);
+	if (isPure(simplified)) {
+		return [simplified, simplified];
 	} else {
 		const temp = uniqueIdentifier(scope);
 		addVariable(scope, temp);
-		return [assignmentExpression("=", temp, expression), temp];
+		return [assignmentExpression("=", temp, simplified), temp];
 	}
 }
 
