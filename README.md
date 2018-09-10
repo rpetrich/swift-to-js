@@ -58,3 +58,5 @@ Destructors aren't supported and won't ever be due to JavaScript's GC model. Int
 Weak references are converted to strong references due to JavaScript's GC model and lack of support for weak references.
 
 Names are mangled based on a few simple rules. Symbols that aren't supported in JavaScript identifiers are converted to `$name$` format. For example, the `==` function is converted to `$equals$$equals$`. Method/function names are mangled to include all named arguments separated by `$`. Internal helper functions are always prefixed by a `$` symbol, because `$` obviously represents Swift.
+
+Source maps are produced by populating the bablyon AST's `loc` properties with data the Swift compiler includes in it's AST's `range` properties. When peephole optimizations remove operations, the inner-most source location is generally preserved. Mapping information will be missing on purely generated code and any code inlined from standard library functions.
