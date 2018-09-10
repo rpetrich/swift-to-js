@@ -1,6 +1,7 @@
+import { Term } from "./ast";
 import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
-import { ArgGetter, call, callable, expr, read, stringifyType, Value } from "./values";
+import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, Value } from "./values";
 
 import { blockStatement, exportNamedDeclaration, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
 
@@ -18,7 +19,7 @@ function getArgumentPointers(type: Type): boolean[] {
 	throw new TypeError(`Expected a function, got a ${type.kind}: ${stringifyType(type)}`);
 }
 
-export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value): [Identifier[], Statement[]] {
+export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value, location?: Location | Term): [Identifier[], Statement[]] {
 	const inner: Scope = newScope("anonymous", scope);
 	let usedCount = 0;
 	const identifiers: { [index: number]: Identifier } = Object.create(null);
@@ -39,7 +40,8 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 		} else {
 			result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
 		}
-		return expr(result, pointers[i]);
+		// TODO: Determine what to do about inout parameters
+		return expr(result);
 	});
 	const args: Identifier[] = [];
 	for (let i = 0; i < usedCount; i++) {
@@ -49,14 +51,14 @@ export function functionize(scope: Scope, type: Type, expression: (scope: Scope,
 	if (newValue.kind === "statements") {
 		statements = newValue.statements;
 	} else {
-		statements = [returnStatement(read(newValue, inner))];
+		statements = [annotate(returnStatement(read(newValue, inner)), newValue.location || location)];
 	}
 	const result = emitScope(inner, statements);
 	usedCount = -1;
 	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, shouldExport: boolean = false): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, location?: Location | Term, shouldExport: boolean = false): Identifier {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}
@@ -66,7 +68,7 @@ export function insertFunction(name: string, scope: Scope, type: Function, build
 	}
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
-	const [args, statements] = functionize(globalScope, type, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name));
+	const [args, statements] = functionize(globalScope, type, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
 	const fn = functionDeclaration(mangled, args, blockStatement(statements));
 	globalScope.declarations[mangled.name] = shouldExport ? exportNamedDeclaration(fn, []) : fn;
 	return mangled;

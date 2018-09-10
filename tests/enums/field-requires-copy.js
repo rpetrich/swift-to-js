@@ -1,9 +1,3 @@
-export function makeCopy$ofPosition$(position) {
-  let copy;
-  copy = position;
-  return copy;
-}
-
 function Position$copy(source) {
   return source[0] === 2 ? [2, {
     x: source[1].x,
@@ -14,6 +8,11 @@ function Position$copy(source) {
   }] : source.slice();
 }
 
+export function makeCopy$ofPosition$(position) {
+  let copy;
+  copy = position;
+  return Position$copy(copy);
+}
 export function makeCopyDirect$ofPosition$(position) {
   return Position$copy(position);
 }

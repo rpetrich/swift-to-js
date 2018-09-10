@@ -1,51 +1,98 @@
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
 
 import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat } from "./utils";
+import { Term } from "./ast";
+import { expectLength } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
+
+
+export interface Position {
+	line: number;
+	column: number;
+}
+
+export interface Location {
+	start: Position;
+	end: Position;
+}
+
+const locationRangeRegex = /^(.*):(\d+):(\d+)$/;
+
+function parseLineAndColumn(position: string): Position {
+	const matched = position.match(locationRangeRegex);
+	if (matched === null) {
+		throw new Error(`Source range does not match expected format: ${position}`);
+	}
+	expectLength(matched as ReadonlyArray<string>, 4);
+	return {
+		line: parseInt(matched[2], 10),
+		column: parseInt(matched[3], 10),
+	};
+}
+
+export function locationForTerm(term: Term): Location | undefined {
+	if (Object.hasOwnProperty.call(term.properties, "range")) {
+		const range = term.properties["range"];
+		if (typeof range === "object" && !Array.isArray(range) && Object.hasOwnProperty.call(range, "from") && Object.hasOwnProperty.call(range, "to")) {
+			return {
+				start: parseLineAndColumn(range.from),
+				end: parseLineAndColumn(range.to),
+			};
+		}
+	}
+	return undefined;
+}
+
+function readLocation(locationOrTerm?: Term | Location): Location | undefined {
+	return typeof locationOrTerm === "undefined" || !Object.hasOwnProperty.call(locationOrTerm, "properties") ? locationOrTerm as any as Location : locationForTerm(locationOrTerm as any as Term);
+}
+
 
 export interface ExpressionValue {
 	kind: "expression";
 	expression: Expression;
-	pointer?: boolean;
+	location?: Location;
 }
 
-export function expr(expression: Identifier | ThisExpression, pointer?: boolean): VariableValue;
-export function expr(expression: Expression, pointer?: boolean): ExpressionValue | VariableValue;
-export function expr(expression: Expression, pointer: boolean = false): ExpressionValue | ReturnType<typeof variable> {
+export function expr(expression: Identifier | ThisExpression, location?: Term | Location): VariableValue;
+export function expr(expression: Expression, location?: Term | Location): ExpressionValue | VariableValue;
+export function expr(expression: Expression, location?: Term | Location): ExpressionValue | ReturnType<typeof variable> {
 	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
-		return variable(expression);
+		return variable(expression, location);
 	}
-	return { kind: "expression", expression: simplify(expression), pointer };
+	return { kind: "expression", expression: simplify(expression), location: readLocation(location) };
 }
 
 
 export interface StatementsValue {
 	kind: "statements";
 	statements: Statement[];
+	location?: Location;
 }
 
-export function statements(statements: Statement[]): StatementsValue | ReturnType<typeof expr> {
+export function statements(statements: Statement[], location?: Term | Location): StatementsValue | ReturnType<typeof expr> {
 	if (statements.length >= 1) {
 		const lastStatement = statements[statements.length - 1];
 		if (lastStatement.type === "ReturnStatement") {
 			const last = lastStatement.argument === null ? undefinedLiteral : lastStatement.argument;
 			if (statements.length === 1) {
-				return expr(last);
+				return expr(last, lastStatement.loc || location);
 			}
 			const exceptLast = statements.slice(0, statements.length - 1);
 			if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
-				return expr(sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [last])));
+				return expr(sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [last])), lastStatement.loc || location);
 			}
 		}
 	}
 	return {
 		kind: "statements",
 		statements,
+		location: readLocation(location),
 	};
 }
 
@@ -53,36 +100,39 @@ export interface CallableValue {
 	kind: "callable";
 	call: (scope: Scope, arg: ArgGetter) => Value;
 	type: Function;
+	location?: Location;
 }
 
-export function callable(call: (scope: Scope, arg: ArgGetter) => Value, type: Type): CallableValue {
+export function callable(call: (scope: Scope, arg: ArgGetter) => Value, type: Type, location?: Term | Location): CallableValue {
 	if (type.kind !== "function") {
 		throw new TypeError(`Expected a function type when constructing a callable, got a ${type.kind}!`);
 	}
-	return { kind: "callable", call, type };
+	return { kind: "callable", call, type, location: readLocation(location) };
 }
 
 
 export interface VariableValue {
 	kind: "direct";
 	ref: Identifier | MemberExpression | ThisExpression;
+	location?: Location;
 }
 
-export function variable(ref: Identifier | MemberExpression | ThisExpression): VariableValue {
-	return { kind: "direct", ref };
+export function variable(ref: Identifier | MemberExpression | ThisExpression, location?: Term | Location): VariableValue {
+	return { kind: "direct", ref, location: readLocation(location) };
 }
 
 
 export interface BoxedValue {
 	kind: "boxed";
 	contents: VariableValue | SubscriptValue;
+	location?: Location;
 }
 
-export function boxed(contents: Value): BoxedValue {
+export function boxed(contents: Value, location?: Term | Location): BoxedValue {
 	if (contents.kind !== "direct" && contents.kind !== "subscript") {
 		throw new TypeError(`Unable to box a ${contents.kind}`);
 	}
-	return { kind: "boxed", contents };
+	return { kind: "boxed", contents, location: readLocation(location) };
 }
 
 
@@ -91,20 +141,22 @@ export interface FunctionValue {
 	name: string;
 	parentType: ReifiedType | undefined;
 	type: Function;
+	location?: Location;
 }
 
-export function functionValue(name: string, parentType: ReifiedType | undefined, type: Function): FunctionValue {
-	return { kind: "function", name, parentType, type };
+export function functionValue(name: string, parentType: ReifiedType | undefined, type: Function, location?: Term | Location): FunctionValue {
+	return { kind: "function", name, parentType, type, location: readLocation(location) };
 }
 
 
 export interface TupleValue {
 	kind: "tuple";
 	values: Value[];
+	location?: Location;
 }
 
-export function tuple(values: Value[]): TupleValue {
-	return { kind: "tuple", values };
+export function tuple(values: Value[], location?: Term | Location): TupleValue {
+	return { kind: "tuple", values, location: readLocation(location) };
 }
 
 
@@ -113,10 +165,11 @@ export interface SubscriptValue {
 	getter: Value;
 	setter: Value;
 	args: Value[];
+	location?: Location;
 }
 
-export function subscript(getter: Value, setter: Value, args: Value[]): SubscriptValue {
-	return { kind: "subscript", getter, setter, args };
+export function subscript(getter: Value, setter: Value, args: Value[], location?: Term | Location): SubscriptValue {
+	return { kind: "subscript", getter, setter, args, location: readLocation(location) };
 }
 
 
@@ -124,6 +177,7 @@ export interface CopiedValue {
 	kind: "copied";
 	value: Value;
 	type: Type;
+	location?: Location;
 }
 
 export function copy(value: Value, type: Type): CopiedValue {
@@ -142,13 +196,9 @@ export type Value = ExpressionValue | CallableValue | VariableValue | FunctionVa
 const baseProperty = identifier("base");
 const offsetProperty = identifier("offset");
 
-export function newPointer(base: Expression, offset: Expression): Value {
-	return expr(objectExpression([objectProperty(baseProperty, base), objectProperty(offsetProperty, offset)]), true);
-}
-
 export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
 	if (value.kind === "boxed") {
-		return value.contents;
+		return annotateValue(value.contents, value.location);
 	} else if (value.kind === "direct") {
 		return value;
 	} else if (value.kind === "subscript") {
@@ -158,23 +208,42 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 	}
 }
 
-export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "="): Value {
+export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "=", location?: Term | Location): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return set(dest.contents, source, scope, operator);
+			return set(dest.contents, source, scope, operator, location);
 		case "direct":
 			if (dest.ref.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
 			}
-			return expr(assignmentExpression(operator, dest.ref, read(source, scope)));
+			return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
 		case "subscript":
 			const value = operator === "=" ? source : expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(dest, scope), read(source, scope)));
-			return call(dest.setter, undefinedValue, concat(dest.args, [source]), scope, "set");
+			return call(dest.setter, undefinedValue, concat(dest.args, [source]), scope, location, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
 }
 
+
+
+export function annotate<T extends Node>(node: T, location?: Location | Term): T {
+	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(node, "loc")) {
+		return Object.assign(Object.create(Object.getPrototypeOf(node)), {
+			loc: readLocation(location)
+		}, node);
+	}
+	return node;
+}
+
+export function annotateValue<T extends Value>(value: T, location?: Location | Term): T {
+	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(value, "location")) {
+		return Object.assign(Object.create(Object.getPrototypeOf(value)), {
+			location: readLocation(location)
+		}, value);
+	}
+	return value;
+}
 
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
@@ -183,39 +252,34 @@ export function read(value: Value, scope: Scope): Expression {
 		case "copied":
 			const reified = reifyType(value.type, scope);
 			if (reified.copy) {
-				return read(reified.copy(value.value, scope), scope);
+				return annotate(read(reified.copy(value.value, scope), scope), value.location);
 			}
-			return read(value.value, scope);
+			return annotate(read(value.value, scope), value.location);
 		case "function":
 			const functions = typeof value.parentType !== "undefined" ? value.parentType.functions : scope.functions;
-			return insertFunction(value.name, scope, value.type, scope.functions[value.name]);
+			return annotate(insertFunction(value.name, scope, value.type, scope.functions[value.name]), value.location);
 		case "tuple":
 			switch (value.values.length) {
 				case 0:
-					return undefinedLiteral;
+					return annotate(undefinedLiteral, value.location);
 				case 1:
-					return read(value.values[0], scope);
+					return annotate(read(value.values[0], scope), value.location);
 				default:
-					return arrayExpression(value.values.map((child) => read(child, scope)));
+					return annotate(arrayExpression(value.values.map((child) => read(child, scope))), value.location);
 			}
 		case "expression":
-			if (value.pointer) {
-				const [first, second] = reuseExpression(value.expression, scope);
-				return memberExpression(memberExpression(first, baseProperty), memberExpression(second, offsetProperty), true);
-			} else {
-				return value.expression;
-			}
+			return annotate(value.expression, value.location);
 		case "callable":
-			const [args, statements] = functionize(scope, value.type, value.call);
-			return functionExpression(undefined, args, blockStatement(statements));
+			const [args, statements] = functionize(scope, value.type, value.call, value.location);
+			return annotate(functionExpression(undefined, args, annotate(blockStatement(statements), value.location)), value.location);
 		case "direct":
-			return value.ref;
+			return annotate(value.ref, value.location);
 		case "statements":
-			return callExpression(functionExpression(undefined, [], blockStatement(value.statements)), []);
+			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 		case "subscript":
-			return read(call(value.getter, undefinedValue, value.args, scope, "get"), scope);
+			return annotate(read(call(value.getter, undefinedValue, value.args, scope, value.location, "get"), scope), value.location);
 		case "boxed":
-			return read(value.contents, scope);
+			return annotate(read(value.contents, scope), value.location);
 		default:
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
 	}
@@ -223,7 +287,7 @@ export function read(value: Value, scope: Scope): Expression {
 
 export const undefinedValue = expr(undefinedLiteral);
 
-export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Value>, scope: Scope, type: "call" | "get" | "set" = "call"): Value {
+export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Value>, scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
 		if (i === "this") {
 			return thisArgument;
@@ -243,24 +307,24 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 						if (typeof fn !== "function") {
 							throw new Error(`Expected a callable function!`);
 						}
-						return fn(scope, getter, target.type, target.name);
+						return annotateValue(fn(scope, getter, target.type, target.name), location);
 					default:
 						if (typeof fn === "function") {
 							throw new Error(`Expected a ${type}ter!`);
 						}
-						return fn[type](scope, getter, target.type, target.name);
+						return annotateValue(fn[type](scope, getter, target.type, target.name), location);
 				}
 			} else {
 				if (type !== "call") {
 					throw new Error(`Unable to call a ${type}ter on a function!`);
 				}
-				return call(expr(insertFunction(target.name, scope, target.type, functions[target.name])), thisArgument, args, scope);
+				return call(expr(insertFunction(target.name, scope, target.type, functions[target.name]), location), thisArgument, args, scope, location);
 			}
 		case "callable":
 			if (type !== "call") {
 				throw new Error(`Unable to call a ${type}ter on a function!`);
 			}
-			return target.call(scope, getter);
+			return annotateValue(target.call(scope, getter), location);
 		default:
 			break;
 	}
@@ -268,9 +332,9 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
 	if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
-		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))));
+		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))), location);
 	} else {
-		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))));
+		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))), location);
 	}
 }
 
@@ -302,26 +366,26 @@ export function isPure(expression: Expression): boolean {
 export function simplify(expression: Expression): Expression {
 	const value = valueOfExpression(expression);
 	if (typeof value !== "undefined") {
-		return literal(value);
+		return annotate(literal(value), expression.loc);
 	}
 	switch (expression.type) {
 		case "ConditionalExpression":
 			const testValue = valueOfExpression(expression.test);
 			if (typeof testValue !== "undefined") {
-				return simplify(testValue ? expression.consequent : expression.alternate);
+				return annotate(simplify(testValue ? expression.consequent : expression.alternate), expression.loc);
 			}
-			return conditionalExpression(simplify(expression.test), simplify(expression.consequent), simplify(expression.alternate));
+			return annotate(conditionalExpression(simplify(expression.test), simplify(expression.consequent), simplify(expression.alternate)), expression.loc);
 		case "LogicalExpression":
-			return logicalExpression(expression.operator, simplify(expression.left), simplify(expression.right));
+			return annotate(logicalExpression(expression.operator, simplify(expression.left), simplify(expression.right)), expression.loc);
 		case "BinaryExpression":
-			return binaryExpression(expression.operator, simplify(expression.left), simplify(expression.right));
+			return annotate(binaryExpression(expression.operator, simplify(expression.left), simplify(expression.right)), expression.loc);
 		case "MemberExpression":
 			if (!expression.computed && expression.property.type === "Identifier") {
 				const objectValue = valueOfExpression(expression.object);
 				if (typeof objectValue !== "undefined" && objectValue !== null && Object.hasOwnProperty.call(objectValue, expression.property.name)) {
 					const propertyValue = (objectValue as any)[expression.property.name];
 					if (typeof propertyValue === "boolean" || typeof propertyValue === "number" || typeof propertyValue === "string" || typeof propertyValue === "object") {
-						return literal(propertyValue);
+						return annotate(literal(propertyValue), expression.loc);
 					}
 				}
 			}
@@ -475,13 +539,13 @@ export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | 
 }
 
 export function reuseExpression(expression: Expression, scope: Scope): [Expression, Expression] {
-	const simplified = simplify(expression);
+	const simplified = annotate(simplify(expression), expression.loc);
 	if (isPure(simplified)) {
 		return [simplified, simplified];
 	} else {
-		const temp = uniqueIdentifier(scope);
+		const temp = annotate(uniqueIdentifier(scope), expression.loc);
 		addVariable(scope, temp);
-		return [assignmentExpression("=", temp, simplified), temp];
+		return [annotate(assignmentExpression("=", temp, simplified), expression.loc), temp];
 	}
 }
 
@@ -489,7 +553,7 @@ export function hoistToIdentifier(expression: Expression, scope: Scope, name: st
 	if (expression.type === "Identifier" || expression.type === "ThisExpression") {
 		return expression;
 	}
-	const result = uniqueIdentifier(scope, name);
+	const result = annotate(uniqueIdentifier(scope, name), expression.loc);
 	addVariable(scope, result, expression);
 	return result;
 }
