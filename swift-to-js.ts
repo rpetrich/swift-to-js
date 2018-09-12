@@ -1327,7 +1327,7 @@ export async function compile(path: string): Promise<CompilerOutput> {
 		console.error(lines.slice(0, bracketIndex).join("\n"));
 		ast = lines.slice(bracketIndex).join("\n");
 	}
-	console.log(ast);
+	// console.log(ast);
 	const rootTerm = parseAST(ast);
 	await stdout;
 	const program = compileTermToProgram(rootTerm);
@@ -1339,8 +1339,8 @@ export async function compile(path: string): Promise<CompilerOutput> {
 		sourceMaps: true,
 	});
 	// console.log(rootTerm.children);
-	console.log(JSON.stringify(result.ast, null, 2));
-	console.log(result.map);
+	// console.log(JSON.stringify(result.ast, null, 2));
+	// console.log(result.map);
 	return {
 		code: result.code!,
 		map: result.map!,
