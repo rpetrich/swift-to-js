@@ -528,7 +528,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 					expr(memberExpression(read(peekedTarget, scope), identifier("apply")), term),
 					undefinedValue,
 					[expr(undefinedLiteral, term) as Value].concat(argsValue),
-					scope
+					scope,
 				);
 			}
 		}

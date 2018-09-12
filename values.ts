@@ -1,11 +1,11 @@
 import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
 
+import { Term } from "./ast";
 import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat } from "./utils";
-import { Term } from "./ast";
 import { expectLength } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
@@ -37,7 +37,7 @@ function parseLineAndColumn(position: string): Position {
 
 export function locationForTerm(term: Term): Location | undefined {
 	if (Object.hasOwnProperty.call(term.properties, "range")) {
-		const range = term.properties["range"];
+		const range = term.properties.range;
 		if (typeof range === "object" && !Array.isArray(range) && Object.hasOwnProperty.call(range, "from") && Object.hasOwnProperty.call(range, "to")) {
 			return {
 				start: parseLineAndColumn(range.from),
@@ -230,7 +230,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 export function annotate<T extends Node>(node: T, location?: Location | Term): T {
 	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(node, "loc")) {
 		return Object.assign(Object.create(Object.getPrototypeOf(node)), {
-			loc: readLocation(location)
+			loc: readLocation(location),
 		}, node);
 	}
 	return node;
@@ -239,7 +239,7 @@ export function annotate<T extends Node>(node: T, location?: Location | Term): T
 export function annotateValue<T extends Value>(value: T, location?: Location | Term): T {
 	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(value, "location")) {
 		return Object.assign(Object.create(Object.getPrototypeOf(value)), {
-			location: readLocation(location)
+			location: readLocation(location),
 		}, value);
 	}
 	return value;
@@ -376,9 +376,39 @@ export function simplify(expression: Expression): Expression {
 			}
 			return annotate(conditionalExpression(simplify(expression.test), simplify(expression.consequent), simplify(expression.alternate)), expression.loc);
 		case "LogicalExpression":
-			return annotate(logicalExpression(expression.operator, simplify(expression.left), simplify(expression.right)), expression.loc);
-		case "BinaryExpression":
-			return annotate(binaryExpression(expression.operator, simplify(expression.left), simplify(expression.right)), expression.loc);
+			const left = simplify(expression.left);
+			const leftValue = valueOfExpression(left);
+			const right = simplify(expression.right);
+			const rightValue = valueOfExpression(right);
+			if (expression.operator === "&&") {
+				if (typeof leftValue !== "undefined") {
+					return annotate(leftValue ? right : left, expression.loc);
+				}
+				if (rightValue === true && left.type === "BinaryExpression") {
+					switch (left.operator) {
+						case "==":
+						case "!=":
+						case "===":
+						case "!==":
+						case "<":
+						case "<=":
+						case ">":
+						case ">=":
+							return annotate(left, expression.loc);
+							break;
+						default:
+							break;
+					}
+				}
+			} else if (expression.operator === "||") {
+				if (typeof leftValue !== "undefined") {
+					return annotate(leftValue ? left : right, expression.loc);
+				}
+			}
+			return annotate(logicalExpression(expression.operator, left, right), expression.loc);
+		case "BinaryExpression": {
+			return annotate(binaryExpression(expression.operator, expression.left, expression.right), expression.loc);
+		}
 		case "MemberExpression":
 			if (!expression.computed && expression.property.type === "Identifier") {
 				const objectValue = valueOfExpression(expression.object);
@@ -387,7 +417,11 @@ export function simplify(expression: Expression): Expression {
 					if (typeof propertyValue === "boolean" || typeof propertyValue === "number" || typeof propertyValue === "string" || typeof propertyValue === "object") {
 						return annotate(literal(propertyValue), expression.loc);
 					}
+				} else {
+					return annotate(memberExpression(simplify(expression.object), expression.property), expression.loc);
 				}
+			} else if (expression.computed) {
+				return annotate(memberExpression(simplify(expression.object), simplify(expression.property), true), expression.loc);
 			}
 		default:
 			break;
