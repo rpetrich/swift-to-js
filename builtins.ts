@@ -99,35 +99,55 @@ function getMetaFieldValue(type: Type, fieldName: string, scope: Scope) {
 	throw new TypeError(`Could not find meta field named ${fieldName} in ${stringifyType(type)}`);
 }
 
-function integerConversionInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+interface NumericRange {
+	min: Expression;
+	max: Expression;
+}
+
+function rangeForNumericType(type: Type, scope: Scope): NumericRange {
+	const min = read(getMetaFieldValue(type, "min", scope), scope);
+	const max = read(getMetaFieldValue(type, "max", scope), scope);
+	return {
+		min,
+		max,
+	};
+}
+
+function possiblyGreaterThan(left: NumericRange, right: NumericRange): boolean {
+	const leftMax = valueOfExpression(left.max);
+	const rightMax = valueOfExpression(right.max);
+	return typeof leftMax !== "number" || typeof rightMax !== "number" || leftMax > rightMax;
+}
+
+function possiblyLessThan(left: NumericRange, right: NumericRange): boolean {
+	const leftMin = valueOfExpression(left.min);
+	const rightMin = valueOfExpression(right.min);
+	return typeof leftMin !== "number" || typeof rightMin !== "number" || leftMin < rightMin;
+}
+
+function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Value {
 	expectLength(type.arguments.types, 1);
-	const sourceMin = read(getMetaFieldValue(type.arguments.types[0], "min", scope), scope);
-	const sourceMinValue = valueOfExpression(sourceMin);
-	const sourceMax = read(getMetaFieldValue(type.arguments.types[0], "max", scope), scope);
-	const sourceMaxValue = valueOfExpression(sourceMax);
-	const destMin = read(getMetaFieldValue(returnType(type), "min", scope), scope);
-	const destMinValue = valueOfExpression(destMin);
-	const destMax = read(getMetaFieldValue(returnType(type), "max", scope), scope);
-	const destMaxValue = valueOfExpression(destMax);
-	const requiresGreaterThanCheck = typeof sourceMaxValue === "undefined" || typeof destMaxValue === "undefined" || sourceMaxValue! > destMaxValue!;
-	const requiresLessThanCheck = typeof sourceMinValue === "undefined" || typeof destMinValue === "undefined" || sourceMinValue! < destMinValue!;
+	const source = rangeForNumericType(type.arguments.types[0], scope);
+	const dest = rangeForNumericType(returnType(type), scope);
+	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
+	const requiresLessThanCheck = possiblyLessThan(source, dest);
 	let check: Expression;
 	let value: Expression;
 	if (requiresGreaterThanCheck && requiresLessThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
 		check = logicalExpression(
 			"||",
-			binaryExpression(">", first, destMax),
-			binaryExpression("<", after, destMin),
+			binaryExpression(">", first, dest.min),
+			binaryExpression("<", after, dest.max),
 		);
 		value = after;
 	} else if (requiresGreaterThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
-		check = binaryExpression(">", first, destMax),
+		check = binaryExpression(">", first, dest.max);
 		value = after;
 	} else if (requiresLessThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
-		check = binaryExpression("<", first, destMin),
+		check = binaryExpression("<", first, dest.min);
 		value = after;
 	} else {
 		return arg(0);
@@ -137,6 +157,42 @@ function integerConversionInit(scope: Scope, arg: ArgGetter, type: Function): Va
 		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope), scope),
 		value,
 	));
+}
+
+function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+	expectLength(type.arguments.types, 1);
+	const source = rangeForNumericType(type.arguments.types[0], scope);
+	const dest = rangeForNumericType(returnType(type), scope);
+	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
+	const requiresLessThanCheck = possiblyLessThan(source, dest);
+	if (requiresGreaterThanCheck && requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		return expr(conditionalExpression(
+			binaryExpression(">", first, dest.max),
+			dest.max,
+			conditionalExpression(
+				binaryExpression("<", after, dest.min),
+				dest.min,
+				after,
+			),
+		));
+	} else if (requiresGreaterThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		return expr(conditionalExpression(
+			binaryExpression(">", first, dest.max),
+			dest.max,
+			after,
+		));
+	} else if (requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		return expr(conditionalExpression(
+			binaryExpression("<", first, dest.min),
+			dest.min,
+			after,
+		));
+	} else {
+		return arg(0);
+	}
 }
 
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
@@ -150,12 +206,17 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
 	})),
 	"SignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-		"init": wrapped(integerConversionInit),
+		"init": wrapped(integerThrowingInit),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 	})),
 	"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-		"init": wrapped(integerConversionInit),
+		"init": wrapped(integerClampingInit),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+	})),
+	"FixedWidthInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
+		"init(clamping:)": wrapped(integerClampingInit),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 	})),
