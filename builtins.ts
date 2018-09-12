@@ -105,6 +105,9 @@ interface NumericRange {
 }
 
 function rangeForNumericType(type: Type, scope: Scope): NumericRange {
+	if (type.kind === "optional") {
+		type = type.type;
+	}
 	const min = read(getMetaFieldValue(type, "min", scope), scope);
 	const max = read(getMetaFieldValue(type, "max", scope), scope);
 	return {
@@ -155,7 +158,41 @@ function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	return expr(conditionalExpression(
 		check,
 		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope), scope),
-		value,
+		value
+	));
+}
+
+function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+	expectLength(type.arguments.types, 1);
+	const source = rangeForNumericType(type.arguments.types[0], scope);
+	const dest = rangeForNumericType(returnType(type), scope);
+	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
+	const requiresLessThanCheck = possiblyLessThan(source, dest);
+	let check: Expression;
+	let value: Expression;
+	if (requiresGreaterThanCheck && requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = logicalExpression(
+			"||",
+			binaryExpression(">", first, dest.min),
+			binaryExpression("<", after, dest.max),
+		);
+		value = after;
+	} else if (requiresGreaterThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = binaryExpression(">", first, dest.max);
+		value = after;
+	} else if (requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = binaryExpression("<", first, dest.min);
+		value = after;
+	} else {
+		return arg(0);
+	}
+	return expr(conditionalExpression(
+		check,
+		literal(null),
+		value
 	));
 }
 
@@ -174,21 +211,21 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 				binaryExpression("<", after, dest.min),
 				dest.min,
 				after,
-			),
+			)
 		));
 	} else if (requiresGreaterThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression(">", first, dest.max),
 			dest.max,
-			after,
+			after
 		));
 	} else if (requiresLessThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression("<", first, dest.min),
 			dest.min,
-			after,
+			after
 		));
 	} else {
 		return arg(0);
@@ -207,11 +244,13 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	})),
 	"SignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init": wrapped(integerThrowingInit),
+		"init(exactly:)": wrapped(integerOptionalInit),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 	})),
 	"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init": wrapped(integerClampingInit),
+		"init(exactly:)": wrapped(integerOptionalInit),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
 	})),

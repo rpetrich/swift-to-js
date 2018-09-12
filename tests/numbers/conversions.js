@@ -15,6 +15,6 @@ export function makeInt16$fromInt$(value) {
 export function makeClampedInt16$fromInt$(value) {
   return value > 32767 ? 32767 : value < -32768 ? -32768 : value;
 }
-export function makeClampedUInt8$fromUInt16$(value) {
-  return value > 255 ? 255 : value;
+export function makeOptionalUInt8$fromUInt16$(value) {
+  return value > 255 ? null : value;
 }
