@@ -214,6 +214,14 @@ export function storeValue(dest: Identifier | MemberExpression, value: Value, ty
 	}
 }
 
+export function getField(value: Value, field: Field, scope: Scope) {
+	if (field.stored) {
+		return expr(memberExpression(read(value, scope), mangleName(field.name)));
+	} else {
+		return field.getter(value, scope);
+	}
+}
+
 export function defaultInstantiateType(type: Type, scope: Scope, consume: (fieldName: string) => Expression | undefined): Value {
 	return reifyType(type, scope).defaultValue(scope, consume);
 }

@@ -1,7 +1,7 @@
 import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
-import { expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
+import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
-import { parse as parseType, Tuple, Type } from "./types";
+import { Function, parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
 import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
@@ -86,6 +86,59 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 	return reifiedType;
 }
 
+function getMetaFieldValue(type: Type, fieldName: string, scope: Scope) {
+	const reified = reifyType("Type", scope, [], reifyType(type, scope).innerTypes);
+	if (typeof reified === "undefined") {
+		throw new Error(`Expected to have a source type!`);
+	}
+	for (const field of reified.fields) {
+		if (field.name === fieldName) {
+			return getField(expr(literal(0)), field, scope);
+		}
+	}
+	throw new TypeError(`Could not find meta field named ${fieldName} in ${stringifyType(type)}`);
+}
+
+function integerConversionInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+	expectLength(type.arguments.types, 1);
+	const sourceMin = read(getMetaFieldValue(type.arguments.types[0], "min", scope), scope);
+	const sourceMinValue = valueOfExpression(sourceMin);
+	const sourceMax = read(getMetaFieldValue(type.arguments.types[0], "max", scope), scope);
+	const sourceMaxValue = valueOfExpression(sourceMax);
+	const destMin = read(getMetaFieldValue(returnType(type), "min", scope), scope);
+	const destMinValue = valueOfExpression(destMin);
+	const destMax = read(getMetaFieldValue(returnType(type), "max", scope), scope);
+	const destMaxValue = valueOfExpression(destMax);
+	const requiresGreaterThanCheck = typeof sourceMaxValue === "undefined" || typeof destMaxValue === "undefined" || sourceMaxValue! > destMaxValue!;
+	const requiresLessThanCheck = typeof sourceMinValue === "undefined" || typeof destMinValue === "undefined" || sourceMinValue! < destMinValue!;
+	let check: Expression;
+	let value: Expression;
+	if (requiresGreaterThanCheck && requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = logicalExpression(
+			"||",
+			binaryExpression(">", first, destMax),
+			binaryExpression("<", after, destMin),
+		);
+		value = after;
+	} else if (requiresGreaterThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = binaryExpression(">", first, destMax),
+		value = after;
+	} else if (requiresLessThanCheck) {
+		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		check = binaryExpression("<", first, destMin),
+		value = after;
+	} else {
+		return arg(0);
+	}
+	return expr(conditionalExpression(
+		check,
+		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope), scope),
+		value,
+	));
+}
+
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
 	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
@@ -95,6 +148,16 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	})),
 	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
+	})),
+	"SignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
+		"init": wrapped(integerConversionInit),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
+	})),
+	"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
+		"init": wrapped(integerConversionInit),
+		"==": binaryBuiltin("==="),
+		"!=": binaryBuiltin("!=="),
 	})),
 	"UInt": cached(() => buildIntegerType(0, 4294967295)),
 	"Int": cached(() => buildIntegerType(-2147483648, 2147483647)),
@@ -554,6 +617,7 @@ function arrayBoundsCheck(array: Value, index: Value, scope: Scope, mode: "read"
 }
 
 export const functions: FunctionMap = {
+	"Swift.(swift-to-js).numericRangeFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("RangeError"), [literal("Not enough bits to represent the given value")]))])),
 	"Swift.(swift-to-js).forceUnwrapFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("TypeError"), [literal("Unexpectedly found nil while unwrapping an Optional value")]))])),
 	"Swift.(swift-to-js).arrayBoundsFailed()": noinline((scope, arg) => statements([throwStatement(newExpression(identifier("RangeError"), [literal("Array index out of range")]))])),
 	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {

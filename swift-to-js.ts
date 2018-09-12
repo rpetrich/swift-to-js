@@ -2,7 +2,7 @@ import { parse as parseAST, Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
 import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
@@ -15,14 +15,6 @@ import { readdirSync } from "fs";
 import { argv } from "process";
 
 const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
-
-function getField(value: Value, field: Field, scope: Scope) {
-	if (field.stored) {
-		return expr(memberExpression(read(value, scope), mangleName(field.name)));
-	} else {
-		return field.getter(value, scope);
-	}
-}
 
 const emptyStatements: Statement[] = [];
 
