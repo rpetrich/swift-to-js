@@ -1344,7 +1344,7 @@ export async function compile(path: string): Promise<CompilerOutput> {
 	return {
 		code: result.code!,
 		map: result.map!,
-		ast
+		ast,
 	};
 }
 

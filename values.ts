@@ -219,7 +219,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
 		case "subscript":
 			const value = operator === "=" ? source : expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(dest, scope), read(source, scope)));
-			return call(dest.setter, undefinedValue, concat(dest.args, [source]), scope, location, "set");
+			return call(dest.setter, undefinedValue, concat(dest.args, [value]), scope, location, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
