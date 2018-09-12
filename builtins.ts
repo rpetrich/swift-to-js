@@ -3,7 +3,7 @@ import { expressionSkipsCopy, field, Field, FunctionMap, inheritLayout, Possible
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
-import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
@@ -29,9 +29,14 @@ function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" 
 	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0), scope), read(arg(1), scope))));
 }
 
-function assignmentBuiltin(operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=") {
-	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator));
+function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", valueChecker?: (value: Value) => Value) {
+	if (typeof valueChecker !== "undefined") {
+		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(0), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(1), scope))))));
+	}
+	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator + "=" as any));
 }
+
+const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope));
 
 const readLengthField = (name: string, globalScope: Scope) => field("count", reifyType("Int", globalScope), (value, scope) => {
 	return expr(memberExpression(read(value, scope), identifier("length")));
@@ -67,9 +72,9 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 		"^": binaryBuiltin("^"),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
-		"+=": assignmentBuiltin("+="),
-		"-=": assignmentBuiltin("-="),
-		"*=": assignmentBuiltin("*="),
+		"+=": updateBuiltin("+"),
+		"-=": updateBuiltin("-"),
+		"*=": updateBuiltin("*"),
 	}, {
 		Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
 			field("min", reifiedType, () => expr(literal(min))),
@@ -122,10 +127,10 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"^": binaryBuiltin("^"),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
-		"+=": assignmentBuiltin("+="),
-		"-=": assignmentBuiltin("-="),
-		"*=": assignmentBuiltin("*="),
-		"/=": assignmentBuiltin("/="),
+		"+=": updateBuiltin("+"),
+		"-=": updateBuiltin("-"),
+		"*=": updateBuiltin("*"),
+		"/=": updateBuiltin("/"),
 	})),
 	"Double": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
@@ -143,10 +148,10 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"^": binaryBuiltin("^"),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
-		"+=": assignmentBuiltin("+="),
-		"-=": assignmentBuiltin("-="),
-		"*=": assignmentBuiltin("*="),
-		"/=": assignmentBuiltin("/="),
+		"+=": updateBuiltin("+"),
+		"-=": updateBuiltin("-"),
+		"*=": updateBuiltin("*"),
+		"/=": updateBuiltin("/"),
 	})),
 	"String": (globalScope) => {
 		const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(literal([])), [

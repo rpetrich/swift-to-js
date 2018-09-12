@@ -232,6 +232,38 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 	}
 }
 
+export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: Term | Location): Value {
+	switch (dest.kind) {
+		case "boxed":
+			return update(dest.contents, scope, updater);
+		case "direct":
+			switch (dest.ref.type) {
+				case "ThisExpression":
+					throw new Error("Cannot update a this expression!");
+				case "MemberExpression":
+					if (dest.ref.object.type !== "Identifier" || (dest.ref.computed && typeof valueOfExpression(dest.ref.property) === "undefined")) {
+						const [firstObject, afterObject] = reuseExpression(dest.ref.object, scope);
+						const [firstProperty, afterProperty] = reuseExpression(dest.ref.object, scope);
+						const first = annotate(memberExpression(firstObject, firstProperty, dest.ref.computed), dest.ref.loc);
+						const after = annotate(memberExpression(afterObject, afterProperty, dest.ref.computed), dest.ref.loc);
+						return expr(assignmentExpression("=", first, read(updater(expr(after)), scope)), location);
+					}
+				case "Identifier":
+				default:
+					return expr(assignmentExpression("=", dest.ref, read(updater(dest), scope)), location);
+			}
+			break;
+		case "subscript":
+			// Call the getter, apply the operation, then apply the setter
+			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope));
+			const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
+			const result = updater(valueFetched);
+			return call(dest.setter, undefinedValue, concat(reused.map(([first]) => expr(first)), [result]), scope, location, "set");
+		default:
+			break;
+	}
+	throw new TypeError(`Unable to set a ${dest.kind} value!`);
+}
 
 
 export function annotate<T extends Node>(node: T, location?: Location | Term): T {
