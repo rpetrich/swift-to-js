@@ -249,7 +249,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 		"!=": binaryBuiltin("!=="),
 	})),
 	"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-		"init": wrapped(integerClampingInit),
+		"init": wrapped(integerThrowingInit),
 		"init(exactly:)": wrapped(integerOptionalInit),
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
