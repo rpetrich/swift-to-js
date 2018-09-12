@@ -218,8 +218,15 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			}
 			return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
 		case "subscript":
-			const value = operator === "=" ? source : expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(dest, scope), read(source, scope)));
-			return call(dest.setter, undefinedValue, concat(dest.args, [value]), scope, location, "set");
+			let setterArgs: Value[] = dest.args;
+			if (operator !== "=") {
+				// Call the getter, apply the operation, then apply the setter
+				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope));
+				const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
+				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
+				setterArgs = reused.map(([first]) => expr(first));
+			}
+			return call(dest.setter, undefinedValue, concat(setterArgs, [source]), scope, location, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
@@ -576,6 +583,8 @@ export function reuseExpression(expression: Expression, scope: Scope): [Expressi
 	const simplified = annotate(simplify(expression), expression.loc);
 	if (isPure(simplified)) {
 		return [simplified, simplified];
+	} else if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
+		return [expression, expression.left];
 	} else {
 		const temp = annotate(uniqueIdentifier(scope), expression.loc);
 		addVariable(scope, temp);
