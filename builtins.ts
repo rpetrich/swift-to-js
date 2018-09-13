@@ -158,7 +158,7 @@ function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	return expr(conditionalExpression(
 		check,
 		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope), scope),
-		value
+		value,
 	));
 }
 
@@ -192,7 +192,7 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	return expr(conditionalExpression(
 		check,
 		literal(null),
-		value
+		value,
 	));
 }
 
@@ -211,21 +211,21 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 				binaryExpression("<", after, dest.min),
 				dest.min,
 				after,
-			)
+			),
 		));
 	} else if (requiresGreaterThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression(">", first, dest.max),
 			dest.max,
-			after
+			after,
 		));
 	} else if (requiresLessThanCheck) {
 		const [first, after] = reuseExpression(read(arg(0), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression("<", first, dest.min),
 			dest.min,
-			after
+			after,
 		));
 	} else {
 		return arg(0);

@@ -10,8 +10,8 @@ function Position$copy(source) {
 
 export function makeCopy$ofPosition$(position) {
   let copy;
-  copy = position;
-  return Position$copy(copy);
+  copy = Position$copy(position);
+  return copy;
 }
 export function makeCopyDirect$ofPosition$(position) {
   return Position$copy(position);

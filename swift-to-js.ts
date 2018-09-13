@@ -195,6 +195,13 @@ function mergePatterns(first: PatternOutput, second: PatternOutput, scope: Scope
 }
 
 export function convertToPattern(value: Value): PatternOutput {
+	if (value.kind === "copied") {
+		const inner = convertToPattern(value.value);
+		return {
+			prefix: inner.prefix,
+			test: copy(inner.test, value.type),
+		};
+	}
 	let prefix: Statement[] = emptyStatements;
 	if (value.kind === "statements") {
 		const returningIndex = value.statements.findIndex((statements) => statements.type === "ReturnStatement");
@@ -222,6 +229,13 @@ function discriminantForPatternTerm(term: Term): string {
 		}
 	}
 	throw new Error(`Expected to have a discriminant property!`);
+}
+
+function unwrapCopies(value: Value): Value {
+	while (value.kind === "copied") {
+		value = value.value;
+	}
+	return value;
 }
 
 function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput {
@@ -276,7 +290,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 				if (!scope.mapping[name.name]) {
 					addVariable(scope, name);
 				}
-				const pattern = convertToPattern(value);
+				const pattern = convertToPattern(copy(value, type));
 				return {
 					prefix: pattern.prefix.concat([annotate(expressionStatement(annotate(assignmentExpression("=", name, read(pattern.test, scope)), term)), term)]),
 					test: trueValue,
@@ -288,12 +302,13 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			if (type.kind !== "tuple") {
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(type)}`);
 			}
-			if (value.kind === "tuple") {
+			const innerValue = unwrapCopies(value);
+			if (innerValue.kind === "tuple") {
 				return term.children.reduce((existing, child, i) => {
-					if (value.values.length <= i) {
-						expectLength(value.values, i);
+					if (innerValue.values.length <= i) {
+						expectLength(innerValue.values, i);
 					}
-					const childPattern = translatePattern(child, value.values[i], scope);
+					const childPattern = translatePattern(child, innerValue.values[i], scope);
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
@@ -858,9 +873,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					return value.statements;
 				}
 				const expression = read(value, scope);
-				// if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
-				// 	return [annotate(returnStatement(expression), term)];
-				// }
+				if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
+					return [annotate(returnStatement(expression), term)];
+				}
 				const copied = copy(expr(expression), getType(term.children[0]));
 				return [annotate(returnStatement(read(copied, scope)), term)];
 			} else if (term.properties.implicit) {

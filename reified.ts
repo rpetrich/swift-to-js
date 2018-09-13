@@ -262,6 +262,9 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 							return expr(arrayExpression(reifiedTypes.map((inner) => read(inner.defaultValue(innerScope, alwaysUndefined), innerScope))));
 						},
 						copy: reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined") ? (value, innerScope) => {
+							if (value.kind === "tuple") {
+								return value;
+							}
 							const expression = read(value, innerScope);
 							if (expressionSkipsCopy(expression)) {
 								return expr(expression);
