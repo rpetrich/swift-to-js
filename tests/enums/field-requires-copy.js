@@ -9,8 +9,7 @@ function Position$copy(source) {
 }
 
 export function makeCopy$ofPosition$(position) {
-  let copy;
-  copy = Position$copy(position);
+  const copy = Position$copy(position);
   return copy;
 }
 export function makeCopyDirect$ofPosition$(position) {

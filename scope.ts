@@ -3,12 +3,19 @@ import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
+import { concat } from "./utils";
 
 export const undefinedLiteral = identifier("undefined");
 
+export enum DeclarationFlags {
+	None = 0,
+	Export = 1 << 0,
+	Const = 1 << 1,
+}
+
 export interface Scope {
 	name: string;
-	declarations: { [name: string]: Declaration | undefined };
+	declarations: { [name: string]: { flags: DeclarationFlags; declaration?: Declaration; } };
 	types: TypeMap;
 	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
@@ -16,20 +23,12 @@ export interface Scope {
 	parent: Scope | undefined;
 }
 
-export function addVariable(scope: Scope, name: Identifier, initializer: Expression | undefined = undefinedLiteral) {
+export function addVariable(scope: Scope, name: Identifier, declaration: Declaration | undefined, flags: DeclarationFlags = DeclarationFlags.None) {
 	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
 		throw new Error(`Declaration of ${name.name} already exists`);
 	}
 	scope.mapping[name.name] = name;
-	scope.declarations[name.name] = typeof initializer === "undefined" ? undefined : variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]);
-}
-
-export function addExternalVariable(scope: Scope, name: Identifier, initializer: Expression = undefinedLiteral) {
-	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
-		throw new Error(`Declaration of ${name.name} already exists`);
-	}
-	scope.mapping[name.name] = name;
-	scope.declarations[name.name] = exportNamedDeclaration(variableDeclaration("let", [variableDeclarator(name, initializer === undefinedLiteral ? undefined : initializer)]), []);
+	scope.declarations[name.name] = { flags, declaration };
 }
 
 export function rootScope(scope: Scope) {
@@ -140,5 +139,12 @@ export function emitScope(scope: Scope, statements: Statement[]): Statement[] {
 	if (keys.length === 0) {
 		return statements;
 	}
-	return (keys.filter((key) => typeof scope.declarations[key] !== "undefined").map((key) => scope.declarations[key]) as Statement[]).concat(statements);
+	const result: Statement[] = [];
+	for (const key of keys) {
+		const declaration = scope.declarations[key];
+		if (typeof declaration.declaration !== "undefined") {
+			result.push(declaration.flags & DeclarationFlags.Export ? exportNamedDeclaration(declaration.declaration, []) : declaration.declaration);
+		}
+	}
+	return concat(result, statements);
 }

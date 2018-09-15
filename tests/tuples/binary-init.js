@@ -1,2 +1,1 @@
-export let tuplePoint;
-tuplePoint = [0, 0];
+export let tuplePoint = [0, 0];

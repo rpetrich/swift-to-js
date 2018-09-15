@@ -13,35 +13,30 @@ export function multiply(left, right) {
   return [2, ArithmeticExpression$copy(left), ArithmeticExpression$copy(right)];
 }
 export function eval(expression) {
-  let l;
-  let r;
-  let value;
   var $match = expression;
 
   if ($match[0] === 0) {
-    value = $match[1];
+    const value = $match[1];
     return value;
   } else if ($match[0] === 1) {
-    l = ArithmeticExpression$copy($match[1]);
-    r = ArithmeticExpression$copy($match[2]);
+    const l = ArithmeticExpression$copy($match[1]);
+    const r = ArithmeticExpression$copy($match[2]);
     return eval(l) + eval(r);
   } else if ($match[0] === 2) {
-    l = ArithmeticExpression$copy($match[1]);
-    r = ArithmeticExpression$copy($match[2]);
+    const l = ArithmeticExpression$copy($match[1]);
+    const r = ArithmeticExpression$copy($match[2]);
     return eval(l) * eval(r);
   }
 }
 export function silly(expression) {
-  let l;
-  let value;
   var $match = expression;
 
   if ($match[0] === 0) {
-    value = $match[1];
+    let value = $match[1];
     value += 10;
     return value;
   } else if ($match[0] === 1) {
-    l = ArithmeticExpression$copy($match[1]);
+    let l = ArithmeticExpression$copy($match[1]);
     l = literal(10);
     return eval(l);
   } else {

@@ -1,2 +1,1 @@
-export let unaryInit;
-unaryInit = 0;
+export let unaryInit = 0;

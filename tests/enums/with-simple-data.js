@@ -8,23 +8,18 @@ export function makeQr$value$(value) {
   return [2, value];
 }
 export function describe$barcode$(barcode) {
-  let value;
-  let numberSystem;
-  let manufacturer;
-  let product;
-  let check;
   var $match = barcode;
 
   if ($match[0] === 0) {
     return "Empty";
   } else if ($match[0] === 1) {
-    numberSystem = $match[1];
-    manufacturer = $match[2];
-    product = $match[3];
-    check = $match[4];
+    const numberSystem = $match[1];
+    const manufacturer = $match[2];
+    const product = $match[3];
+    const check = $match[4];
     return "UPC:" + String(numberSystem) + "-" + String(manufacturer) + "-" + String(product) + "-" + String(check);
   } else if ($match[0] === 2) {
-    value = $match[1];
+    const value = $match[1];
     return "QR:" + value;
   }
 }

@@ -1,9 +1,9 @@
 import { Term } from "./ast";
-import { addVariable, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, Value } from "./values";
 
-import { blockStatement, exportNamedDeclaration, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
+import { blockStatement, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Function, name: string) => Value;
 
@@ -70,7 +70,7 @@ export function insertFunction(name: string, scope: Scope, type: Function, build
 	const globalScope = rootScope(scope);
 	const [args, statements] = functionize(globalScope, type, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
 	const fn = functionDeclaration(mangled, args, blockStatement(statements));
-	globalScope.declarations[mangled.name] = shouldExport ? exportNamedDeclaration(fn, []) : fn;
+	addVariable(globalScope, mangled, fn, shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 	return mangled;
 }
 

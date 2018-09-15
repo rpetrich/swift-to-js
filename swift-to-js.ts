@@ -3,10 +3,10 @@ import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome,
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
-import { addExternalVariable, addVariable, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
-import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, hoistToIdentifier, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -238,14 +238,14 @@ function unwrapCopies(value: Value): Value {
 	return value;
 }
 
-function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput {
+function translatePattern(term: Term, value: Value, scope: Scope, declarationFlags: DeclarationFlags = DeclarationFlags.None): PatternOutput {
 	switch (term.name) {
 		case "pattern_optional_some": // Development
 		case "optional_some_element": { // Swift 4.1
 			expectLength(term.children, 1);
 			const type = getType(term);
 			const [first, second] = reuseExpression(read(value, scope), scope);
-			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope);
+			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope, declarationFlags);
 			return {
 				prefix: emptyStatements,
 				test: expr(optionalIsSome(second, type), term),
@@ -254,16 +254,16 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 		}
 		case "case_label_item": {
 			expectLength(term.children, 1);
-			return translatePattern(term.children[0], value, scope);
+			return translatePattern(term.children[0], value, scope, declarationFlags);
 		}
 		case "pattern_let": {
 			expectLength(term.children, 1);
 			// TODO: Figure out how to avoid the copy here since it should only be necessary on var patterns
-			return translatePattern(term.children[0], copy(value, getType(term)), scope);
+			return translatePattern(term.children[0], copy(value, getType(term)), scope, declarationFlags | DeclarationFlags.Const);
 		}
 		case "pattern_var": {
 			expectLength(term.children, 1);
-			return translatePattern(term.children[0], copy(value, getType(term)), scope);
+			return translatePattern(term.children[0], copy(value, getType(term)), scope, declarationFlags & ~DeclarationFlags.Const);
 		}
 		case "pattern_expr": {
 			expectLength(term.children, 1);
@@ -274,7 +274,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
-			return translatePattern(term.children[0], value, scope);
+			return translatePattern(term.children[0], value, scope, declarationFlags);
 		}
 		case "pattern_named": {
 			expectLength(term.children, 0);
@@ -287,12 +287,20 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 					test: trueValue,
 				};
 			} else {
-				if (!scope.mapping[name.name]) {
-					addVariable(scope, name);
-				}
 				const pattern = convertToPattern(copy(value, type));
+				const hasMapping = Object.hasOwnProperty.call(scope.mapping, name.name);
+				let result: Statement;
+				if (hasMapping) {
+					result = expressionStatement(annotate(assignmentExpression("=", name, read(pattern.test, scope)), term));
+				} else {
+					addVariable(scope, name, undefined);
+					result = variableDeclaration(declarationFlags & DeclarationFlags.Const ? "const" : "let", [annotate(variableDeclarator(name, read(pattern.test, scope)), term)]);
+					if (declarationFlags & DeclarationFlags.Export) {
+						result = exportNamedDeclaration(result, []);
+					}
+				}
 				return {
-					prefix: pattern.prefix.concat([annotate(expressionStatement(annotate(assignmentExpression("=", name, read(pattern.test, scope)), term)), term)]),
+					prefix: concat(pattern.prefix, [annotate(result, term)]),
 					test: trueValue,
 				};
 			}
@@ -308,13 +316,13 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 					if (innerValue.values.length <= i) {
 						expectLength(innerValue.values, i);
 					}
-					const childPattern = translatePattern(child, innerValue.values[i], scope);
+					const childPattern = translatePattern(child, innerValue.values[i], scope, declarationFlags);
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
 			const [first, second] = reuseExpression(read(value, scope), scope);
 			return term.children.reduce((existing, child, i) => {
-				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, literal(i), true), term), scope);
+				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, literal(i), true), term), scope, declarationFlags);
 				return mergePatterns(existing, childPattern, scope, term);
 			}, emptyPattern);
 		}
@@ -354,7 +362,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 						return {
 							prefix: emptyStatements,
 							test,
-							next: translatePattern(child.children[0], patternValue, scope),
+							next: translatePattern(child.children[0], patternValue, scope, declarationFlags),
 						};
 					}
 					break;
@@ -363,7 +371,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 					if (child.name === "pattern_tuple") {
 						const next = child.children.reduce((existing, tupleChild, i) => {
 							// Offset by 1 to account for the discriminant
-							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, literal(i + 1), true), term), scope);
+							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, literal(i + 1), true), term), scope, declarationFlags);
 							return mergePatterns(existing, childPattern, scope, term);
 						}, emptyPattern);
 						return {
@@ -380,7 +388,7 @@ function translatePattern(term: Term, value: Value, scope: Scope): PatternOutput
 			return {
 				prefix: emptyStatements,
 				test,
-				next: translatePattern(child, patternValue, scope),
+				next: translatePattern(child, patternValue, scope, declarationFlags),
 			};
 		}
 		case "pattern_any": {
@@ -632,11 +640,9 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const parameterList = termWithName(term.children, "parameter_list");
 			return callable((innerScope, arg) => {
 				const childScope = newScope("anonymous", innerScope);
-				termsWithName(parameterList.children, "parameter").forEach((param, index) => {
-					const name = param.args[0];
-					childScope.mapping[name] = hoistToIdentifier(read(arg(index, name), childScope), childScope, name);
-				});
-				return translateTermToValue(term.children[1], childScope, bindingContext);
+				const paramStatements = applyParameterMappings(termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
+				const result = translateTermToValue(term.children[1], childScope, bindingContext);
+				return statements(emitScope(childScope, concat(paramStatements, [returnStatement(read(result, childScope))])));
 			}, getType(term));
 		}
 		case "tuple_shuffle_expr": {
@@ -710,7 +716,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const type = getType(term);
 			const tempIdentifier = identifier("$try");
 			if (!Object.hasOwnProperty.call(scope.declarations, tempIdentifier.name)) {
-				addVariable(scope, tempIdentifier);
+				addVariable(scope, tempIdentifier, variableDeclaration("let", [variableDeclarator(tempIdentifier)]));
 			}
 			const bodyExpression = read(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope);
 			return statements([
@@ -766,14 +772,15 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 	}
 }
 
-function translateAllStatements(terms: Term[], scope: Scope, functions: FunctionMap): Statement[] {
+function translateAllStatements(terms: Term[], scope: Scope, functions: FunctionMap, nextTerm?: Term): Statement[] {
 	let tailStatements = emptyStatements;
 	let headStatements = emptyStatements;
-	for (const term of terms) {
+	for (let i = 0; i < terms.length; i++) {
+		const term = terms[i];
 		if (term.name === "defer_stmt") {
-			tailStatements = concat(translateStatement(term, scope, functions), tailStatements);
+			tailStatements = concat(translateStatement(term, scope, functions, terms[i + 1] || nextTerm), tailStatements);
 		} else {
-			headStatements = concat(headStatements, translateStatement(term, scope, functions));
+			headStatements = concat(headStatements, translateStatement(term, scope, functions, terms[i + 1] || nextTerm));
 		}
 	}
 	if (tailStatements.length) {
@@ -783,7 +790,33 @@ function translateAllStatements(terms: Term[], scope: Scope, functions: Function
 	}
 }
 
-function translateStatement(term: Term, scope: Scope, functions: FunctionMap): Statement[] {
+function applyParameterMappings(parameterTerms: Term[], arg: ArgGetter, scope: Scope, childScope: Scope): Statement[] {
+	return parameterTerms.reduce((statements, param, index) => {
+		expectLength(param.args, 1);
+		const parameterName = param.args[0];
+		const expression = read(arg(index, parameterName), scope);
+		if (isIdentifier(expression) || expression.type === "ThisExpression") {
+			childScope.mapping[parameterName] = expression;
+			return statements;
+		}
+		const temporary = annotate(uniqueIdentifier(scope, parameterName), expression.loc);
+		addVariable(scope, temporary, undefined);
+		return concat(statements, [variableDeclaration("const", [variableDeclarator(temporary, expression)])]);
+	}, emptyStatements);
+}
+
+function flagsForDeclarationTerm(term: Term): DeclarationFlags {
+	let flags: DeclarationFlags = DeclarationFlags.None;
+	if (term.properties.let) {
+		flags |= DeclarationFlags.Const;
+	}
+	if (term.properties.access === "public") {
+		flags |= DeclarationFlags.Export;
+	}
+	return flags;
+}
+
+function translateStatement(term: Term, scope: Scope, functions: FunctionMap, nextTerm?: Term): Statement[] {
 	switch (term.name) {
 		case "source_file": {
 			return translateAllStatements(term.children, scope, functions);
@@ -798,16 +831,12 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			expectLength(term.args, 1);
 			const name = term.args[0];
 
-			function constructCallable(parameterList: Term[], remainingLists: Term[][], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
+			function constructCallable(head: Statement[], parameterList: Term[], remainingLists: Term[][], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
 				return (targetScope: Scope, arg: ArgGetter) => {
 					const childScope = typeof initialScope !== "undefined" ? initialScope : newScope(name, targetScope);
-					termsWithName(parameterList, "parameter").forEach((param, index) => {
-						expectLength(param.args, 1);
-						const parameterName = param.args[0];
-						targetScope.mapping[parameterName] = hoistToIdentifier(read(arg(index, parameterName), childScope), childScope, parameterName);
-					});
+					const parameterStatements = concat(head, applyParameterMappings(termsWithName(parameterList, "parameter"), arg, targetScope, childScope));
 					if (remainingLists.length) {
-						return callable(constructCallable(remainingLists[0], remainingLists.slice(1), returnType(functionType), initialScope), functionType);
+						return callable(constructCallable(emitScope(childScope, parameterStatements), remainingLists[0], remainingLists.slice(1), returnType(functionType), childScope), functionType);
 					}
 					const brace = findTermWithName(term.children, "brace_stmt");
 					if (brace) {
@@ -829,19 +858,19 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 								return undefined;
 							});
 							if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-								return statements(emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), brace)]), brace);
+								return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), brace)])), brace);
 							}
-							addVariable(childScope, selfMapping, read(defaultInstantiation, scope));
+							addVariable(childScope, selfMapping, variableDeclaration("let", [variableDeclarator(selfMapping, read(defaultInstantiation, scope))]));
 						}
-						return statements(emitScope(childScope, translateAllStatements(body, childScope, functions)), brace);
+						return statements(concat(parameterStatements, emitScope(childScope, translateAllStatements(body, childScope, functions))), brace);
 					} else {
 						if (isConstructor) {
 							const typeOfResult = returnType(returnType(getType(term)));
 							const selfMapping = childScope.mapping.self = uniqueIdentifier(childScope, "self");
 							const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, () => undefined);
-							return statements(emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), term)]), term);
+							return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), term)])), term);
 						} else {
-							return statements(emptyStatements, term);
+							return statements(parameterStatements, term);
 						}
 					}
 				};
@@ -854,10 +883,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				throw new Error(`Expected a parameter list for a function declaration`);
 			}
 
-			const fn = constructCallable(parameterLists[0], parameterLists.slice(1), getType(term));
+			const fn = constructCallable(emptyStatements, parameterLists[0], parameterLists.slice(1), getType(term));
 			if (/^anonname=/.test(name)) {
 				scope.functions[name] = fn;
-			} else if (!isConstructor && term.properties.access === "public" && functions === scope.functions) {
+			} else if (!isConstructor && (flagsForDeclarationTerm(term) & DeclarationFlags.Export) && functions === scope.functions) {
 				functions[name] = noinline(fn);
 				insertFunction(name, scope, getFunctionType(term), fn, undefined, true);
 			} else {
@@ -885,27 +914,24 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			}
 		}
 		case "top_level_code_decl": {
-			return translateAllStatements(term.children, scope, functions);
+			return translateAllStatements(term.children, scope, functions, nextTerm);
 		}
 		case "var_decl": {
 			expectLength(term.children, 0);
 			const name = mangleName(term.args[0]);
 			if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
 				if (term.properties.access === "public") {
-					scope.declarations[name.name] = exportNamedDeclaration(scope.declarations[name.name], []);
+					scope.declarations[name.name].flags |= DeclarationFlags.Export;
 				}
+				return emptyStatements;
 			} else {
 				const defaultInstantiation = read(defaultInstantiateType(getType(term), scope, returnUndef), scope);
-				if (term.properties.access === "public") {
-					addExternalVariable(scope, name, defaultInstantiation);
-				} else {
-					addVariable(scope, name, defaultInstantiation);
-				}
+				const declaration = variableDeclaration("let", [variableDeclarator(name, defaultInstantiation)]);
+				addVariable(scope, name, declaration, flagsForDeclarationTerm(term));
 			}
-			return emptyStatements;
 		}
 		case "brace_stmt": {
-			return translateAllStatements(term.children, scope, functions);
+			return translateAllStatements(term.children, scope, functions, nextTerm);
 		}
 		case "if_stmt": {
 			const children = term.children;
@@ -918,18 +944,18 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				pattern = convertToPattern(translateTermToValue(testTerm, scope));
 			}
 			const { prefix, test, suffix } = flattenPattern(pattern, scope, term);
-			const consequent = concat(suffix, translateStatement(children[1], scope, functions));
+			const consequent = concat(suffix, translateInNewScope(children[1], scope, functions, "consequent"));
 			if (isTrueExpression(test)) {
 				return concat(prefix, consequent);
 			}
-			const alternate = children.length === 3 ? blockStatement(translateStatement(children[2], scope, functions)) : undefined;
+			const alternate = children.length === 3 ? blockStatement(translateInNewScope(children[2], scope, functions, "alternate")) : undefined;
 			return concat(prefix, [annotate(ifStatement(test, blockStatement(consequent), alternate), term)]);
 		}
 		case "while_stmt": {
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateStatement(bodyTerm, scope, functions)))];
+			return [whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")))];
 		}
 		case "switch_stmt": {
 			if (term.children.length < 1) {
@@ -942,12 +968,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				if (childTerm.children.length < 1) {
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
+				const childScope = newScope("case", scope);
 				const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
 				let mergedPrefix: Statement[] = emptyStatements;
 				let mergedTest: Expression = literal(false);
 				let mergedSuffix: Statement[] = emptyStatements;
 				for (const child of remainingChildren) {
-					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), scope), scope, term);
+					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope), scope, term);
 					mergedPrefix = concat(mergedPrefix, prefix);
 					if (valueOfExpression(mergedTest) === false) {
 						mergedTest = test;
@@ -956,7 +983,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 					}
 					mergedSuffix = concat(mergedSuffix, suffix);
 				}
-				const body = concat(mergedSuffix, translateStatement(childTerm.children[childTerm.children.length - 1], scope, functions));
+				const body = emitScope(childScope, concat(mergedSuffix, translateStatement(childTerm.children[childTerm.children.length - 1], childScope, functions)));
 				// Basic optimization for else case in switch statement
 				if (typeof previous === "undefined" && isTrueExpression(mergedTest)) {
 					return blockStatement(concat(mergedPrefix, body));
@@ -979,7 +1006,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [ifStatement(unaryExpression("!", read(translateTermToValue(testTerm, scope), scope)), blockStatement(translateAllStatements(bodyTerm.children, scope, functions)))];
+			return [ifStatement(unaryExpression("!", read(translateTermToValue(testTerm, scope), scope)), blockStatement(translateInNewScope(bodyTerm, scope, functions, "alternate")))];
 		}
 		case "do_catch_stmt": {
 			if (term.children.length < 2) {
@@ -999,9 +1026,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 				const catchClauseExpression = identifier(letPatternChild.args[0]);
 				const catchBodyTerm = catchTerm.children[1];
 				checkTermName(catchBodyTerm, "brace_stmt", "as only child of a catch clause");
-				const catchBodyStatements = translateAllStatements(catchBodyTerm.children, scope, functions);
+				const catchBodyStatements = translateInNewScope(catchBodyTerm, scope, functions, "catch");
 				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
-			}, translateAllStatements(bodyTerm.children, scope, functions));
+			}, translateInNewScope(bodyTerm, scope, functions, "body"));
 		}
 		case "defer_stmt": {
 			expectLength(term.children, 2);
@@ -1012,7 +1039,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			expectLength(firstChild.children[0].children, 0);
 			checkTermName(firstChild.children[1], "brace_stmt", "as second child of defer statement function");
 			checkTermName(term.children[1], "call_expr", "as second child of a defer statement");
-			return translateAllStatements(firstChild.children[1].children, scope, functions);
+			return translateInNewScope(firstChild.children[1], scope, functions, "deferred");
 		}
 		case "enum_decl": {
 			expectLength(term.args, 1);
@@ -1198,8 +1225,11 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 		}
 		case "pattern_binding_decl": {
 			if (term.children.length === 2) {
-				const value = translateTermToValue(term.children[1], scope);
-				const pattern = translatePattern(term.children[0], value, scope);
+				const valueChild = term.children[1];
+				// const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
+				const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
+				let flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
+				const pattern = translatePattern(term.children[0], value, scope, flags);
 				if (typeof pattern.next !== "undefined") {
 					throw new Error(`Chained patterns are not supported on binding declarations`);
 				}
@@ -1258,6 +1288,11 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap): S
 			return concat(result, suffix);
 		}
 	}
+}
+
+function translateInNewScope(term: Term, scope: Scope, functions: FunctionMap, scopeName: string): Statement[] {
+	const childScope = newScope(scopeName, scope);
+	return emitScope(childScope, translateStatement(term, childScope, functions));
 }
 
 export function compileTermToProgram(root: Term): Program {

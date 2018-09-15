@@ -1,12 +1,11 @@
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression } from "babel-types";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction } from "./functions";
 import { ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
-import { concat } from "./utils";
-import { expectLength } from "./utils";
+import { concat, expectLength } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -619,18 +618,9 @@ export function reuseExpression(expression: Expression, scope: Scope): [Expressi
 		return [expression, expression.left];
 	} else {
 		const temp = annotate(uniqueIdentifier(scope), expression.loc);
-		addVariable(scope, temp);
+		addVariable(scope, temp, variableDeclaration("let", [variableDeclarator(temp)]));
 		return [annotate(assignmentExpression("=", temp, simplified), expression.loc), temp];
 	}
-}
-
-export function hoistToIdentifier(expression: Expression, scope: Scope, name: string = "temp"): Identifier | ThisExpression {
-	if (expression.type === "Identifier" || expression.type === "ThisExpression") {
-		return expression;
-	}
-	const result = annotate(uniqueIdentifier(scope, name), expression.loc);
-	addVariable(scope, result, expression);
-	return result;
 }
 
 export function stringifyType(type: Type): string {

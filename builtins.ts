@@ -3,12 +3,12 @@ import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength } from "./utils";
-import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, hoistToIdentifier, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
-	return arg(0);
+	return arg(0, "value");
 }
 
 function returnThis(scope: Scope, arg: ArgGetter): Value {
@@ -26,17 +26,17 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 }
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==") {
-	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0), scope), read(arg(1), scope))));
+	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))));
 }
 
 function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", valueChecker?: (value: Value) => Value) {
 	if (typeof valueChecker !== "undefined") {
-		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(0), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(1), scope))))));
+		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(0, "target"), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(1, "value"), scope))))));
 	}
-	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope, operator + "=" as any));
+	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope, operator + "=" as any));
 }
 
-const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0), arg(1), scope));
+const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope));
 
 const readLengthField = (name: string, globalScope: Scope) => field("count", reifyType("Int", globalScope), (value, scope) => {
 	return expr(memberExpression(read(value, scope), identifier("length")));
@@ -61,7 +61,7 @@ function buildIntegerType(min: number, max: number): ReifiedType {
 		"+": binaryBuiltin("+"),
 		"-": binaryBuiltin("-"),
 		"*": binaryBuiltin("*"),
-		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0), scope), read(arg(1), scope)), literal(0))),
+		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
 		"%": binaryBuiltin("%"),
 		"<": binaryBuiltin("<"),
 		">": binaryBuiltin(">"),
@@ -137,7 +137,7 @@ function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	let check: Expression;
 	let value: Expression;
 	if (requiresGreaterThanCheck && requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = logicalExpression(
 			"||",
 			binaryExpression(">", first, dest.min),
@@ -145,15 +145,15 @@ function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 		);
 		value = after;
 	} else if (requiresGreaterThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = binaryExpression(">", first, dest.max);
 		value = after;
 	} else if (requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = binaryExpression("<", first, dest.min);
 		value = after;
 	} else {
-		return arg(0);
+		return arg(0, "value");
 	}
 	return expr(conditionalExpression(
 		check,
@@ -171,7 +171,7 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	let check: Expression;
 	let value: Expression;
 	if (requiresGreaterThanCheck && requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = logicalExpression(
 			"||",
 			binaryExpression(">", first, dest.min),
@@ -179,15 +179,15 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 		);
 		value = after;
 	} else if (requiresGreaterThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = binaryExpression(">", first, dest.max);
 		value = after;
 	} else if (requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		check = binaryExpression("<", first, dest.min);
 		value = after;
 	} else {
-		return arg(0);
+		return arg(0, "value");
 	}
 	return expr(conditionalExpression(
 		check,
@@ -203,7 +203,7 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
 	const requiresLessThanCheck = possiblyLessThan(source, dest);
 	if (requiresGreaterThanCheck && requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression(">", first, dest.max),
 			dest.max,
@@ -214,33 +214,33 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 			),
 		));
 	} else if (requiresGreaterThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression(">", first, dest.max),
 			dest.max,
 			after,
 		));
 	} else if (requiresLessThanCheck) {
-		const [first, after] = reuseExpression(read(arg(0), scope), scope);
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope);
 		return expr(conditionalExpression(
 			binaryExpression("<", first, dest.min),
 			dest.min,
 			after,
 		));
 	} else {
-		return arg(0);
+		return arg(0, "value");
 	}
 }
 
 export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } = {
 	"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0), returnType(type)),
-		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
-		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0), scope), read(call(arg(1), undefinedValue, [], scope), scope)))),
+		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), returnType(type)),
+		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
+		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
 	})),
 	"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0), scope)))),
+		"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
 	})),
 	"SignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init": wrapped(integerThrowingInit),
@@ -272,7 +272,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"==": binaryBuiltin("==="),
 		"!=": binaryBuiltin("!=="),
-		"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0), scope)])), returnType(type)),
+		"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0, "value"), scope)])), returnType(type)),
 	})),
 	"Float": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
@@ -337,10 +337,10 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 			field("utf16", UTF16View, (value) => value),
 			field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
 		], {
-			"init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0)], scope)),
+			"init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0, "value")], scope)),
 			"+": binaryBuiltin("+"),
-			"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
-			"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
+			"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
+			"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
 		}, {
 			"UnicodeScalarView": () => UnicodeScalarView,
 			"UTF16View": () => UTF16View,
@@ -425,7 +425,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				}),
 			],
 			functions: {
-				"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0)], scope)),
+				"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0, "iterable")], scope)),
 				"count": returnLength,
 				"subscript": {
 					get(scope, arg) {
@@ -544,8 +544,8 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 				functions: {
 					subscript: {
 						get(scope, arg, type) {
-							const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
-							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+							const [dictFirst, dictAfter] = reuseExpression(read(arg(0, "dict"), scope), scope);
+							const [indexFirst, indexAfter] = reuseExpression(read(arg(1, "index"), scope), scope);
 							return expr(conditionalExpression(
 								callExpression(
 									memberExpression(
@@ -555,34 +555,33 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 										),
 										identifier("call"),
 									),
-									[dict, index],
+									[dictFirst, indexFirst],
 								),
-								read(wrapInOptional(copy(expr(memberExpression(dict, index, true)), valueType), possibleValueType, scope), scope),
+								read(wrapInOptional(copy(expr(memberExpression(dictAfter, indexAfter, true)), valueType), possibleValueType, scope), scope),
 								emptyOptional(possibleValueType),
 							));
 						},
 						set(scope, arg, type) {
-							const dict = hoistToIdentifier(read(arg(0, "dict"), scope), scope, "dict");
-							const index = hoistToIdentifier(read(arg(1, "index"), scope), scope, "index");
+							const dict = read(arg(0, "dict"), scope);
+							const index = read(arg(1, "index"), scope);
 							const valueExpression = read(arg(2, "value"), scope);
-							const remove = unaryExpression("delete", memberExpression(dict, index, true));
 							if (valueType.kind === "optional") {
 								if (valueExpression.type === "ArrayExpression" && valueExpression.elements.length === 0) {
-									return expr(remove);
+									return expr(unaryExpression("delete", memberExpression(dict, index, true)));
 								}
 							} else {
 								if (valueExpression.type === "NullLiteral") {
-									return expr(remove);
+									return expr(unaryExpression("delete", memberExpression(dict, index, true)));
 								}
 							}
 							if (isLiteral(valueExpression) || valueExpression.type === "ArrayExpression" || valueExpression.type === "ObjectExpression") {
 								return expr(assignmentExpression("=", memberExpression(dict, index, true), valueExpression));
 							}
-							const hoistedValue = hoistToIdentifier(valueExpression, scope, "value");
+							const [valueFirst, valueAfter] = reuseExpression(valueExpression, scope);
 							return expr(conditionalExpression(
-								optionalIsSome(hoistedValue, possibleValueType),
-								assignmentExpression("=", memberExpression(dict, index, true), read(copy(unwrapOptional(expr(hoistedValue), possibleValueType, scope), valueType), scope)),
-								remove,
+								optionalIsSome(valueFirst, possibleValueType),
+								assignmentExpression("=", memberExpression(dict, index, true), read(copy(unwrapOptional(expr(valueAfter), possibleValueType, scope), valueType), scope)),
+								unaryExpression("delete", memberExpression(dict, index, true)),
 							));
 						},
 					},
@@ -640,7 +639,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 	], {
-		map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(literal([]), identifier("map")), identifier("bind")), [read(arg(0), scope)])),
+		map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(literal([]), identifier("map")), identifier("bind")), [read(arg(0, "element"), scope)])),
 	}),
 	"BidirectionalCollection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
 		field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -655,7 +654,7 @@ export const defaultTypes: { [name: string]: (globalScope: Scope, typeParameters
 	}),
 	"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([]))),
 	"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [], {
-		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0), scope), read(arg(1), scope)]))),
+		"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0, "low"), scope), read(arg(1, "high"), scope)]))),
 	}),
 	"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [
 	], {
@@ -781,7 +780,7 @@ export const functions: FunctionMap = {
 		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
 	"??": returnTodo,
-	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0), scope), read(arg(1), scope))),
+	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0, "pattern"), scope), read(arg(1, "value"), scope))),
 	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
 		ifStatement(

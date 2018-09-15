@@ -1,11 +1,9 @@
 export function distance$first$second$(first, second) {
-  let delta;
+  const _x = first.x - second.x;
 
-  let _x = first.x - second.x;
+  const _y = first.y - second.y;
 
-  let _y = first.y - second.y;
-
-  delta = {
+  const delta = {
     x: _x,
     y: _y
   };

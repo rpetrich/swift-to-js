@@ -1,6 +1,5 @@
 export function silly_math$num$(num) {
-  let result;
-  result = num;
+  let result = num;
 
   while (result < 10000) {
     result *= result;

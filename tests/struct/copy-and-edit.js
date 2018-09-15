@@ -1,7 +1,5 @@
-let origin;
 export function pointOffsetFromOrigin$x$y$(x, y) {
-  let result;
-  result = {
+  let result = {
     x: origin.x,
     y: origin.y
   };
@@ -9,9 +7,9 @@ export function pointOffsetFromOrigin$x$y$(x, y) {
   result.y += y;
   return result;
 }
-let x = 0;
-let y = 0;
-origin = {
+const x = 0;
+const y = 0;
+let origin = {
   x: 0,
   y: 0
 };

@@ -1,5 +1,4 @@
-export let origin;
-origin = {
+export let origin = {
   x: 0,
   y: 0
 };
