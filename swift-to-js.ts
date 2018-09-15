@@ -168,8 +168,24 @@ const emptyPattern: PatternOutput = {
 	test: trueValue,
 };
 
+function mergeDeclarationStatements(statements: Statement[]) {
+	let result = statements;
+	let i = statements.length - 1;
+	while (i--) {
+		const current = statements[i];
+		const previous = statements[i + 1];
+		if (current.type === "VariableDeclaration" && previous.type === "VariableDeclaration" && current.kind === previous.kind) {
+			if (result === statements) {
+				result = statements.slice();
+			}
+			result.splice(i, 2, variableDeclaration(current.kind, concat(current.declarations, previous.declarations)));
+		}
+	}
+	return result;
+}
+
 function mergePatterns(first: PatternOutput, second: PatternOutput, scope: Scope, term: Term): PatternOutput {
-	const prefix = concat(first.prefix, second.prefix);
+	const prefix = mergeDeclarationStatements(concat(first.prefix, second.prefix));
 	const next = first.next ? (second.next ? mergePatterns(first.next, second.next, scope, term) : first.next) : second.next;
 	const firstExpression = read(first.test, scope);
 	if (isTrueExpression(firstExpression)) {

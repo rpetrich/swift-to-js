@@ -19,12 +19,12 @@ export function eval(expression) {
     const value = $match[1];
     return value;
   } else if ($match[0] === 1) {
-    const l = ArithmeticExpression$copy($match[1]);
-    const r = ArithmeticExpression$copy($match[2]);
+    const l = ArithmeticExpression$copy($match[1]),
+          r = ArithmeticExpression$copy($match[2]);
     return eval(l) + eval(r);
   } else if ($match[0] === 2) {
-    const l = ArithmeticExpression$copy($match[1]);
-    const r = ArithmeticExpression$copy($match[2]);
+    const l = ArithmeticExpression$copy($match[1]),
+          r = ArithmeticExpression$copy($match[2]);
     return eval(l) * eval(r);
   }
 }
