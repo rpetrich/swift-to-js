@@ -362,6 +362,8 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 			if (type !== "call") {
 				throw new Error(`Unable to call a ${type}ter on a function!`);
 			}
+			// Inlining is responsible for making the codegen even remotely sane
+			// return call(expr(read(target, scope)), thisArgument, args, scope, location);
 			return annotateValue(target.call(scope, getter), location);
 		default:
 			break;
