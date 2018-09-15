@@ -220,7 +220,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			let setterArgs: Value[] = dest.args;
 			if (operator !== "=") {
 				// Call the getter, apply the operation, then apply the setter
-				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope));
+				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
 				const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
 				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
 				setterArgs = reused.map(([first]) => expr(first));
@@ -241,8 +241,8 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 					throw new Error("Cannot update a this expression!");
 				case "MemberExpression":
 					if (dest.ref.object.type !== "Identifier" || (dest.ref.computed && typeof valueOfExpression(dest.ref.property) === "undefined")) {
-						const [firstObject, afterObject] = reuseExpression(dest.ref.object, scope);
-						const [firstProperty, afterProperty] = reuseExpression(dest.ref.object, scope);
+						const [firstObject, afterObject] = reuseExpression(dest.ref.object, scope, "object");
+						const [firstProperty, afterProperty] = reuseExpression(dest.ref.object, scope, "property");
 						const first = annotate(memberExpression(firstObject, firstProperty, dest.ref.computed), dest.ref.loc);
 						const after = annotate(memberExpression(afterObject, afterProperty, dest.ref.computed), dest.ref.loc);
 						return expr(assignmentExpression("=", first, read(updater(expr(after)), scope)), location);
@@ -254,7 +254,7 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 			break;
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
-			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope));
+			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
 			const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
 			const result = updater(valueFetched);
 			return call(dest.setter, undefinedValue, concat(reused.map(([first]) => expr(first)), [result]), scope, location, "set");
@@ -612,14 +612,14 @@ export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | 
 	}
 }
 
-export function reuseExpression(expression: Expression, scope: Scope): [Expression, Expression] {
+export function reuseExpression(expression: Expression, scope: Scope, uniqueIdentifierPrefix: string): [Expression, Expression] {
 	const simplified = annotate(simplify(expression), expression.loc);
 	if (isPure(simplified)) {
 		return [simplified, simplified];
 	} else if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
 		return [expression, expression.left];
 	} else {
-		const temp = annotate(uniqueIdentifier(scope), expression.loc);
+		const temp = annotate(uniqueIdentifier(scope, uniqueIdentifierPrefix), expression.loc);
 		addVariable(scope, temp, variableDeclaration("let", [variableDeclarator(temp)]));
 		return [annotate(assignmentExpression("=", temp, simplified), expression.loc), temp];
 	}

@@ -9,6 +9,6 @@ export function force_unwrap$doubleOption$(option) {
   return option.length !== 0 ? option[0] : $$forceUnwrapFailed();
 }
 export function force_unwrap$allTheWay$(option) {
-  let $temp;
-  return ($temp = option.length !== 0 ? option[0] : $$forceUnwrapFailed()) !== null ? $temp : $$forceUnwrapFailed();
+  let optional;
+  return (optional = option.length !== 0 ? option[0] : $$forceUnwrapFailed()) !== null ? optional : $$forceUnwrapFailed();
 }

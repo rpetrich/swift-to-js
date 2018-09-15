@@ -135,7 +135,7 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 					if (expressionSkipsCopy(expression)) {
 						return expr(expression);
 					}
-					const [first, after] = reuseExpression(expression, scope);
+					const [first, after] = reuseExpression(expression, scope, "copySource");
 					return expr(objectExpression(onlyStored.map((field) => {
 						const identifier = usedFirst ? after : (usedFirst = true, first);
 						const propertyExpr = memberExpression(identifier, mangleName(field.name));
@@ -270,7 +270,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 								return expr(expression);
 							}
 							let usedFirst = false;
-							const [first, after] = reuseExpression(expression, innerScope);
+							const [first, after] = reuseExpression(expression, innerScope, "copySource");
 							return expr(arrayExpression(reifiedTypes.map((elementType, index) => {
 								const identifier = usedFirst ? after : (usedFirst = true, first);
 								const field = memberExpression(identifier, literal(index), true);

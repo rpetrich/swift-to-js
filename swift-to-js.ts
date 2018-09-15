@@ -260,7 +260,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 		case "optional_some_element": { // Swift 4.1
 			expectLength(term.children, 1);
 			const type = getType(term);
-			const [first, second] = reuseExpression(read(value, scope), scope);
+			const [first, second] = reuseExpression(read(value, scope), scope, "optional");
 			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope, declarationFlags);
 			return {
 				prefix: emptyStatements,
@@ -337,7 +337,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
-			const [first, second] = reuseExpression(read(value, scope), scope);
+			const [first, second] = reuseExpression(read(value, scope), scope, "tuple");
 			return term.children.reduce((existing, child, i) => {
 				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, literal(i), true), term), scope, declarationFlags);
 				return mergePatterns(existing, childPattern, scope, term);
@@ -356,7 +356,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
 			}
 			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
-			const [first, after] = reuseExpression(read(value, scope), scope);
+			const [first, after] = reuseExpression(read(value, scope), scope, "enum");
 			const discriminantExpression = isDirectRepresentation ? first : memberExpression(first, literal(0), true);
 			const test = expr(binaryExpression("===", discriminantExpression, literal(index)), term);
 			expectLength(term.children, 0, 1);
@@ -713,7 +713,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "force_value_expr": {
 			expectLength(term.children, 1);
 			const value = translateTermToValue(term.children[0], scope, bindingContext);
-			const [first, after] = reuseExpression(read(value, scope), scope);
+			const [first, after] = reuseExpression(read(value, scope), scope, "optional");
 			// TODO: Optimize some cases where we can prove it to be a .some
 			const type = getType(term.children[0]);
 			return expr(conditionalExpression(
@@ -764,7 +764,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				if (typeof testExpression !== "undefined") {
 					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
 				}
-				const [first, after] = reuseExpression(read(value, scope), scope);
+				const [first, after] = reuseExpression(read(value, scope), scope, "optional");
 				testExpression = optionalIsSome(first, innerOptionalType);
 				return unwrapOptional(expr(after), innerOptionalType, scope);
 			});
@@ -1080,7 +1080,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 				if (requiresCopyHelper) {
 					// Emit checks for cases that have field that require copying
-					const [first, after] = reuseExpression(expression, scope);
+					const [first, after] = reuseExpression(expression, scope, "copySource");
 					let usedFirst = false;
 					return expr(cases.reduce(
 						(previous, enumCase, i) => {
