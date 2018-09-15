@@ -1,1 +1,1 @@
-export let emptyInit = undefined;
+export let emptyInit;

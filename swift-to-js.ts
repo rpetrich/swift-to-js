@@ -288,13 +288,14 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 				};
 			} else {
 				const pattern = convertToPattern(copy(value, type));
+				const patternExpression = read(pattern.test, scope);
 				const hasMapping = Object.hasOwnProperty.call(scope.mapping, name.name);
 				let result: Statement;
 				if (hasMapping) {
-					result = expressionStatement(annotate(assignmentExpression("=", name, read(pattern.test, scope)), term));
+					result = expressionStatement(annotate(assignmentExpression("=", name, patternExpression), term));
 				} else {
 					addVariable(scope, name, undefined);
-					result = variableDeclaration(declarationFlags & DeclarationFlags.Const ? "const" : "let", [annotate(variableDeclarator(name, read(pattern.test, scope)), term)]);
+					result = variableDeclaration(declarationFlags & DeclarationFlags.Const ? "const" : "let", [annotate(variableDeclarator(name, isIdentifier(patternExpression) && patternExpression.name === "undefined" ? undefined : patternExpression), term)]);
 					if (declarationFlags & DeclarationFlags.Export) {
 						result = exportNamedDeclaration(result, []);
 					}
