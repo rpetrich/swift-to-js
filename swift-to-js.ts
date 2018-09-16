@@ -2,11 +2,11 @@ import { parse as parseAST, Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration, parse as parseDeclaration } from "./declaration";
 import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "./functions";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct } from "./reified";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
-import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -106,11 +106,19 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 		return variable(lookup(declaration.local, scope), term);
 	}
 	if (typeof declaration.member === "string") {
-		const functionType = typeof declaration.type === "string" ? reifyType(constructTypeFromNames(declaration.type, declaration.substitutions), scope) : undefined;
-		if (Object.hasOwnProperty.call(functionType !== undefined ? functionType.functions : scope.functions, declaration.member)) {
-			return functionValue(declaration.member, functionType, type || getFunctionType(term), term);
+		let parentType: Value | undefined;
+		if (typeof declaration.type === "string") {
+			parentType = typeValue(constructTypeFromNames(declaration.type, declaration.substitutions));
+		} else if (!Object.hasOwnProperty.call(scope.functions, declaration.member)) {
+			return variable(lookup(declaration.member, scope), term);
 		}
-		return variable(lookup(declaration.member, scope), term);
+		let substitutionValues: Value[];
+		if (typeof declaration.substitutions !== "undefined") {
+			substitutionValues = declaration.substitutions.map((substitution) => typeValue(parseType(substitution)));
+		} else {
+			substitutionValues = [];
+		}
+		return functionValue(declaration.member, parentType, type || getFunctionType(term), substitutionValues, term);
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
 }
@@ -124,12 +132,19 @@ function getType(term: Term) {
 	}
 }
 
-function getFunctionType(term: Term) {
-	const result = getType(term);
-	if (result.kind !== "function") {
-		throw new TypeError(`Expected a function, got ${stringifyType(result)}`);
+function findFunctionType(type: Type): Function {
+	switch (type.kind) {
+		case "generic":
+			return findFunctionType(type.base);
+		case "function":
+			return type;
+		default:
+			throw new TypeError(`Expected a function, got ${stringifyType(type)}`);
 	}
-	return result;
+}
+
+function getFunctionType(term: Term) {
+	return findFunctionType(getType(term));
 }
 
 function collapseToExpression(expressions: Expression[]): Expression {
@@ -550,16 +565,27 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 2);
 			const target = term.children[0];
 			const args = term.children[1];
-			const peekedTarget = translateTermToValue(target, scope, bindingContext);
+			const targetValue = translateTermToValue(target, scope, bindingContext);
 			const type = getType(args);
 			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
 			if (argsValue.kind === "tuple") {
-				return call(peekedTarget, undefinedValue, argsValue.values, scope);
+				return call(targetValue, undefinedValue, argsValue.values, scope);
 			} else {
+				let updatedArgs: Value = argsValue;
+				if (targetValue.kind === "function" && targetValue.substitutions.length !== 0) {
+					// Insert substitutions as a [Foo$Type].concat(realArgs) expression
+					updatedArgs = call(
+						expr(memberExpression(arrayExpression(targetValue.substitutions.map((sub) => read(sub, scope))), identifier("concat"))),
+						undefinedValue,
+						[argsValue],
+						scope,
+						argsValue.location,
+					);
+				}
 				return call(
-					expr(memberExpression(read(peekedTarget, scope), identifier("apply")), term),
+					expr(memberExpression(read(targetValue, scope), identifier("apply")), term),
 					undefinedValue,
-					[expr(undefinedLiteral, term) as Value].concat(argsValue),
+					[undefinedValue, updatedArgs],
 					scope,
 				);
 			}
@@ -575,7 +601,12 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "type_expr": {
 			expectLength(term.children, 0);
-			return expr(mangleName(getProperty(term, "type", isString)), term);
+			let type = getType(term);
+			// TODO: Properly unwrap the .Type part
+			if (type.kind === "namespaced" && type.type.kind === "name" && type.type.name === "Type") {
+				type = type.namespace;
+			}
+			return typeValue(type, term);
 		}
 		case "boolean_literal_expr": {
 			expectLength(term.children, 0);
@@ -599,6 +630,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "dictionary_expr": {
 			const type = getType(term);
 			if (type.kind !== "dictionary") {
+				console.error(term);
 				throw new TypeError(`Expected a dictionary type, got a ${stringifyType(type)}`);
 			}
 			reifyType(type, scope);
@@ -657,7 +689,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const parameterList = termWithName(term.children, "parameter_list");
 			return callable((innerScope, arg) => {
 				const childScope = newScope("anonymous", innerScope);
-				const paramStatements = applyParameterMappings(termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
+				const paramStatements = applyParameterMappings(0, termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
 				const result = translateTermToValue(term.children[1], childScope, bindingContext);
 				return statements(emitScope(childScope, concat(paramStatements, [returnStatement(read(result, childScope))])));
 			}, getType(term));
@@ -807,11 +839,11 @@ function translateAllStatements(terms: Term[], scope: Scope, functions: Function
 	}
 }
 
-function applyParameterMappings(parameterTerms: Term[], arg: ArgGetter, scope: Scope, childScope: Scope): Statement[] {
+function applyParameterMappings(typeParameterCount: number, parameterTerms: Term[], arg: ArgGetter, scope: Scope, childScope: Scope): Statement[] {
 	return parameterTerms.reduce((statements, param, index) => {
 		expectLength(param.args, 1);
 		const parameterName = param.args[0];
-		const expression = read(arg(index, parameterName), scope);
+		const expression = read(arg(index + typeParameterCount, parameterName), scope);
 		if (isIdentifier(expression) || expression.type === "ThisExpression") {
 			childScope.mapping[parameterName] = expression;
 			return statements;
@@ -833,6 +865,37 @@ function flagsForDeclarationTerm(term: Term): DeclarationFlags {
 	return flags;
 }
 
+function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): TypeMap {
+	if (typeArguments.kind !== "generic") {
+		throw new TypeError(`Expected a generic type, got a ${typeArguments.kind}`);
+	}
+	const result: TypeMap = Object.create(null);
+	for (let i = 0; i < typeArguments.arguments.length; i++) {
+		const typeParameter = typeArguments.arguments[i];
+		let name: string;
+		if (typeParameter.kind === "name") {
+			name = typeParameter.name;
+		} else if (typeParameter.kind === "constrained") {
+			if (typeParameter.type.kind === "name") {
+				name = typeParameter.type.name;
+			} else {
+				throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.type.kind}`);
+			}
+		} else {
+			throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.kind}`);
+		}
+		result[name] = (scope: Scope) => {
+			try {
+				// TODO: Support runtime reified types, for now just catch
+				return reifyType(typeFromValue(arg(i, name)), scope);
+			} catch (e) {
+				return reifyType("Int", scope);
+			}
+		};
+	}
+	return result;
+}
+
 function translateStatement(term: Term, scope: Scope, functions: FunctionMap, nextTerm?: Term): Statement[] {
 	switch (term.name) {
 		case "source_file": {
@@ -845,16 +908,36 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "constructor_decl":
 		case "func_decl": {
 			const isConstructor = term.name === "constructor_decl";
-			expectLength(term.args, 1);
+			expectLength(term.args, 1, 2);
 			const name = term.args[0];
 
-			function constructCallable(head: Statement[], parameterList: Term[], remainingLists: Term[][], functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
+			const parameters = termsWithName(term.children, "parameter");
+			const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map((paramList) => paramList.children));
+			if (parameterLists.length === 0) {
+				throw new Error(`Expected a parameter list for a function declaration`);
+			}
+
+			function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
 				return (targetScope: Scope, arg: ArgGetter) => {
-					const childScope = typeof initialScope !== "undefined" ? initialScope : newScope(name, targetScope);
-					const parameterStatements = concat(head, applyParameterMappings(termsWithName(parameterList, "parameter"), arg, targetScope, childScope));
-					if (remainingLists.length) {
-						return callable(constructCallable(emitScope(childScope, parameterStatements), remainingLists[0], remainingLists.slice(1), returnType(functionType), childScope), functionType);
+					// Apply generic function mapping for outermost function
+					let typeArgumentCount: number;
+					let childScope: Scope;
+					if (typeof initialScope !== "undefined") {
+						typeArgumentCount = 0;
+						childScope = initialScope;
+					} else {
+						const typeMap: TypeMap = term.args.length >= 2 ? typeMappingForGenericArguments(parseType("Base" + term.args[1]), arg) : Object.create(null);
+						typeArgumentCount = Object.keys(typeMap).length;
+						childScope = newScope(name, targetScope, typeMap);
 					}
+					// Apply parameters
+					const parameterList = parameterLists[parameterListIndex];
+					const parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope));
+					if (parameterListIndex !== parameterLists.length - 1) {
+						// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
+						return callable(constructCallable(emitScope(childScope, parameterStatements), parameterListIndex + 1, returnType(functionType), childScope), functionType);
+					}
+					// Emit the innermost function
 					const brace = findTermWithName(term.children, "brace_stmt");
 					if (brace) {
 						const body = termWithName(term.children, "brace_stmt").children.slice();
@@ -893,14 +976,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				};
 			}
 
-			// Workaround differences in AST between swift 4.1 and development
-			const parameters = termsWithName(term.children, "parameter");
-			const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map((paramList) => paramList.children));
-			if (parameterLists.length === 0) {
-				throw new Error(`Expected a parameter list for a function declaration`);
-			}
-
-			const fn = constructCallable(emptyStatements, parameterLists[0], parameterLists.slice(1), getType(term));
+			const fn = constructCallable(emptyStatements, 0, getType(term));
 			if (/^anonname=/.test(name)) {
 				scope.functions[name] = fn;
 			} else if (!isConstructor && (flagsForDeclarationTerm(term) & DeclarationFlags.Export) && functions === scope.functions) {
@@ -1134,7 +1210,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					}
 					// Dispatch through the function so that recursion doesn't kill us
 					const copyFunctionType: Function = { kind: "function", arguments: { kind: "tuple", types: [selfType] }, return: selfType, throws: false, rethrows: false, attributes: [] };
-					return call(functionValue(copyFunctionName, reifiedSelfType, copyFunctionType), undefinedValue, [expr(expression)], scope);
+					return call(functionValue(copyFunctionName, typeValue(selfType), copyFunctionType), undefinedValue, [expr(expression)], scope);
 				},
 				cases,
 			};

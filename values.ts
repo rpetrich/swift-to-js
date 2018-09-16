@@ -2,7 +2,7 @@ import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpressio
 
 import { Term } from "./ast";
 import { functionize, insertFunction } from "./functions";
-import { ReifiedType, reifyType } from "./reified";
+import { FunctionMap, ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { concat, expectLength } from "./utils";
@@ -138,13 +138,14 @@ export function boxed(contents: Value, location?: Term | Location): BoxedValue {
 export interface FunctionValue {
 	kind: "function";
 	name: string;
-	parentType: ReifiedType | undefined;
+	parentType: Value | undefined;
 	type: Function;
+	substitutions: Value[];
 	location?: Location;
 }
 
-export function functionValue(name: string, parentType: ReifiedType | undefined, type: Function, location?: Term | Location): FunctionValue {
-	return { kind: "function", name, parentType, type, location: readLocation(location) };
+export function functionValue(name: string, parentType: Value | undefined, type: Function, substitutions: Value[] = [], location?: Term | Location): FunctionValue {
+	return { kind: "function", name, parentType, type, substitutions, location: readLocation(location) };
 }
 
 
@@ -188,7 +189,25 @@ export function copy(value: Value, type: Type): CopiedValue {
 }
 
 
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue;
+export interface TypeValue {
+	kind: "type";
+	type: Type;
+	location?: Location;
+}
+
+export function typeValue(type: Type, location?: Term | Location): TypeValue {
+	return { kind: "type", type, location: readLocation(location) };
+}
+
+export function typeFromValue(value: Value): Type {
+	if (value.kind !== "type") {
+		throw new Error(`Expected to receive a type argument to the outer layer of a wrapped function, instead got a ${value.kind}`);
+	}
+	return value.type;
+}
+
+
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue;
 
 
 
@@ -294,8 +313,16 @@ export function read(value: Value, scope: Scope): Expression {
 			}
 			return annotate(read(value.value, scope), value.location);
 		case "function":
-			const functions = typeof value.parentType !== "undefined" ? value.parentType.functions : scope.functions;
-			return annotate(insertFunction(value.name, scope, value.type, scope.functions[value.name]), value.location);
+			const bind = value.substitutions.length ? (expression: Expression) => annotate(callExpression(memberExpression(expression, identifier("bind")), concat([nullLiteral()], value.substitutions.map((substitution) => read(substitution, scope)))), value.location) : (expression: Expression) => expression;
+			let functions: FunctionMap;
+			if (typeof value.parentType === "undefined") {
+				functions = scope.functions;
+			} else if (value.parentType.kind === "type") {
+				functions = reifyType(value.parentType.type, scope).functions;
+			} else {
+				return bind(annotate(memberExpression(read(value.parentType, scope), literal(value.name), true), value.location));
+			}
+			return bind(annotate(insertFunction(value.name, scope, value.type, scope.functions[value.name]), value.location));
 		case "tuple":
 			switch (value.values.length) {
 				case 0:
@@ -318,6 +345,8 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(read(call(value.getter, undefinedValue, value.args, scope, value.location, "get"), scope), value.location);
 		case "boxed":
 			return annotate(read(value.contents, scope), value.location);
+		case "type":
+			return annotate(mangleName(stringifyType(value.type) + ".Type"), value.location);
 		default:
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
 	}
@@ -337,7 +366,36 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 	};
 	switch (target.kind) {
 		case "function":
-			const functions = typeof target.parentType !== "undefined" ? target.parentType.functions : scope.functions;
+			let targetFunctionType: Function;
+			if (target.substitutions.length !== 0) {
+				// Type substitutions are passed as prefix arguments
+				args = concat(target.substitutions, args);
+				targetFunctionType = {
+					kind: "function",
+					arguments: {
+						kind: "tuple",
+						types: concat(target.substitutions.map(() => ({ kind: "name", name: "Type" } as Type)), target.type.arguments.types),
+					},
+					return: target.type.return,
+					attributes: target.type.attributes,
+					throws: target.type.throws,
+					rethrows: target.type.rethrows,
+				};
+			} else {
+				targetFunctionType = target.type;
+			}
+			let functions: FunctionMap;
+			if (typeof target.parentType === "undefined") {
+				functions = scope.functions;
+			} else if (target.parentType.kind === "type") {
+				functions = reifyType(target.parentType.type, scope).functions;
+			} else {
+				if (type !== "call") {
+					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
+				}
+				const func = memberExpression(read(target.parentType, scope), literal(target.name), true);
+				return call(expr(func, target.location), thisArgument, args, scope, location);
+			}
 			if (Object.hasOwnProperty.call(functions, target.name)) {
 				const fn = functions[target.name];
 				switch (type) {
@@ -345,18 +403,18 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 						if (typeof fn !== "function") {
 							throw new Error(`Expected a callable function!`);
 						}
-						return annotateValue(fn(scope, getter, target.type, target.name), location);
+						return annotateValue(fn(scope, getter, targetFunctionType, target.name), location);
 					default:
 						if (typeof fn === "function") {
 							throw new Error(`Expected a ${type}ter!`);
 						}
-						return annotateValue(fn[type](scope, getter, target.type, target.name), location);
+						return annotateValue(fn[type](scope, getter, targetFunctionType, target.name), location);
 				}
 			} else {
 				if (type !== "call") {
 					throw new Error(`Unable to call a ${type}ter on a function!`);
 				}
-				return call(expr(insertFunction(target.name, scope, target.type, functions[target.name]), location), thisArgument, args, scope, location);
+				return call(expr(insertFunction(target.name, scope, targetFunctionType, functions[target.name]), location), thisArgument, args, scope, location);
 			}
 		case "callable":
 			if (type !== "call") {
@@ -371,10 +429,10 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 	if (type !== "call") {
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
-	if (thisArgument.kind === "expression" && thisArgument.expression === undefinedLiteral) {
-		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))), location);
-	} else {
+	if (thisArgument.kind === "direct" && thisArgument.ref.type === "Identifier" && thisArgument.ref.name === "undefined") {
 		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))), location);
+	} else {
+		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))), location);
 	}
 }
 
@@ -630,7 +688,11 @@ export function stringifyType(type: Type): string {
 		case "optional":
 			return stringifyType(type.type) + "?";
 		case "generic":
-			return stringifyType(type.base) + "<" + type.arguments.map(stringifyType).join(", ") + ">";
+			if (type.base.kind === "function") {
+				return "<" + type.arguments.map(stringifyType).join(", ") + "> " + stringifyType(type.base);
+			} else {
+				return stringifyType(type.base) + "<" + type.arguments.map(stringifyType).join(", ") + ">";
+			}
 		case "function":
 			// TODO: Handle attributes
 			return stringifyType(type.arguments) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return);
@@ -648,6 +710,8 @@ export function stringifyType(type: Type): string {
 			return stringifyType(type.namespace) + "." + stringifyType(type.type);
 		case "name":
 			return type.name;
+		case "constrained":
+			return stringifyType(type.type) + " where " + stringifyType(type.type) + " : " + stringifyType(type.constraint);
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}

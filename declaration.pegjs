@@ -1,5 +1,5 @@
 Top
-  = _ Name '.(file).' body:(FunctionAndLocalReference / TypeAndMemberReference / FunctionReference / Name) specialization:Specialization? PathReference? _ { return { ...body, substitutions: specialization || undefined }; }
+  = _ Name '.(file).' body:(FunctionAndLocalReference / TypeAndMemberReference / FunctionReference / Name) specialization:Specialization? PathReference? afterSpecialization:Specialization? _ { return { ...body, substitutions: specialization || afterSpecialization || undefined }; }
 
 FunctionAndLocalReference
   = member:(TypeAndMemberReference / FunctionReference) '.' local:Name { return { type: member.type, member: member.member, local: local }; }
@@ -14,7 +14,7 @@ NamedArgument
   = Name? ':'
 
 PathReference
-  = '@' .*
+  = '@' [^:]* [:0-9]*
 
 Specialization
   = ' [with (substitution_map generic_signature=<' [^\@>]* '>' substitutions:Substitution* ')]' { return substitutions; }

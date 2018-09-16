@@ -232,20 +232,35 @@ function typeArgumentsForArray(args: ReadonlyArray<Type>) {
 	}) as TypeParameterHost;
 }
 
-export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArguments: ReadonlyArray<Type> = emptyTypes, types: Readonly<TypeMap> = scope.types): ReifiedType {
+export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArguments: ReadonlyArray<Type> = emptyTypes, types?: ReadonlyArray<Readonly<TypeMap>>): ReifiedType {
 	const type = typeof typeOrTypeName === "string" ? parseType(typeOrTypeName) : typeOrTypeName;
 	switch (type.kind) {
 		case "name":
-			if (Object.hasOwnProperty.call(types, type.name)) {
-				return types[type.name](scope, typeArgumentsForArray(typeArguments));
+			if (typeof types !== "undefined") {
+				// Search the provided types only
+				for (const map of types) {
+					if (Object.hasOwnProperty.call(map, type.name)) {
+						return map[type.name](scope, typeArgumentsForArray(typeArguments));
+					}
+				}
+			} else {
+				// Search up the scope chain
+				let currentScope: Scope | undefined = scope;
+				while (typeof currentScope !== "undefined") {
+					const map = currentScope.types;
+					if (Object.hasOwnProperty.call(map, type.name)) {
+						return map[type.name](scope, typeArgumentsForArray(typeArguments));
+					}
+					currentScope = currentScope.parent;
+				}
 			}
 			throw new TypeError(`Cannot resolve type named ${type.name}`);
 		case "array":
-			return scope.types.Array(scope, typeArgumentsForArray([type.type]));
+			return reifyType({ kind: "name", name: "Array" }, scope, [type.type]);
 		case "modified":
 			return reifyType(type.type, scope);
 		case "dictionary":
-			return scope.types.Dictionary(scope, typeArgumentsForArray([type.keyType, type.valueType]));
+			return reifyType({ kind: "name", name: "Dictionary" }, scope, [type.keyType, type.valueType]);
 		case "tuple":
 			const reifiedTypes = type.types.map((inner) => reifyType(inner, scope));
 			switch (type.types.length) {
@@ -287,9 +302,9 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 		case "function":
 			return primitive(PossibleRepresentation.Function, undefinedValue);
 		case "namespaced":
-			return reifyType(type.type, scope, emptyTypes, reifyType(type.namespace, scope, typeArguments).innerTypes);
+			return reifyType(type.type, scope, emptyTypes, [reifyType(type.namespace, scope, typeArguments).innerTypes]);
 		case "optional":
-			return scope.types.Optional(scope, typeArgumentsForArray([type.type]));
+			return reifyType({ kind: "name", name: "Optional" }, scope, [type.type]);
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}

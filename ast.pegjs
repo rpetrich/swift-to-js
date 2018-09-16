@@ -25,12 +25,12 @@ WhitespaceAndAttributeOrArgument
   = _ value:AttributeOrArgument { return value; }
 
 Argument
-  = argument:(DoubleQuotedString / SingleQuotedString) { return argument; }
+  = argument:(DoubleQuotedString / SingleQuotedString / TypeArgumentString) { return argument; }
 
 Attribute
   = key:Identifier value:AttributeValue? { return { key: key, value: value === null ? true : value } }
 AttributeValue
-  = ('=' / ': ' / ' #') value: (Range / List / String / ParenthesizedBareString / EmptyString) { return value; }
+  = ('=' / ': ' / ' #') value: ('(<generic> )' / Range / List / String / ParenthesizedBareString / EmptyString) { return value; }
 
 EmptyString "empty string"
   = "" { return ""; }
@@ -48,6 +48,9 @@ WhitespaceAndDoubleQuotedString
 
 SingleQuotedString "singlequote string"
   = "'" content:(EscapeSequence / [^'])* "'" { return content.join(""); }
+
+TypeArgumentString "type argument"
+  = "<" value:[^>]* ">" { return "<" + value.join("") + ">" }
 
 List "list"
   = BracketedList / CommaSeparatedBareString / EmptyBracketedList

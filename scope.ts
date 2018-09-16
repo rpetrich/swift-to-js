@@ -39,11 +39,11 @@ export function rootScope(scope: Scope) {
 	return result;
 }
 
-export function newScope(name: string, parent: Scope): Scope {
+export function newScope(name: string, parent: Scope, types: TypeMap = parent.types): Scope {
 	return {
 		name,
 		declarations: Object.create(null),
-		types: parent.types,
+		types,
 		functions: parent.functions,
 		functionUsage: parent.functionUsage,
 		mapping: Object.create(null),

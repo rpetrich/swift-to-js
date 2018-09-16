@@ -25,18 +25,18 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 	return arg0.kind === "direct" ? variable(read(arg0, scope)) : expr(read(arg0, scope));
 }
 
-function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==", valueChecker?: (value: Value, scope: Scope) => Value) {
+function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
 	if (typeof valueChecker !== "undefined") {
-		return wrapped((scope: Scope, arg: ArgGetter) => valueChecker(expr(binaryExpression(operator, read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), scope));
+		return wrapped((scope: Scope, arg: ArgGetter) => valueChecker(expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))), scope));
 	}
-	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))));
+	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))));
 }
 
-function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", valueChecker?: (value: Value, scope: Scope) => Value) {
+function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
 	if (typeof valueChecker !== "undefined") {
-		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(0, "target"), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(1, "value"), scope))), scope)));
+		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(typeArgumentCount, "target"), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(typeArgumentCount + 1, "value"), scope))), scope)));
 	}
-	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope, operator + "=" as any));
+	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, operator + "=" as any));
 }
 
 const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope));
@@ -81,23 +81,23 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 		"+": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerHigh, range)),
 		"-": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerLow, range)),
 		"*": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerBoth, range)),
-		"&+": binaryBuiltin("+", wrap),
-		"&-": binaryBuiltin("-", wrap),
-		"&*": binaryBuiltin("*", wrap),
+		"&+": binaryBuiltin("+", 0, wrap),
+		"&-": binaryBuiltin("-", 0, wrap),
+		"&*": binaryBuiltin("*", 0, wrap),
 		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
-		"%": binaryBuiltin("%"),
-		"<": binaryBuiltin("<"),
-		">": binaryBuiltin(">"),
-		"<=": binaryBuiltin("<="),
-		">=": binaryBuiltin(">="),
-		"&": binaryBuiltin("&"),
-		"|": binaryBuiltin("|"),
-		"^": binaryBuiltin("^"),
-		"==": binaryBuiltin("==="),
-		"!=": binaryBuiltin("!=="),
-		"+=": updateBuiltin("+"),
-		"-=": updateBuiltin("-"),
-		"*=": updateBuiltin("*"),
+		"%": binaryBuiltin("%", 0),
+		"<": binaryBuiltin("<", 0),
+		">": binaryBuiltin(">", 0),
+		"<=": binaryBuiltin("<=", 0),
+		">=": binaryBuiltin(">=", 0),
+		"&": binaryBuiltin("&", 0),
+		"|": binaryBuiltin("|", 0),
+		"^": binaryBuiltin("^", 0),
+		"==": binaryBuiltin("===", 0),
+		"!=": binaryBuiltin("!==", 0),
+		"+=": updateBuiltin("+", 0),
+		"-=": updateBuiltin("-", 0),
+		"*=": updateBuiltin("*", 0),
 	}, {
 		Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
 			field("min", reifiedType, () => expr(literal(min))),
@@ -110,7 +110,7 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 }
 
 function getMetaFieldValue(type: Type, fieldName: string, scope: Scope) {
-	const reified = reifyType("Type", scope, [], reifyType(type, scope).innerTypes);
+	const reified = reifyType("Type", scope, [], [reifyType(type, scope).innerTypes]);
 	if (typeof reified === "undefined") {
 		throw new Error(`Expected to have a source type!`);
 	}
@@ -184,15 +184,15 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 	));
 }
 
-function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
 	expectLength(type.arguments.types, 1);
-	return integerRangeCheck(scope, arg(0, "value"), rangeForNumericType(type.arguments.types[0], scope), rangeForNumericType(returnType(type), scope));
+	return integerRangeCheck(scope, arg(0, "value"), rangeForNumericType(type.arguments.types[0], scope), rangeForNumericType(typeArgument, scope));
 }
 
-function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
 	expectLength(type.arguments.types, 1);
 	const source = rangeForNumericType(type.arguments.types[0], scope);
-	const dest = rangeForNumericType(returnType(type), scope);
+	const dest = rangeForNumericType(typeArgument, scope);
 	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
 	const requiresLessThanCheck = possiblyLessThan(source, dest);
 	if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
@@ -220,10 +220,10 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	));
 }
 
-function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Value {
+function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
 	expectLength(type.arguments.types, 1);
 	const source = rangeForNumericType(type.arguments.types[0], scope);
-	const dest = rangeForNumericType(returnType(type), scope);
+	const dest = rangeForNumericType(typeArgument, scope);
 	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
 	const requiresLessThanCheck = possiblyLessThan(source, dest);
 	if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
@@ -255,44 +255,47 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	}
 }
 
-function forwardToReturnType(scope: Scope, arg: ArgGetter, type: Function, name: string) {
-	return call(functionValue(name, reifyType(returnType(returnFunctionType(type)), scope), type), undefinedValue, [arg(0, "type")], scope);
+function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, name: string) {
+	const typeArg = arg(0, "type");
+	return call(functionValue(name, typeArg, type), undefinedValue, [typeArg], scope);
 }
 
 function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
+	const BoolType = cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
+		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
+		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
+		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
+		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
+	}));
 	return {
-		"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
-			"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-			"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), returnType(type)),
-			"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
-			"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), undefinedValue, [], scope), scope)))),
-		})),
+		"Bool": BoolType,
+		"Int1": BoolType,
 		"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
 		})),
 		"SignedInteger": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init": wrapped(integerThrowingInit),
 			"init(exactly:)": wrapped(integerOptionalInit),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"&+": forwardToReturnType,
-			"&-": forwardToReturnType,
+			"==": binaryBuiltin("===", 1),
+			"!=": binaryBuiltin("!==", 1),
+			"&+": forwardToTypeArgument,
+			"&-": forwardToTypeArgument,
 		}),
 		"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init": wrapped(integerThrowingInit),
 			"init(exactly:)": wrapped(integerOptionalInit),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"&+": forwardToReturnType,
-			"&-": forwardToReturnType,
+			"==": binaryBuiltin("===", 1),
+			"!=": binaryBuiltin("!==", 1),
+			"&+": forwardToTypeArgument,
+			"&-": forwardToTypeArgument,
 		})),
 		"FixedWidthInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init(clamping:)": wrapped(integerClampingInit),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"&+": forwardToReturnType,
-			"&-": forwardToReturnType,
-			"&*": forwardToReturnType,
+			"==": binaryBuiltin("===", 1),
+			"!=": binaryBuiltin("!==", 1),
+			"&+": forwardToTypeArgument,
+			"&-": forwardToTypeArgument,
+			"&*": forwardToTypeArgument,
 		})),
 		"UInt": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
 		"Int": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
@@ -305,51 +308,51 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
 		"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
 		"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(0, "value"), scope)])), returnType(type)),
+			"==": binaryBuiltin("===", 0),
+			"!=": binaryBuiltin("!==", 0),
+			"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(1, "value"), scope)])), returnType(type)),
 		})),
 		"Float": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-			"+": binaryBuiltin("+"),
-			"-": binaryBuiltin("-"),
-			"*": binaryBuiltin("*"),
-			"/": binaryBuiltin("/"),
-			"%": binaryBuiltin("%"),
-			"<": binaryBuiltin("<"),
-			">": binaryBuiltin(">"),
-			"<=": binaryBuiltin("<="),
-			">=": binaryBuiltin(">="),
-			"&": binaryBuiltin("&"),
-			"|": binaryBuiltin("|"),
-			"^": binaryBuiltin("^"),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"+=": updateBuiltin("+"),
-			"-=": updateBuiltin("-"),
-			"*=": updateBuiltin("*"),
-			"/=": updateBuiltin("/"),
+			"+": binaryBuiltin("+", 0),
+			"-": binaryBuiltin("-", 0),
+			"*": binaryBuiltin("*", 0),
+			"/": binaryBuiltin("/", 0),
+			"%": binaryBuiltin("%", 0),
+			"<": binaryBuiltin("<", 0),
+			">": binaryBuiltin(">", 0),
+			"<=": binaryBuiltin("<=", 0),
+			">=": binaryBuiltin(">=", 0),
+			"&": binaryBuiltin("&", 0),
+			"|": binaryBuiltin("|", 0),
+			"^": binaryBuiltin("^", 0),
+			"==": binaryBuiltin("===", 0),
+			"!=": binaryBuiltin("!==", 0),
+			"+=": updateBuiltin("+", 0),
+			"-=": updateBuiltin("-", 0),
+			"*=": updateBuiltin("*", 0),
+			"/=": updateBuiltin("/", 0),
 		})),
 		"Double": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-			"+": binaryBuiltin("+"),
-			"-": binaryBuiltin("-"),
-			"*": binaryBuiltin("*"),
-			"/": binaryBuiltin("/"),
-			"%": binaryBuiltin("%"),
-			"<": binaryBuiltin("<"),
-			">": binaryBuiltin(">"),
-			"<=": binaryBuiltin("<="),
-			">=": binaryBuiltin(">="),
-			"&": binaryBuiltin("&"),
-			"|": binaryBuiltin("|"),
-			"^": binaryBuiltin("^"),
-			"==": binaryBuiltin("==="),
-			"!=": binaryBuiltin("!=="),
-			"+=": updateBuiltin("+"),
-			"-=": updateBuiltin("-"),
-			"*=": updateBuiltin("*"),
-			"/=": updateBuiltin("/"),
+			"+": binaryBuiltin("+", 0),
+			"-": binaryBuiltin("-", 0),
+			"*": binaryBuiltin("*", 0),
+			"/": binaryBuiltin("/", 0),
+			"%": binaryBuiltin("%", 0),
+			"<": binaryBuiltin("<", 0),
+			">": binaryBuiltin(">", 0),
+			"<=": binaryBuiltin("<=", 0),
+			">=": binaryBuiltin(">=", 0),
+			"&": binaryBuiltin("&", 0),
+			"|": binaryBuiltin("|", 0),
+			"^": binaryBuiltin("^", 0),
+			"==": binaryBuiltin("===", 0),
+			"!=": binaryBuiltin("!==", 0),
+			"+=": updateBuiltin("+", 0),
+			"-=": updateBuiltin("-", 0),
+			"*=": updateBuiltin("*", 0),
+			"/=": updateBuiltin("/", 0),
 		})),
 		"String": (globalScope) => {
 			const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(literal([])), [
@@ -373,9 +376,9 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), undefinedValue, [value], scope)),
 			], {
 				"init": wrapped((scope, arg) => call(expr(identifier("String")), undefinedValue, [arg(0, "value")], scope)),
-				"+": binaryBuiltin("+"),
-				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), undefinedValue, [], scope), returnType(type)),
-				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), undefinedValue, [], scope), returnType(type)),
+				"+": binaryBuiltin("+", 0),
+				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), undefinedValue, [], scope), parseType("(String) -> String")),
+				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), undefinedValue, [], scope), parseType("(String) -> String")),
 			}, {
 				"UnicodeScalarView": () => UnicodeScalarView,
 				"UTF16View": () => UTF16View,
@@ -394,8 +397,8 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				functions: {
 					"none": (scope, arg, type) => expr(emptyOptional(optionalType)),
 					"some": wrapped((scope, arg, type) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
-					"==": binaryBuiltin("==="), // TODO: Fix to use proper comparator for internal type
-					"!=": binaryBuiltin("!=="), // TODO: Fix to use proper comparator for internal type
+					"==": binaryBuiltin("===", 0), // TODO: Fix to use proper comparator for internal type
+					"!=": binaryBuiltin("!==", 0), // TODO: Fix to use proper comparator for internal type
 					"flatMap": returnTodo,
 				},
 				possibleRepresentations: PossibleRepresentation.Array,
@@ -464,30 +467,30 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 					"count": returnLength,
 					"subscript": {
 						get(scope, arg) {
-							return arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "read");
+							return arrayBoundsCheck(arg(1, "array"), arg(2, "index"), scope, "read");
 						},
 						set(scope, arg) {
-							return expr(assignmentExpression("=", read(arrayBoundsCheck(arg(0, "array"), arg(1, "index"), scope, "write"), scope), read(copy(arg(2, "value"), valueType), scope)));
+							return expr(assignmentExpression("=", read(arrayBoundsCheck(arg(1, "array"), arg(2, "index"), scope, "write"), scope), read(copy(arg(3, "value"), valueType), scope)));
 						},
 					},
 					"append()": wrapped((scope, arg) => {
-						const pushExpression = expr(memberExpression(read(arg(0, "array"), scope), identifier("push")));
-						const newElement = copy(arg(1, "newElement"), valueType);
+						const pushExpression = expr(memberExpression(read(arg(2, "array"), scope), identifier("push")));
+						const newElement = copy(arg(2, "newElement"), valueType);
 						return call(pushExpression, undefinedValue, [newElement], scope);
 					}),
 					"insert(at:)": wrapped((scope, arg) => {
-						const array = arg(0, "array");
-						const newElement = copy(arg(1, "newElement"), valueType);
-						const i = arg(2, "i");
+						const array = arg(1, "array");
+						const newElement = copy(arg(2, "newElement"), valueType);
+						const i = arg(3, "i");
 						return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [array, newElement, i], scope);
 					}),
 					"remove(at:)": wrapped((scope, arg) => {
-						const array = arg(0, "array");
-						const i = arg(1, "i");
+						const array = arg(1, "array");
+						const i = arg(2, "i");
 						return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [array, i], scope);
 					}),
 					"removeFirst()": wrapped((scope, arg) => {
-						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("shift")), []), scope, "element");
+						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(1, "array"), scope), identifier("shift")), []), scope, "element");
 						return expr(conditionalExpression(
 							binaryExpression("!==", first, read(undefinedValue, scope)),
 							after,
@@ -495,7 +498,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 					"removeLast()": wrapped((scope, arg) => {
-						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("pop")), []), scope, "element");
+						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(1, "array"), scope), identifier("pop")), []), scope, "element");
 						return expr(conditionalExpression(
 							binaryExpression("!==", first, read(undefinedValue, scope)),
 							after,
@@ -503,7 +506,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 					"popLast()": wrapped((scope, arg) => {
-						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(0, "array"), scope), identifier("pop")), []), scope, "element");
+						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(1, "array"), scope), identifier("pop")), []), scope, "element");
 						return expr(conditionalExpression(
 							binaryExpression("!==", first, read(undefinedValue, scope)),
 							read(wrapInOptional(expr(after), optionalValueType, scope), scope),
@@ -511,12 +514,12 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 					"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
-						return expr(assignmentExpression("=", memberExpression(read(arg(0, "array"), scope), identifier("length")), literal(0)));
+						return expr(assignmentExpression("=", memberExpression(read(arg(1, "array"), scope), identifier("length")), literal(0)));
 					}),
 					"reserveCapacity()": wrapped((scope, arg) => undefinedValue),
 					"index(after:)": wrapped((scope, arg) => {
-						const array = arg(0, "array");
-						const i = arg(1, "i");
+						const array = arg(1, "array");
+						const i = arg(2, "i");
 						const [first, after] = reuseExpression(read(i, scope), scope, "index");
 						return expr(conditionalExpression(
 							binaryExpression("<", read(array, scope), first),
@@ -525,7 +528,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 					"index(before:)": wrapped((scope, arg) => {
-						const i = arg(1, "i");
+						const i = arg(2, "i");
 						const [first, after] = reuseExpression(read(i, scope), scope, "index");
 						return expr(conditionalExpression(
 							binaryExpression(">", first, literal(0)),
@@ -534,8 +537,8 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 					"distance(from:to:)": wrapped((scope, arg) => {
-						const start = arg(1, "start");
-						const end = arg(2, "end");
+						const start = arg(2, "start");
+						const end = arg(3, "end");
 						return expr(binaryExpression("-", read(end, scope), read(start, scope)));
 					}),
 				},
@@ -579,8 +582,8 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 					functions: {
 						subscript: {
 							get(scope, arg, type) {
-								const [dictFirst, dictAfter] = reuseExpression(read(arg(0, "dict"), scope), scope, "dict");
-								const [indexFirst, indexAfter] = reuseExpression(read(arg(1, "index"), scope), scope, "index");
+								const [dictFirst, dictAfter] = reuseExpression(read(arg(2, "dict"), scope), scope, "dict");
+								const [indexFirst, indexAfter] = reuseExpression(read(arg(3, "index"), scope), scope, "index");
 								return expr(conditionalExpression(
 									callExpression(
 										memberExpression(
@@ -597,9 +600,9 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 								));
 							},
 							set(scope, arg, type) {
-								const dict = read(arg(0, "dict"), scope);
-								const index = read(arg(1, "index"), scope);
-								const valueExpression = read(arg(2, "value"), scope);
+								const dict = read(arg(2, "dict"), scope);
+								const index = read(arg(3, "index"), scope);
+								const valueExpression = read(arg(4, "value"), scope);
 								if (valueType.kind === "optional") {
 									if (valueExpression.type === "ArrayExpression" && valueExpression.elements.length === 0) {
 										return expr(unaryExpression("delete", memberExpression(dict, index, true)));
@@ -816,7 +819,7 @@ export const functions: FunctionMap = {
 		return call(expr(identifier("Sequence$reduce")), undefinedValue, [arg(0)], scope);
 	}, returnType(type)),
 	"??": returnTodo,
-	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(0, "pattern"), scope), read(arg(1, "value"), scope))),
+	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(1, "pattern"), scope), read(arg(2, "value"), scope))),
 	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), undefinedValue, [arg(0, "items")], scope),
 	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
 		ifStatement(
