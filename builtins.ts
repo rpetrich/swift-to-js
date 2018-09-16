@@ -57,7 +57,7 @@ const voidType: Tuple = { kind: "tuple", types: [] };
 
 export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
 
-function buildIntegerType(min: number, max: number, checked: boolean): ReifiedType {
+function buildIntegerType(min: number, max: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
 	const fields: Field[] = [];
 	// function rangeChecker(value: Value, scope: Scope): Value {
 	// 	const expression = read(value, scope);
@@ -81,9 +81,9 @@ function buildIntegerType(min: number, max: number, checked: boolean): ReifiedTy
 		"+": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerHigh, range)),
 		"-": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerLow, range)),
 		"*": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerBoth, range)),
-		"&+": binaryBuiltin("+"),
-		"&-": binaryBuiltin("-"),
-		"&*": binaryBuiltin("*"),
+		"&+": binaryBuiltin("+", wrap),
+		"&-": binaryBuiltin("-", wrap),
+		"&*": binaryBuiltin("*", wrap),
 		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
 		"%": binaryBuiltin("%"),
 		"<": binaryBuiltin("<"),
@@ -255,6 +255,10 @@ function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function): Valu
 	}
 }
 
+function forwardToReturnType(scope: Scope, arg: ArgGetter, type: Function, name: string) {
+	return call(functionValue(name, reifyType(returnType(returnFunctionType(type)), scope), type), undefinedValue, [arg(0, "type")], scope);
+}
+
 function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
 	return {
 		"Bool": cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
@@ -266,33 +270,40 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
 		})),
-		"SignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
+		"SignedInteger": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init": wrapped(integerThrowingInit),
 			"init(exactly:)": wrapped(integerOptionalInit),
 			"==": binaryBuiltin("==="),
 			"!=": binaryBuiltin("!=="),
-		})),
+			"&+": forwardToReturnType,
+			"&-": forwardToReturnType,
+		}),
 		"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init": wrapped(integerThrowingInit),
 			"init(exactly:)": wrapped(integerOptionalInit),
 			"==": binaryBuiltin("==="),
 			"!=": binaryBuiltin("!=="),
+			"&+": forwardToReturnType,
+			"&-": forwardToReturnType,
 		})),
 		"FixedWidthInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init(clamping:)": wrapped(integerClampingInit),
 			"==": binaryBuiltin("==="),
 			"!=": binaryBuiltin("!=="),
+			"&+": forwardToReturnType,
+			"&-": forwardToReturnType,
+			"&*": forwardToReturnType,
 		})),
-		"UInt": cached(() => buildIntegerType(0, 4294967295, checkedIntegers)),
-		"Int": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers)),
-		"UInt8": cached(() => buildIntegerType(0, 255, checkedIntegers)),
-		"Int8": cached(() => buildIntegerType(-128, 127, checkedIntegers)),
-		"UInt16": cached(() => buildIntegerType(0, 65535, checkedIntegers)),
-		"Int16": cached(() => buildIntegerType(-32768, 32767, checkedIntegers)),
-		"UInt32": cached(() => buildIntegerType(0, 4294967295, checkedIntegers)),
-		"Int32": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers)),
-		"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER, checkedIntegers)), // 52-bit integers
-		"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers)), // 53-bit integers
+		"UInt": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
+		"Int": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
+		"UInt8": cached(() => buildIntegerType(0, 255, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFF))))),
+		"Int8": cached(() => buildIntegerType(-128, 127, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(24)), literal(24))))),
+		"UInt16": cached(() => buildIntegerType(0, 65535, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFFFF))))),
+		"Int16": cached(() => buildIntegerType(-32768, 32767, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(16)), literal(16))))),
+		"UInt32": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
+		"Int32": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
+		"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
+		"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
 		"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"==": binaryBuiltin("==="),
 			"!=": binaryBuiltin("!=="),
