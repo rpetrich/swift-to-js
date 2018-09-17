@@ -5,7 +5,7 @@ import { FunctionBuilder, functionize, insertFunction, noinline, returnType, wra
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
-import { concat, expectLength, lookupForMap } from "./utils";
+import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
@@ -936,7 +936,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 					if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
 						return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), brace)])), brace);
 					}
-					addVariable(childScope, selfMapping, variableDeclaration("let", [variableDeclarator(selfMapping, read(defaultInstantiation, scope))]));
+					addVariable(childScope, selfMapping, variableDeclaration("const", [variableDeclarator(selfMapping, read(defaultInstantiation, scope))]));
 				}
 				return statements(concat(parameterStatements, emitScope(childScope, translateAllStatements(body, childScope, functions))), brace);
 			} else {
@@ -1343,55 +1343,85 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "class_decl": {
 			expectLength(term.args, 1);
 			const layout: Field[] = [];
-			const methods: FunctionMap = {};
-			scope.types[term.args[0]] = () => newClass(layout, methods);
+			const methods: FunctionMap = Object.create(null);
+			const classIdentifier = mangleName(term.args[0]);
+			const className = term.args[0];
+			scope.types[className] = () => newClass(layout, methods, Object.create(null), (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
+				const self = uniqueIdentifier(innerScope, camelCase(className));
+				addVariable(innerScope, self, undefined);
+				const bodyStatements: Statement[] = [variableDeclaration("const", [variableDeclarator(self, newExpression(classIdentifier, []))])];
+				for (const field of layout) {
+					if (field.stored) {
+						const fieldExpression = consume(field.name) || read(field.type.defaultValue(innerScope, () => undefined), innerScope);
+						bodyStatements.push(expressionStatement(assignmentExpression("=", memberExpression(self, identifier(field.name)), fieldExpression)));
+					}
+				}
+				bodyStatements.push(returnStatement(self));
+				return statements(bodyStatements);
+			});
 			const bodyContents: (ClassProperty | ClassMethod)[] = [];
 			for (const child of term.children) {
-				if (child.name === "var_decl") {
-					expectLength(child.args, 1);
-					const propertyName = child.args[0];
-					if (requiresGetter(child)) {
-						// TODO: Implement getters/setters
-						//layout.push(field(child.args[0], reifyType(getType(child), scope)));
-						expectLength(child.children, 1);
-						const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-						const flags = flagsForDeclarationTerm(child);
-						const type = getType(declaration);
-						if (flags & DeclarationFlags.Export) {
-							const fn = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, thisExpression());
-							const [args, statements] = functionize(scope, type, (scope) => fn(scope, () => expr(thisExpression())));
-							bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(statements)));
-							// Default implementation will call getter/setter
-							layout.push(field(child.args[0], reifyType(getType(child), scope)));
-						} else {
-							// layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
-							// 	return callable(fn, type, declaration);
-							// }));
-							layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
-								let selfExpression = read(value, innerScope);
-								if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
-									return translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, selfExpression)(scope, noArguments);
-								} else {
-									const self = uniqueIdentifier(innerScope, "self");
-									addVariable(innerScope, self, undefined);
-									const head = variableDeclaration("const", [variableDeclarator(self, selfExpression)]);
-									const result = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, self)(scope, noArguments);
-									if (result.kind === "statements") {
-										return statements(concat([head], result.statements), result.location);
+				switch (child.name) {
+					case "var_decl": {
+						expectLength(child.args, 1);
+						const propertyName = child.args[0];
+						if (requiresGetter(child)) {
+							// TODO: Implement getters/setters
+							//layout.push(field(child.args[0], reifyType(getType(child), scope)));
+							expectLength(child.children, 1);
+							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
+							const flags = flagsForDeclarationTerm(child);
+							const type = getType(declaration);
+							if (flags & DeclarationFlags.Export) {
+								const fn = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, thisExpression());
+								const [args, statements] = functionize(scope, type, (scope) => fn(scope, () => expr(thisExpression())));
+								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(statements)));
+								// Default implementation will call getter/setter
+								layout.push(field(child.args[0], reifyType(getType(child), scope)));
+							} else {
+								// layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
+								// 	return callable(fn, type, declaration);
+								// }));
+								layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
+									let selfExpression = read(value, innerScope);
+									if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
+										return translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, selfExpression)(scope, noArguments);
 									} else {
-										return statements([head, returnStatement(read(result, innerScope))]);
+										const self = uniqueIdentifier(innerScope, "self");
+										addVariable(innerScope, self, undefined);
+										const head = variableDeclaration("const", [variableDeclarator(self, selfExpression)]);
+										const result = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, self)(scope, noArguments);
+										if (result.kind === "statements") {
+											return statements(concat([head], result.statements), result.location);
+										} else {
+											return statements([head, returnStatement(read(result, innerScope))]);
+										}
 									}
-								}
-							}));
+								}));
+							}
+						} else {
+							layout.push(field(child.args[0], reifyType(getType(child), scope)));
 						}
-					} else {
-						layout.push(field(child.args[0], reifyType(getType(child), scope)));
+						break;
+					}
+					case "constructor_decl":
+					case "func_decl": {
+						const isConstructor = child.name === "constructor_decl";
+						expectLength(child.args, 1, 2);
+						const name = child.args[0];
+						const parameters = termsWithName(child.children, "parameter");
+						const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(child.children, "parameter_list").map((paramList) => paramList.children));
+						if (parameterLists.length === 0) {
+							throw new Error(`Expected a parameter list for a function declaration`);
+						}
+						const fn = translateFunctionTerm(name, child, parameterLists, isConstructor, scope, functions);
+						methods[name] = fn;
+						break;
 					}
 				}
 			}
-			// TODO: Fill in body
 			const flags = flagsForDeclarationTerm(term);
-			const declaration = classDeclaration(mangleName(term.args[0]), undefined, classBody(bodyContents), []);
+			const declaration = classDeclaration(classIdentifier, undefined, classBody(bodyContents), []);
 			return [flags & DeclarationFlags.Export ? exportNamedDeclaration(declaration, []) : declaration];
 		}
 		default: {

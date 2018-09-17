@@ -156,14 +156,16 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 	}
 }
 
-export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+function cannotDefaultInstantiateClass(): never {
+	throw new TypeError(`Cannot default instantiate a class`);
+}
+
+export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
 	return {
 		fields,
 		functions: lookupForMap(functions),
 		possibleRepresentations: PossibleRepresentation.Object,
-		defaultValue() {
-			throw new Error(`Cannot default instantiate a class!`);
-		},
+		defaultValue,
 		innerTypes,
 	};
 }

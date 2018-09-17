@@ -33,3 +33,11 @@ export function cached<T>(fn: () => T): () => T {
 export function lookupForMap<V>(map: { [key: string]: V }): (key: string) => V | undefined {
 	return (key: string) => Object.hasOwnProperty.call(map, key) ? map[key] : undefined;
 }
+
+function toLowerCase(text: string): string {
+	return text.toLowerCase();
+}
+
+export function camelCase(text: string): string {
+	return text.replace(/^[^a-z]/, toLowerCase);
+}
