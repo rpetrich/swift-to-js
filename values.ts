@@ -2,10 +2,10 @@ import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpressio
 
 import { Term } from "./ast";
 import { functionize, insertFunction } from "./functions";
-import { FunctionMap, ReifiedType, reifyType } from "./reified";
+import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
-import { concat, expectLength } from "./utils";
+import { concat, expectLength, lookupForMap } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
 
@@ -199,11 +199,27 @@ export function typeValue(type: Type, location?: Term | Location): TypeValue {
 	return { kind: "type", type, location: readLocation(location) };
 }
 
-export function typeFromValue(value: Value): Type {
-	if (value.kind !== "type") {
-		throw new Error(`Expected to receive a type argument to the outer layer of a wrapped function, instead got a ${value.kind}`);
+const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
+
+export function typeFromValue(value: Value, scope: Scope): ReifiedType {
+	switch (value.kind) {
+		case "type":
+			return reifyType(value.type, scope);
+		default:
+			const expression = read(value, scope);
+			return {
+				fields: [],
+				functions: (name: string) => {
+					const result = expr(isValidIdentifier.test(name) ? memberExpression(expression, identifier(name)) : memberExpression(expression, literal(name), true));
+					return () => result;
+				},
+				innerTypes: {},
+				possibleRepresentations: PossibleRepresentation.Object,
+				defaultValue() {
+					return undefinedValue;
+				},
+			};
 	}
-	return value.type;
 }
 
 
@@ -314,15 +330,18 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(read(value.value, scope), value.location);
 		case "function":
 			const bind = value.substitutions.length ? (expression: Expression) => annotate(callExpression(memberExpression(expression, identifier("bind")), concat([nullLiteral()], value.substitutions.map((substitution) => read(substitution, scope)))), value.location) : (expression: Expression) => expression;
-			let functions: FunctionMap;
+			let builder;
 			if (typeof value.parentType === "undefined") {
-				functions = scope.functions;
+				if (Object.hasOwnProperty.call(scope.functions, value.name)) {
+					builder = scope.functions[value.name];
+				}
 			} else if (value.parentType.kind === "type") {
-				functions = reifyType(value.parentType.type, scope).functions;
-			} else {
-				return bind(annotate(memberExpression(read(value.parentType, scope), literal(value.name), true), value.location));
+				builder = reifyType(value.parentType.type, scope).functions(value.name);
 			}
-			return bind(annotate(insertFunction(value.name, scope, value.type, scope.functions[value.name]), value.location));
+			if (typeof builder === "undefined") {
+				throw new Error(`Could not find function for ${value.name}`);
+			}
+			return bind(annotate(insertFunction(value.name, scope, value.type, builder), value.location));
 		case "tuple":
 			switch (value.values.length) {
 				case 0:
@@ -384,11 +403,11 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 			} else {
 				targetFunctionType = target.type;
 			}
-			let functions: FunctionMap;
+			let lookup;
 			if (typeof target.parentType === "undefined") {
-				functions = scope.functions;
+				lookup = lookupForMap(scope.functions);
 			} else if (target.parentType.kind === "type") {
-				functions = reifyType(target.parentType.type, scope).functions;
+				lookup = reifyType(target.parentType.type, scope).functions;
 			} else {
 				if (type !== "call") {
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
@@ -396,8 +415,8 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 				const func = memberExpression(read(target.parentType, scope), literal(target.name), true);
 				return call(expr(func, target.location), thisArgument, args, scope, location);
 			}
-			if (Object.hasOwnProperty.call(functions, target.name)) {
-				const fn = functions[target.name];
+			const fn = lookup(target.name);
+			if (typeof fn !== "undefined") {
 				switch (type) {
 					case "call":
 						if (typeof fn !== "function") {
@@ -411,10 +430,7 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 						return annotateValue(fn[type](scope, getter, targetFunctionType, target.name), location);
 				}
 			} else {
-				if (type !== "call") {
-					throw new Error(`Unable to call a ${type}ter on a function!`);
-				}
-				return call(expr(insertFunction(target.name, scope, targetFunctionType, functions[target.name]), location), thisArgument, args, scope, location);
+				throw new Error(`Could not find function for ${target.name}`);
 			}
 		case "callable":
 			if (type !== "call") {

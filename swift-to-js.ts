@@ -5,7 +5,7 @@ import { FunctionBuilder, insertFunction, noinline, returnType, wrapped } from "
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
-import { concat, expectLength } from "./utils";
+import { concat, expectLength, lookupForMap } from "./utils";
 import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
@@ -127,7 +127,7 @@ function getType(term: Term) {
 	try {
 		return parseType(getProperty(term, "type", isString));
 	} catch (e) {
-		console.log(term);
+		console.error(term);
 		throw e;
 	}
 }
@@ -427,7 +427,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 			return emptyPattern;
 		}
 		default: {
-			console.log(term);
+			console.error(term);
 			return {
 				prefix: emptyStatements,
 				test: expr(identifier("unknown_pattern_type$" + term.name), term),
@@ -815,7 +815,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			return bindingContext(wrappedValue, getType(expressionTerm));
 		}
 		default: {
-			console.log(term);
+			console.error(term);
 			return variable(identifier("unknown_term_type$" + term.name));
 		}
 	}
@@ -884,14 +884,7 @@ function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): Ty
 		} else {
 			throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.kind}`);
 		}
-		result[name] = (scope: Scope) => {
-			try {
-				// TODO: Support runtime reified types, for now just catch
-				return reifyType(typeFromValue(arg(i, name)), scope);
-			} catch (e) {
-				return reifyType("Int", scope);
-			}
-		};
+		result[name] = (scope: Scope) => typeFromValue(arg(i, name), scope);
 	}
 	return result;
 }
@@ -1193,7 +1186,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			// Reify self
 			const reifiedSelfType: ReifiedType = {
 				fields: layout,
-				functions: methods,
+				functions: lookupForMap(methods),
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
 				defaultValue() {
 					throw new Error(`Unable to default instantiate enums`);

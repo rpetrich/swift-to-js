@@ -2,7 +2,7 @@ import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Tuple, Type } from "./types";
-import { cached, expectLength } from "./utils";
+import { cached, expectLength, lookupForMap } from "./utils";
 import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
@@ -16,7 +16,7 @@ function returnThis(scope: Scope, arg: ArgGetter): Value {
 }
 
 function returnTodo(scope: Scope, arg: ArgGetter, type: Type, name: string): Value {
-	console.log(name);
+	console.error(name);
 	return call(expr(mangleName("todo_missing_builtin$" + name)), undefinedValue, [], scope);
 }
 
@@ -98,6 +98,7 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 		"+=": updateBuiltin("+", 0),
 		"-=": updateBuiltin("-", 0),
 		"*=": updateBuiltin("*", 0),
+		"SignedNumeric.-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
 	}, {
 		Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
 			field("min", reifiedType, () => expr(literal(min))),
@@ -109,8 +110,8 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 	return reifiedType;
 }
 
-function getMetaFieldValue(type: Type, fieldName: string, scope: Scope) {
-	const reified = reifyType("Type", scope, [], [reifyType(type, scope).innerTypes]);
+function getMetaFieldValue(type: ReifiedType, fieldName: string, scope: Scope) {
+	const reified = reifyType("Type", scope, [], [type.innerTypes]);
 	if (typeof reified === "undefined") {
 		throw new Error(`Expected to have a source type!`);
 	}
@@ -119,7 +120,7 @@ function getMetaFieldValue(type: Type, fieldName: string, scope: Scope) {
 			return getField(expr(literal(0)), field, scope);
 		}
 	}
-	throw new TypeError(`Could not find meta field named ${fieldName} in ${stringifyType(type)}`);
+	throw new TypeError(`Could not find field named ${fieldName} in type's metaclass`);
 }
 
 interface NumericRange {
@@ -127,10 +128,7 @@ interface NumericRange {
 	max: Expression;
 }
 
-function rangeForNumericType(type: Type, scope: Scope): NumericRange {
-	if (type.kind === "optional") {
-		type = type.type;
-	}
+function rangeForNumericType(type: ReifiedType, scope: Scope): NumericRange {
 	const min = read(getMetaFieldValue(type, "min", scope), scope);
 	const max = read(getMetaFieldValue(type, "max", scope), scope);
 	return {
@@ -184,14 +182,19 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 	));
 }
 
-function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
+function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
 	expectLength(type.arguments.types, 1);
-	return integerRangeCheck(scope, arg(0, "value"), rangeForNumericType(type.arguments.types[0], scope), rangeForNumericType(typeArgument, scope));
+	return integerRangeCheck(
+		scope,
+		arg(0, "value"),
+		rangeForNumericType(reifyType(type.arguments.types[0], scope), scope),
+		rangeForNumericType(typeArgument, scope),
+	);
 }
 
-function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
+function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
 	expectLength(type.arguments.types, 1);
-	const source = rangeForNumericType(type.arguments.types[0], scope);
+	const source = rangeForNumericType(reifyType(type.arguments.types[0], scope), scope);
 	const dest = rangeForNumericType(typeArgument, scope);
 	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
 	const requiresLessThanCheck = possiblyLessThan(source, dest);
@@ -220,9 +223,9 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeA
 	));
 }
 
-function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type): Value {
+function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
 	expectLength(type.arguments.types, 1);
-	const source = rangeForNumericType(type.arguments.types[0], scope);
+	const source = rangeForNumericType(reifyType(type.arguments.types[0], scope), scope);
 	const dest = rangeForNumericType(typeArgument, scope);
 	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
 	const requiresLessThanCheck = possiblyLessThan(source, dest);
@@ -271,7 +274,10 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		"Bool": BoolType,
 		"Int1": BoolType,
 		"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
+			"-": (scope: Scope, arg: ArgGetter, type: Function) => {
+				const typeArg = arg(0, "type");
+				return call(functionValue("SignedNumeric.-", typeArg, type), undefinedValue, [typeArg], scope);
+			},
 		})),
 		"SignedInteger": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
 			"init": wrapped(integerThrowingInit),
@@ -394,13 +400,13 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			const optionalType: Type = { kind: "optional", type: wrappedType };
 			return {
 				fields: [],
-				functions: {
-					"none": (scope, arg, type) => expr(emptyOptional(optionalType)),
-					"some": wrapped((scope, arg, type) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
+				functions: lookupForMap({
+					"none": () => expr(emptyOptional(optionalType)),
+					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
 					"==": binaryBuiltin("===", 0), // TODO: Fix to use proper comparator for internal type
 					"!=": binaryBuiltin("!==", 0), // TODO: Fix to use proper comparator for internal type
 					"flatMap": returnTodo,
-				},
+				} as FunctionMap),
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(emptyOptional(wrappedType));
@@ -462,7 +468,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						));
 					}),
 				],
-				functions: {
+				functions: lookupForMap({
 					"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), undefinedValue, [arg(0, "iterable")], scope)),
 					"count": returnLength,
 					"subscript": {
@@ -541,7 +547,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						const end = arg(3, "end");
 						return expr(binaryExpression("-", read(end, scope), read(start, scope)));
 					}),
-				},
+				} as FunctionMap),
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(literal([]));
@@ -579,7 +585,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 							return expr(callExpression(memberExpression(identifier("Object"), identifier("keys")), [read(value, scope)]));
 						}),
 					],
-					functions: {
+					functions: lookupForMap({
 						subscript: {
 							get(scope, arg, type) {
 								const [dictFirst, dictAfter] = reuseExpression(read(arg(2, "dict"), scope), scope, "dict");
@@ -623,7 +629,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 								));
 							},
 						},
-					},
+					} as FunctionMap),
 					possibleRepresentations: PossibleRepresentation.Object,
 					defaultValue() {
 						return expr(literal({}));

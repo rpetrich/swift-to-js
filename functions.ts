@@ -1,4 +1,5 @@
 import { Term } from "./ast";
+import { ReifiedType, reifyType } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
@@ -83,9 +84,9 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 	};
 }
 
-export function wrapped(fn: (scope: Scope, arg: ArgGetter, type: Function, typeArgument: Type) => Value): FunctionBuilder {
+export function wrapped(fn: (scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType) => Value): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, type: Type, name: string): Value => {
-		const typeArgument = typeFromValue(arg(0, "type"));
+		const typeArgument = typeFromValue(arg(0, "type"), scope);
 		const innerType = returnFunctionType(type);
 		return callable((innerScope, innerArg) => fn(innerScope, innerArg, innerType, typeArgument), innerType);
 	};

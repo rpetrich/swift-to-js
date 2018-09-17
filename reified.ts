@@ -1,7 +1,7 @@
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
-import { concat } from "./utils";
+import { concat, lookupForMap } from "./utils";
 import { copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 
 import { arrayExpression, assignmentExpression, Expression, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
@@ -21,7 +21,7 @@ export enum PossibleRepresentation {
 
 export interface ReifiedType {
 	fields: ReadonlyArray<Field>;
-	functions: FunctionMap;
+	functions: (name: string) => FunctionBuilder | GetterSetterBuilder | undefined;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	cases?: ReadonlyArray<EnumCase>;
@@ -81,7 +81,7 @@ const noInnerTypes: Readonly<TypeMap> = {};
 export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
-		functions,
+		functions: lookupForMap(functions),
 		possibleRepresentations,
 		defaultValue() {
 			return defaultValue;
@@ -93,7 +93,7 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		fields,
-		functions,
+		functions: lookupForMap(functions),
 		possibleRepresentations: type.possibleRepresentations,
 		defaultValue: type.defaultValue,
 		copy: type.copy,
@@ -108,7 +108,7 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 		case 0:
 			return {
 				fields,
-				functions,
+				functions: lookupForMap(functions),
 				possibleRepresentations: PossibleRepresentation.Undefined,
 				defaultValue() {
 					return undefinedValue;
@@ -121,7 +121,7 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 		default:
 			return {
 				fields,
-				functions,
+				functions: lookupForMap(functions),
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue(scope, consume) {
 					return expr(objectExpression(onlyStored.map((field) => {
@@ -159,7 +159,7 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
-		functions,
+		functions: lookupForMap(functions),
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue() {
 			throw new Error(`Cannot default instantiate a class!`);
@@ -271,7 +271,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 				default:
 					return {
 						fields: [],
-						functions: noFunctions,
+						functions: lookupForMap(noFunctions),
 						possibleRepresentations: PossibleRepresentation.Array,
 						defaultValue(innerScope) {
 							return expr(arrayExpression(reifiedTypes.map((inner) => read(inner.defaultValue(innerScope, alwaysUndefined), innerScope))));
