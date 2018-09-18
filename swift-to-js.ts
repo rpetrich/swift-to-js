@@ -1322,7 +1322,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			if (term.children.length === 2) {
 				const valueChild = term.children[1];
 				// const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
-				const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
+				const value = translateTermToValue(valueChild, scope);
 				let flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
 				const pattern = translatePattern(term.children[0], value, scope, flags);
 				if (typeof pattern.next !== "undefined") {

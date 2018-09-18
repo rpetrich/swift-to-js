@@ -2,9 +2,9 @@ import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
+import { call, copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 
-import { arrayExpression, assignmentExpression, Expression, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
+import { arrayExpression, assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
 export enum PossibleRepresentation {
 	None,
@@ -278,13 +278,16 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 						defaultValue(innerScope) {
 							return expr(arrayExpression(reifiedTypes.map((inner) => read(inner.defaultValue(innerScope, alwaysUndefined), innerScope))));
 						},
-						copy: reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined") ? (value, innerScope) => {
+						copy(value, innerScope) {
 							if (value.kind === "tuple") {
 								return value;
 							}
 							const expression = read(value, innerScope);
 							if (expressionSkipsCopy(expression)) {
 								return expr(expression);
+							}
+							if (!reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined")) {
+								return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], scope);
 							}
 							let usedFirst = false;
 							const [first, after] = reuseExpression(expression, innerScope, "copySource");
@@ -293,7 +296,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 								const field = memberExpression(identifier, literal(index), true);
 								return elementType.copy ? read(elementType.copy(expr(field), innerScope), innerScope) : field;
 							})));
-						} : undefined,
+						},
 						innerTypes: noInnerTypes,
 					};
 			}

@@ -22,6 +22,6 @@ export function sumSizes$sizes$(sizes) {
   }();
 }
 export function copySizes$sizes$(sizes) {
-  return sizes;
+  return sizes.slice();
 }
 export class Size {}
