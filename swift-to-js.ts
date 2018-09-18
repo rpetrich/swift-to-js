@@ -934,7 +934,8 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 						return undefined;
 					});
 					if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-						return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), brace)])), brace);
+						const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
+						return statements(concat(parameterStatements, emitScope(childScope, defaultStatements)), brace);
 					}
 					addVariable(childScope, selfMapping, variableDeclaration("const", [variableDeclarator(selfMapping, read(defaultInstantiation, scope))]));
 				}
