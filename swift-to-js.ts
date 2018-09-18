@@ -103,14 +103,14 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 		if (declaration.local === "$match") {
 			return variable(identifier("$match"), term);
 		}
-		return variable(lookup(declaration.local, scope), term);
+		return expr(lookup(declaration.local, scope), term);
 	}
 	if (typeof declaration.member === "string") {
 		let parentType: Value | undefined;
 		if (typeof declaration.type === "string") {
 			parentType = typeValue(constructTypeFromNames(declaration.type, declaration.substitutions));
 		} else if (!Object.hasOwnProperty.call(scope.functions, declaration.member)) {
-			return variable(lookup(declaration.member, scope), term);
+			return expr(lookup(declaration.member, scope), term);
 		}
 		let substitutionValues: Value[];
 		if (typeof declaration.substitutions !== "undefined") {
@@ -846,6 +846,11 @@ function applyParameterMappings(typeParameterCount: number, parameterTerms: Term
 		const expression = read(arg(index + typeParameterCount, parameterName), scope);
 		if (isIdentifier(expression) || expression.type === "ThisExpression") {
 			childScope.mapping[parameterName] = expression;
+			return statements;
+		}
+		const literalValue = valueOfExpression(expression);
+		if (typeof literalValue === "boolean" || typeof literalValue === "number" || typeof literalValue === "string" || literalValue === null) {
+			childScope.mapping[parameterName] = literal(literalValue) as any;
 			return statements;
 		}
 		const temporary = annotate(uniqueIdentifier(scope, parameterName), expression.loc);

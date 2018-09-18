@@ -1,4 +1,4 @@
-import { Declaration, exportNamedDeclaration, Expression, identifier, Identifier, Statement, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, NullLiteral, NumericLiteral, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { ReifiedType, TypeMap } from "./reified";
@@ -13,13 +13,15 @@ export enum DeclarationFlags {
 	Const = 1 << 1,
 }
 
+type MappedIdentifier = ThisExpression | Identifier | BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral;
+
 export interface Scope {
 	name: string;
 	declarations: { [name: string]: { flags: DeclarationFlags; declaration?: Declaration; } };
 	types: TypeMap;
 	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
-	mapping: { [name: string]: ThisExpression | Identifier };
+	mapping: { [name: string]: MappedIdentifier };
 	parent: Scope | undefined;
 }
 
@@ -114,7 +116,7 @@ export function mangleName(name: string) {
 	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|\(\)|\W)/g, mangleSymbol));
 }
 
-export function lookup(name: string, scope: Scope): Identifier | ThisExpression {
+export function lookup(name: string, scope: Scope): MappedIdentifier {
 	let targetScope: Scope | undefined = scope;
 	do {
 		if (Object.hasOwnProperty.call(targetScope.mapping, name)) {
