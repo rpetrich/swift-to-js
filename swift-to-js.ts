@@ -1359,7 +1359,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				bodyStatements.push(returnStatement(self));
 				return statements(bodyStatements);
 			});
-			const bodyContents: (ClassProperty | ClassMethod)[] = [];
+			const bodyContents: Array<ClassProperty | ClassMethod> = [];
 			for (const child of term.children) {
 				switch (child.name) {
 					case "var_decl": {
@@ -1367,14 +1367,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						const propertyName = child.args[0];
 						if (requiresGetter(child)) {
 							// TODO: Implement getters/setters
-							//layout.push(field(child.args[0], reifyType(getType(child), scope)));
 							expectLength(child.children, 1);
 							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							const flags = flagsForDeclarationTerm(child);
 							const type = getType(declaration);
 							if (flags & DeclarationFlags.Export) {
 								const fn = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, thisExpression());
-								const [args, statements] = functionize(scope, type, (scope) => fn(scope, () => expr(thisExpression())));
+								const [args, statements] = functionize(scope, type, (innerScope) => fn(innerScope, () => expr(thisExpression())));
 								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(statements)));
 								// Default implementation will call getter/setter
 								layout.push(field(child.args[0], reifyType(getType(child), scope)));
@@ -1418,6 +1417,8 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						methods[name] = fn;
 						break;
 					}
+					default:
+						break;
 				}
 			}
 			const flags = flagsForDeclarationTerm(term);
