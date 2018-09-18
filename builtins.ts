@@ -3,9 +3,9 @@ import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -698,7 +698,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		}),
 		"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([]))),
 		"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [], {
-			"...": wrapped((scope, arg) => expr(arrayExpression([read(arg(0, "low"), scope), read(arg(1, "high"), scope)]))),
+			"...": wrapped((scope, arg) => array([arg(0, "low"), arg(1, "high")], scope)),
 		}),
 		"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [
 		], {
@@ -714,7 +714,7 @@ export function emptyOptional(type: Type) {
 }
 
 export function wrapInOptional(value: Value, type: Type, scope: Scope) {
-	return isNestedOptional(type) ? expr(arrayExpression([read(value, scope)])) : value;
+	return isNestedOptional(type) ? array([value], scope) : value;
 }
 
 export function unwrapOptional(value: Value, type: Type, scope: Scope) {

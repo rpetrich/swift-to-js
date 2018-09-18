@@ -2,9 +2,9 @@ import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { mangleName, Scope } from "./scope";
 import { parse as parseType, Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { call, copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
+import { array, call, copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 
-import { arrayExpression, assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
+import { assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
 export enum PossibleRepresentation {
 	None,
@@ -276,7 +276,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 						functions: lookupForMap(noFunctions),
 						possibleRepresentations: PossibleRepresentation.Array,
 						defaultValue(innerScope) {
-							return expr(arrayExpression(reifiedTypes.map((inner) => read(inner.defaultValue(innerScope, alwaysUndefined), innerScope))));
+							return array(reifiedTypes.map((inner) => inner.defaultValue(innerScope, alwaysUndefined)), innerScope);
 						},
 						copy(value, innerScope) {
 							if (value.kind === "tuple") {
@@ -291,11 +291,11 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 							}
 							let usedFirst = false;
 							const [first, after] = reuseExpression(expression, innerScope, "copySource");
-							return expr(arrayExpression(reifiedTypes.map((elementType, index) => {
+							return array(reifiedTypes.map((elementType, index) => {
 								const identifier = usedFirst ? after : (usedFirst = true, first);
 								const field = memberExpression(identifier, literal(index), true);
-								return elementType.copy ? read(elementType.copy(expr(field), innerScope), innerScope) : field;
-							})));
+								return elementType.copy ? elementType.copy(expr(field), innerScope) : expr(field);
+							}), scope);
 						},
 						innerTypes: noInnerTypes,
 					};

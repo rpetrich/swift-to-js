@@ -299,6 +299,41 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 	throw new TypeError(`Unable to set a ${dest.kind} value!`);
 }
 
+export function array(values: Value[], scope: Scope, location?: Location | Term) {
+	let prefixStatements: Statement[] = [];
+	const elements: Expression[] = [];
+	for (const value of values.slice().reverse()) {
+		if (value.kind === "statements" && value.statements[value.statements.length - 1].type === "ReturnStatement") {
+			const argument = (value.statements[value.statements.length - 1] as ReturnType<typeof returnStatement>).argument;
+			const newStatements = value.statements.slice(0, value.statements.length - 1);
+			if (argument.type === "Identifier") {
+				elements.unshift(argument);
+			} else {
+				const temp = uniqueIdentifier(scope, "element");
+				addVariable(scope, temp, undefined);
+				elements.unshift(temp);
+				newStatements.push(variableDeclaration("const", [variableDeclarator(temp, argument)]));
+			}
+			prefixStatements = concat(newStatements, prefixStatements);
+		} else {
+			const expression = read(value, scope);
+			if (prefixStatements.length !== 0 && !isPure(expression)) {
+				const temp = uniqueIdentifier(scope, "element");
+				addVariable(scope, temp, undefined);
+				elements.unshift(temp);
+				prefixStatements.push(variableDeclaration("const", [variableDeclarator(temp, expression)]));
+			} else {
+				elements.unshift(expression);
+			}
+		}
+	}
+	if (prefixStatements.length === 0) {
+		return expr(arrayExpression(elements));
+	}
+	prefixStatements.push(returnStatement(arrayExpression(elements)));
+	return statements(prefixStatements);
+}
+
 
 export function annotate<T extends Node>(node: T, location?: Location | Term): T {
 	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(node, "loc")) {
@@ -349,7 +384,7 @@ export function read(value: Value, scope: Scope): Expression {
 				case 1:
 					return annotate(read(value.values[0], scope), value.location);
 				default:
-					return annotate(arrayExpression(value.values.map((child) => read(child, scope))), value.location);
+					return annotate(read(array(value.values, scope), scope), value.location);
 			}
 		case "expression":
 			return annotate(value.expression, value.location);

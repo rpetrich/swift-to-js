@@ -6,7 +6,7 @@ import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, Fu
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, parse as parseType, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, ArgGetter, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -625,7 +625,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			if (type.kind !== "array") {
 				throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
 			}
-			return expr(arrayExpression(term.children.filter(noSemanticExpressions).map((child) => read(translateTermToValue(child, scope, bindingContext), scope))), term);
+			return array(term.children.filter(noSemanticExpressions).map((child) => translateTermToValue(child, scope, bindingContext)), scope);
 		}
 		case "dictionary_expr": {
 			const type = getType(term);
@@ -1232,8 +1232,8 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const type = returnType(getType(elementDecl));
 				if (type.kind === "function") {
 					methods[name] = wrapped((innerScope, arg) => {
-						const args = type.arguments.types.map((argType, argIndex) => read(copy(arg(argIndex), argType), innerScope));
-						return expr(arrayExpression(concat([literal(index)], args)));
+						const args = type.arguments.types.map((argType, argIndex) => copy(arg(argIndex), argType));
+						return array(concat([expr(literal(index)) as Value], args), scope);
 					});
 					cases.push({
 						name,
