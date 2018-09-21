@@ -2,9 +2,10 @@ import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpressio
 
 import { Term } from "./ast";
 import { functionize, insertFunction } from "./functions";
+import { parseType } from "./parse";
 import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
 import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
-import { Function, parse as parseType, Type } from "./types";
+import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
 export type ArgGetter = (index: number | "this", desiredName?: string) => Value;

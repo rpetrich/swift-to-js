@@ -1,10 +1,11 @@
-import { parse as parseAST, Property, Term } from "./ast";
+import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
-import { Declaration, parse as parseDeclaration } from "./declaration";
+import { Declaration } from "./declaration";
 import { FunctionBuilder, functionize, insertFunction, noinline, returnType, wrapped } from "./functions";
+import { parseAST, parseDeclaration, parseType } from "./parse";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
-import { Function, parse as parseType, Type } from "./types";
+import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 

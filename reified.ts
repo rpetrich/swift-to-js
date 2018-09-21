@@ -1,6 +1,7 @@
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
+import { parseType } from "./parse";
 import { mangleName, Scope } from "./scope";
-import { parse as parseType, Type } from "./types";
+import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
 import { array, call, copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 

@@ -1,7 +1,8 @@
 import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
+import { parseType } from "./parse";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
-import { Function, parse as parseType, Tuple, Type } from "./types";
+import { Function, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
 import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
