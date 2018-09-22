@@ -790,7 +790,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			field("hashValue", reifyType("Int", globalScope), (value) => value),
 		], {
 		}),
-		"ClosedRange": () => primitive(PossibleRepresentation.Array, expr(arrayExpression([literal(0), literal(0)])), [], {
+		"ClosedRange": () => primitive(PossibleRepresentation.Array, tuple([expr(literal(0)), expr(literal(0))]), [], {
 			map: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
