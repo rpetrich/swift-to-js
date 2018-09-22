@@ -20,11 +20,10 @@ function getArgumentPointers(type: Type): boolean[] {
 	throw new TypeError(`Expected a function, got a ${type.kind}: ${stringifyType(type)}`);
 }
 
-export function functionize(scope: Scope, type: Type, expression: (scope: Scope, arg: ArgGetter) => Value, location?: Location | Term): [Identifier[], Statement[]] {
+export function functionize(scope: Scope, expression: (scope: Scope, arg: ArgGetter) => Value, location?: Location | Term): [Identifier[], Statement[]] {
 	const inner: Scope = newScope("anonymous", scope);
 	let usedCount = 0;
 	const identifiers: { [index: number]: Identifier } = Object.create(null);
-	const pointers = getArgumentPointers(type);
 	const newValue = expression(inner, (i, name) => {
 		if (usedCount === -1) {
 			throw new Error(`Requested access to scope after it was generated!`);
@@ -69,7 +68,7 @@ export function insertFunction(name: string, scope: Scope, type: Function, build
 	}
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
-	const [args, statements] = functionize(globalScope, type, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
+	const [args, statements] = functionize(globalScope, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
 	const fn = functionDeclaration(mangled, args, blockStatement(statements));
 	addVariable(globalScope, mangled, fn, shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 	return mangled;

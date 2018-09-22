@@ -1,9 +1,9 @@
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseType } from "./parse";
 import { mangleName, Scope } from "./scope";
-import { Type } from "./types";
+import { Function, Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, copy, expr, literal, read, reuseExpression, undefinedValue, Value } from "./values";
+import { array, call, copy, expr, functionValue, literal, read, reuseExpression, undefinedValue, Value } from "./values";
 
 import { assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
@@ -18,11 +18,13 @@ export enum PossibleRepresentation {
 	Symbol = 1 << 6, // Not used currently, possibly ever
 	Null = 1 << 7, // Not referenced by typeof, but modeled in our system
 	Array = 1 << 8, // Supported via Array.isArray
+	All = ~0,
 }
 
 export interface ReifiedType {
 	fields: ReadonlyArray<Field>;
 	functions: (name: string) => FunctionBuilder | GetterSetterBuilder | undefined;
+	conformances: { [protocolName: string]: ProtocolConformance };
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	cases?: ReadonlyArray<EnumCase>;
@@ -50,6 +52,10 @@ export interface TypeMap {
 
 export interface FunctionMap {
 	[name: string]: FunctionBuilder | GetterSetterBuilder;
+}
+
+export interface ProtocolConformance {
+	[functionName: string]: FunctionBuilder;
 }
 
 export type Field = {
@@ -82,7 +88,8 @@ const noInnerTypes: Readonly<TypeMap> = {};
 export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
-		functions: lookupForMap(functions),
+		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
+		conformances: {},
 		possibleRepresentations,
 		defaultValue() {
 			return defaultValue;
@@ -91,10 +98,29 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 	};
 }
 
+export function protocol(name: string): ReifiedType {
+	return {
+		fields: emptyFields,
+		functions(functionName) {
+			return (scope, arg, type) => {
+				const typeArg = arg(0, "type");
+				return call(functionValue(functionName, typeArg, type), undefinedValue, type.arguments.types.map((_, i) => i ? arg(i) : typeArg), scope);
+			};
+		},
+		conformances: Object.create(null),
+		possibleRepresentations: PossibleRepresentation.All,
+		defaultValue() {
+			throw new TypeError(`Protocols do not have a default value`);
+		},
+		innerTypes: noInnerTypes,
+	};
+}
+
 export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		fields,
-		functions: lookupForMap(functions),
+		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
+		conformances: {},
 		possibleRepresentations: type.possibleRepresentations,
 		defaultValue: type.defaultValue,
 		copy: type.copy,
@@ -109,7 +135,8 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 		case 0:
 			return {
 				fields,
-				functions: lookupForMap(functions),
+				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
+				conformances: {},
 				possibleRepresentations: PossibleRepresentation.Undefined,
 				defaultValue() {
 					return undefinedValue;
@@ -122,7 +149,8 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 		default:
 			return {
 				fields,
-				functions: lookupForMap(functions),
+				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
+				conformances: {},
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue(scope, consume) {
 					return expr(objectExpression(onlyStored.map((field) => {
@@ -165,6 +193,7 @@ export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = 
 	return {
 		fields,
 		functions: lookupForMap(functions),
+		conformances: {},
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue,
 		innerTypes,
@@ -275,6 +304,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 					return {
 						fields: [],
 						functions: lookupForMap(noFunctions),
+						conformances: {},
 						possibleRepresentations: PossibleRepresentation.Array,
 						defaultValue(innerScope) {
 							return array(reifiedTypes.map((inner) => inner.defaultValue(innerScope, alwaysUndefined)), innerScope);

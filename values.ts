@@ -1,10 +1,10 @@
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 import { Term } from "./ast";
-import { functionize, insertFunction } from "./functions";
-import { parseType } from "./parse";
+import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
+import { parseFunctionType, parseType } from "./parse";
 import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
-import { addVariable, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -193,11 +193,12 @@ export function copy(value: Value, type: Type): CopiedValue {
 export interface TypeValue {
 	kind: "type";
 	type: Type;
+	protocol?: string;
 	location?: Location;
 }
 
-export function typeValue(type: Type, location?: Term | Location): TypeValue {
-	return { kind: "type", type, location: readLocation(location) };
+export function typeValue(type: Type, protocol?: string, location?: Term | Location): TypeValue {
+	return { kind: "type", type, protocol, location: readLocation(location) };
 }
 
 const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
@@ -205,13 +206,32 @@ const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
 export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	switch (value.kind) {
 		case "type":
-			return reifyType(value.type, scope);
+			const reified = reifyType(value.type, scope);
+			if (typeof value.protocol !== "undefined") {
+				if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
+					throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
+				}
+				return {
+					fields: [],
+					functions: lookupForMap<FunctionBuilder | GetterSetterBuilder | undefined>(reified.conformances[value.protocol]),
+					conformances: {
+						[value.protocol]: reified.conformances[value.protocol],
+					},
+					innerTypes: {},
+					possibleRepresentations: PossibleRepresentation.All,
+					defaultValue() {
+						throw new Error(`No default value`);
+					},
+				};
+			}
+			return reified;
 		default:
 			const expression = read(value, scope);
 			return {
 				fields: [],
+				conformances: {},
 				functions: (name: string) => {
-					const result = expr(isValidIdentifier.test(name) ? memberExpression(expression, identifier(name)) : memberExpression(expression, literal(name), true));
+					const result = expr(memberExpression(expression, mangleName(name)));
 					return () => result;
 				},
 				innerTypes: {},
@@ -354,17 +374,20 @@ export function annotateValue<T extends Value>(value: T, location?: Location | T
 	return value;
 }
 
+const voidToVoid = parseFunctionType(`() -> () -> ()`); // TODO: Replace with proper type extracted from the context
+
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
-		case "copied":
+		case "copied": {
 			const reified = reifyType(value.type, scope);
 			if (reified.copy) {
 				return annotate(read(reified.copy(value.value, scope), scope), value.location);
 			}
 			return annotate(read(value.value, scope), value.location);
-		case "function":
+		}
+		case "function": {
 			const bind = value.substitutions.length ? (expression: Expression) => annotate(callExpression(memberExpression(expression, identifier("bind")), concat([nullLiteral()], value.substitutions.map((substitution) => read(substitution, scope)))), value.location) : (expression: Expression) => expression;
 			let builder;
 			if (typeof value.parentType === "undefined") {
@@ -378,7 +401,8 @@ export function read(value: Value, scope: Scope): Expression {
 				throw new Error(`Could not find function for ${value.name}`);
 			}
 			return bind(annotate(insertFunction(value.name, scope, value.type, builder), value.location));
-		case "tuple":
+		}
+		case "tuple": {
 			switch (value.values.length) {
 				case 0:
 					return annotate(undefinedLiteral, value.location);
@@ -387,23 +411,57 @@ export function read(value: Value, scope: Scope): Expression {
 				default:
 					return annotate(read(array(value.values, scope), scope), value.location);
 			}
-		case "expression":
+		}
+		case "expression": {
 			return annotate(value.expression, value.location);
-		case "callable":
-			const [args, statements] = functionize(scope, value.type, value.call, value.location);
+		}
+		case "callable": {
+			const [args, statements] = functionize(scope, value.call, value.location);
 			return annotate(functionExpression(undefined, args, annotate(blockStatement(statements), value.location)), value.location);
-		case "direct":
+		}
+		case "direct": {
 			return annotate(value.ref, value.location);
-		case "statements":
+		}
+		case "statements": {
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
-		case "subscript":
+		}
+		case "subscript": {
 			return annotate(read(call(value.getter, undefinedValue, value.args, scope, value.location, "get"), scope), value.location);
-		case "boxed":
+		}
+		case "boxed": {
 			return annotate(read(value.contents, scope), value.location);
-		case "type":
-			return annotate(mangleName(stringifyType(value.type) + ".Type"), value.location);
-		default:
+		}
+		case "type": {
+			const name: string = `:${stringifyType(value.type)}.${typeof value.protocol !== "undefined" ? value.protocol : "Type"}`;
+			const mangled = mangleName(name);
+			const reified = reifyType(value.type, scope);
+			if (typeof value.protocol !== "undefined") {
+				const globalScope = rootScope(scope);
+				if (!Object.hasOwnProperty.call(globalScope.declarations, value.protocol)) {
+					if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
+						throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
+					}
+					const protocol = reified.conformances[value.protocol];
+					const witnessTable = objectExpression(Object.keys(protocol).map((key) => {
+						const result = protocol[key](globalScope, () => expr(mangled), voidToVoid, name);
+						if (result.kind === "callable") {
+							const [args, statements] = functionize(globalScope, result.call);
+							return objectMethod("method", mangleName(key), args, blockStatement(statements));
+						} else {
+							return objectProperty(mangleName(key), read(result, scope));
+						}
+					}));
+					globalScope.declarations[name] = {
+						flags: DeclarationFlags.Const,
+						declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
+					};
+				}
+			}
+			return annotate(mangled, value.location);
+		}
+		default: {
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
+		}
 	}
 }
 
@@ -443,7 +501,20 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 			if (typeof target.parentType === "undefined") {
 				lookup = lookupForMap(scope.functions);
 			} else if (target.parentType.kind === "type") {
-				lookup = reifyType(target.parentType.type, scope).functions;
+				const parentType = target.parentType;
+				const reified = reifyType(parentType.type, scope);
+				const protocolName = parentType.protocol;
+				// TODO: Figure out proper way to determine if parentType.type already conforms
+				lookup = typeof protocolName === "undefined" || Object.keys(reified.conformances).length === 0 ? reified.functions : (functionName: string) => {
+					if (!Object.hasOwnProperty.call(reified.conformances, protocolName)) {
+						throw new TypeError(`${stringifyType(parentType.type)} does not conform to ${protocolName}`);
+					}
+					const protocol = reified.conformances[protocolName];
+					if (!Object.hasOwnProperty.call(protocol, functionName)) {
+						throw new TypeError(`${protocolName} conformance of ${stringifyType(parentType.type)} does not have a ${functionName}`);
+					}
+					return protocol[functionName];
+				};
 			} else {
 				if (type !== "call") {
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);

@@ -109,13 +109,23 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 	if (typeof declaration.member === "string") {
 		let parentType: Value | undefined;
 		if (typeof declaration.type === "string") {
-			parentType = typeValue(constructTypeFromNames(declaration.type, declaration.substitutions));
+			parentType = typeValue(constructTypeFromNames(declaration.type, typeof declaration.substitutions !== "undefined" ? declaration.substitutions.map((sub) => sub.to) : undefined));
 		} else if (!Object.hasOwnProperty.call(scope.functions, declaration.member)) {
 			return expr(lookup(declaration.member, scope), term);
 		}
 		let substitutionValues: Value[];
 		if (typeof declaration.substitutions !== "undefined") {
-			substitutionValues = declaration.substitutions.map((substitution) => typeValue(parseType(substitution)));
+			substitutionValues = declaration.substitutions.map((substitution) => {
+				let protocol;
+				if (typeof declaration.signature !== "undefined") {
+					for (const element of declaration.signature) {
+						if (element.name === substitution.from) {
+							protocol = element.protocol;
+						}
+					}
+				}
+				return typeValue(parseType(substitution.to), protocol);
+			});
 		} else {
 			substitutionValues = [];
 		}
@@ -607,7 +617,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			if (type.kind === "namespaced" && type.type.kind === "name" && type.type.name === "Type") {
 				type = type.namespace;
 			}
-			return typeValue(type, term);
+			return typeValue(type, undefined, term);
 		}
 		case "boolean_literal_expr": {
 			expectLength(term.children, 0);
@@ -1203,6 +1213,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const reifiedSelfType: ReifiedType = {
 				fields: layout,
 				functions: lookupForMap(methods),
+				conformances: {},
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
 				defaultValue() {
 					throw new Error(`Unable to default instantiate enums`);
@@ -1380,7 +1391,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							const type = getType(declaration);
 							if (flags & DeclarationFlags.Export) {
 								const fn = translateFunctionTerm(propertyName + ".get", declaration, [[]], false, scope, functions, thisExpression());
-								const [args, statements] = functionize(scope, type, (innerScope) => fn(innerScope, () => expr(thisExpression())));
+								const [args, statements] = functionize(scope, (innerScope) => fn(innerScope, () => expr(thisExpression())));
 								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(statements)));
 								// Default implementation will call getter/setter
 								layout.push(field(child.args[0], reifyType(getType(child), scope)));

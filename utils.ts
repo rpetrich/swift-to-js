@@ -30,7 +30,7 @@ export function cached<T>(fn: () => T): () => T {
 	};
 }
 
-export function lookupForMap<V>(map: { [key: string]: V }): (key: string) => V | undefined {
+export function lookupForMap<V>(map: { readonly [key: string]: V }): (key: string) => V | undefined {
 	return (key: string) => Object.hasOwnProperty.call(map, key) ? map[key] : undefined;
 }
 

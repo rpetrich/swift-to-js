@@ -1,10 +1,18 @@
 import { parse as ast } from "./ast";
 import { parse as declaration } from "./declaration";
-import { parse as type } from "./types";
+import { Function, parse as type } from "./types";
 
 export const parseDeclaration = parse(declaration, "declaration");
 export const parseType = parse(type, "type");
 export const parseAST = parse(ast, "ast");
+
+export function parseFunctionType(text: string): Function {
+	const result = parseType(text);
+	if (result.kind !== "function") {
+		throw new TypeError(`Expected a function, got a ${result.kind} from ${text}`);
+	}
+	return result;
+}
 
 function parse<T>(parser: (text: string) => T, description: string): (text: string) => T {
 	// const memoized: { [name: string]: T } = Object.create(null);

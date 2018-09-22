@@ -1,10 +1,10 @@
 import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
-import { parseType } from "./parse";
-import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
+import { parseFunctionType, parseType } from "./parse";
+import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
 import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
@@ -60,68 +60,213 @@ export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).force
 
 function buildIntegerType(min: number, max: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
 	const fields: Field[] = [];
-	// function rangeChecker(value: Value, scope: Scope): Value {
-	// 	const expression = read(value, scope);
-	// 	const constant = valueOfExpression(expression);
-	// 	if (typeof constant === "number" && constant >= min && constant <= max) {
-	// 		return expr(expression);
-	// 	}
-	// 	const [first, after] = reuseExpression(expression, scope);
-	// 	return conditionalExpression(
-	// 		read(test(expr(first), scope), scope),
-	// 		after,
-	// 		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), undefinedValue, [], scope), scope),
-	// 	);
-	// }
 	const range: NumericRange = { min: literal(min), max: literal(max) };
 	const widerHigh: NumericRange = checked ? { min: literal(min), max: literal(max + 1) } : range;
 	const widerLow: NumericRange = checked ? { min: literal(min - 1), max: literal(max) } : range;
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
-	const reifiedType = primitive(PossibleRepresentation.Number, expr(literal(0)), fields, {
-		"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-		"+": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerHigh, range)),
-		"-": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerLow, range)),
-		"*": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerBoth, range)),
-		"&+": binaryBuiltin("+", 0, wrap),
+	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
+	const integerType: ProtocolConformance = {
+		"min"() {
+			return expr(literal(min));
+		},
+		"max"() {
+			return expr(literal(max));
+		},
+		"init": wrapped((scope, arg, type) => {
+			expectLength(type.arguments.types, 1);
+			const sourceType = typeFromValue(typeValue(type.arguments.types[0], integerTypeName), scope);
+			return integerRangeCheck(
+				scope,
+				arg(0, "value"),
+				rangeForNumericType(sourceType, scope),
+				range,
+			);
+		}),
+		"init(exactly:)": wrapped((scope, arg, type) => {
+			expectLength(type.arguments.types, 1);
+			const source = rangeForNumericType(typeFromValue(typeValue(type.arguments.types[0], integerTypeName), scope), scope);
+			const requiresGreaterThanCheck = possiblyGreaterThan(source, range);
+			const requiresLessThanCheck = possiblyLessThan(source, range);
+			if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
+				return arg(0, "value");
+			}
+			const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope, "value");
+			let check: Expression;
+			if (requiresGreaterThanCheck && requiresLessThanCheck) {
+				check = logicalExpression(
+					"||",
+					binaryExpression(">", first, range.min),
+					binaryExpression("<", after, range.max),
+				);
+			} else if (requiresGreaterThanCheck) {
+				check = binaryExpression(">", first, range.max);
+			} else if (requiresLessThanCheck) {
+				check = binaryExpression("<", first, range.min);
+			} else {
+				return arg(0, "value");
+			}
+			return expr(conditionalExpression(
+				check,
+				literal(null),
+				after,
+			));
+		}),
 		"&-": binaryBuiltin("-", 0, wrap),
+	};
+	const fixedWidthIntegerType: ProtocolConformance = {
+		"&+": binaryBuiltin("+", 0, wrap),
 		"&*": binaryBuiltin("*", 0, wrap),
-		"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
-		"%": binaryBuiltin("%", 0),
-		"<": binaryBuiltin("<", 0),
-		">": binaryBuiltin(">", 0),
-		"<=": binaryBuiltin("<=", 0),
-		">=": binaryBuiltin(">=", 0),
-		"&": binaryBuiltin("&", 0),
-		"|": binaryBuiltin("|", 0),
-		"^": binaryBuiltin("^", 0),
-		"==": binaryBuiltin("===", 0),
-		"!=": binaryBuiltin("!==", 0),
-		"+=": updateBuiltin("+", 0),
-		"-=": updateBuiltin("-", 0),
-		"*=": updateBuiltin("*", 0),
-		"SignedNumeric.-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
-	}, {
-		Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
-			field("min", reifiedType, () => expr(literal(min))),
-			field("max", reifiedType, () => expr(literal(max))),
-		], {
-		})),
-	});
+	};
+	const reifiedType: ReifiedType = {
+		fields,
+		functions: lookupForMap({
+			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+			"init(clamping:)": wrapped((scope, arg, type) => {
+				expectLength(type.arguments.types, 1);
+				const source = rangeForNumericType(typeFromValue(typeValue(type.arguments.types[0], "SignedInteger"), scope), scope);
+				const requiresGreaterThanCheck = possiblyGreaterThan(source, range);
+				const requiresLessThanCheck = possiblyLessThan(source, range);
+				if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
+					return arg(0, "value");
+				}
+				const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope, "value");
+				if (requiresGreaterThanCheck && requiresLessThanCheck) {
+					return expr(conditionalExpression(
+						binaryExpression(">", first, range.max),
+						range.max,
+						conditionalExpression(
+							binaryExpression("<", after, range.min),
+							range.min,
+							after,
+						),
+					));
+				} else if (requiresGreaterThanCheck) {
+					return expr(conditionalExpression(
+						binaryExpression(">", first, range.max),
+						range.max,
+						after,
+					));
+				} else {
+					return expr(conditionalExpression(
+						binaryExpression("<", first, range.min),
+						range.min,
+						after,
+					));
+				}
+			}),
+			"+": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerHigh, range)),
+			"-": wrapped((scope, arg, type) => {
+				if (type.arguments.types.length === 1) {
+					if (min >= 0) {
+						throw new TypeError(`Range does not permit negative values: ${min}...${max}`);
+					}
+					return integerRangeCheck(scope, expr(unaryExpression("-", read(arg(0, "value"), scope))), widerLow, range);
+				}
+				return integerRangeCheck(scope, expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerLow, range);
+			}),
+			"*": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerBoth, range)),
+			"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
+			"%": binaryBuiltin("%", 0),
+			"<": binaryBuiltin("<", 0),
+			">": binaryBuiltin(">", 0),
+			"<=": binaryBuiltin("<=", 0),
+			">=": binaryBuiltin(">=", 0),
+			"&": binaryBuiltin("&", 0),
+			"|": binaryBuiltin("|", 0),
+			"^": binaryBuiltin("^", 0),
+			"==": binaryBuiltin("===", 0),
+			"!=": binaryBuiltin("!==", 0),
+			"+=": updateBuiltin("+", 0),
+			"-=": updateBuiltin("-", 0),
+			"*=": updateBuiltin("*", 0),
+		} as FunctionMap),
+		conformances: {
+			[integerTypeName]: integerType,
+			FixedWidthInteger: fixedWidthIntegerType,
+			LosslessStringConvertible: {
+			},
+		},
+		possibleRepresentations: PossibleRepresentation.Number,
+		defaultValue() {
+			return expr(literal(0));
+		},
+		innerTypes: {
+			Type: cached(() => primitive(PossibleRepresentation.Object, expr(literal({})), [
+				field("min", reifiedType, () => expr(literal(min))),
+				field("max", reifiedType, () => expr(literal(max))),
+			], {
+			})),
+		},
+	};
+	if (min < 0) {
+		reifiedType.conformances.SignedNumeric = {
+			"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
+		};
+	}
 	fields.push(field("hashValue", reifiedType, (value) => value));
 	return reifiedType;
 }
 
-function getMetaFieldValue(type: ReifiedType, fieldName: string, scope: Scope) {
-	const reified = reifyType("Type", scope, [], [type.innerTypes]);
-	if (typeof reified === "undefined") {
-		throw new Error(`Expected to have a source type!`);
+function buildFloatingType(): ReifiedType {
+	const fields: Field[] = [];
+	const reifiedType: ReifiedType = {
+		fields,
+		functions: lookupForMap({
+			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
+			"+": wrapped((scope, arg, type) => expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)))),
+			"-": wrapped((scope, arg, type) => {
+				if (type.arguments.types.length === 1) {
+					return expr(unaryExpression("-", read(arg(0, "value"), scope)));
+				}
+				return expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)));
+			}),
+			"*": wrapped((scope, arg, type) => expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)))),
+			"/": wrapped((scope, arg, type) => expr(binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)))),
+			"%": binaryBuiltin("%", 0),
+			"<": binaryBuiltin("<", 0),
+			">": binaryBuiltin(">", 0),
+			"<=": binaryBuiltin("<=", 0),
+			">=": binaryBuiltin(">=", 0),
+			"&": binaryBuiltin("&", 0),
+			"|": binaryBuiltin("|", 0),
+			"^": binaryBuiltin("^", 0),
+			"+=": updateBuiltin("+", 0),
+			"-=": updateBuiltin("-", 0),
+			"*=": updateBuiltin("*", 0),
+			"/=": updateBuiltin("/", 0),
+		} as FunctionMap),
+		conformances: {
+			SignedNumeric: {
+				"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
+			},
+			FloatingPoint: {
+				"==": binaryBuiltin("===", 0),
+				"!=": binaryBuiltin("!==", 0),
+				"squareRoot()": (scope, arg, type) => {
+					const expression = read(arg(1, "value"), scope);
+					return callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [expression])), returnType(type));
+				},
+			},
+		},
+		possibleRepresentations: PossibleRepresentation.Number,
+		defaultValue() {
+			return expr(literal(0));
+		},
+		innerTypes: {
+		},
+	};
+	fields.push(field("hashValue", reifiedType, (value) => value));
+	return reifiedType;
+}
+
+function callSimpleMethod(protocolType: ReifiedType, methodName: string, scope: Scope) {
+	const functionBuilder = protocolType.functions(methodName);
+	if (typeof functionBuilder !== "function") {
+		throw new TypeError(`Expected a function as a result of searching for simple method ${methodName}`);
 	}
-	for (const field of reified.fields) {
-		if (field.name === fieldName) {
-			return getField(expr(literal(0)), field, scope);
-		}
-	}
-	throw new TypeError(`Could not find field named ${fieldName} in type's metaclass`);
+	return functionBuilder(scope, () => {
+		throw new Error(`Did not expect to be called with arguments`);
+	}, parseType("(Int) -> Int") as Function, methodName);
 }
 
 interface NumericRange {
@@ -130,8 +275,8 @@ interface NumericRange {
 }
 
 function rangeForNumericType(type: ReifiedType, scope: Scope): NumericRange {
-	const min = read(getMetaFieldValue(type, "min", scope), scope);
-	const max = read(getMetaFieldValue(type, "max", scope), scope);
+	const min = read(callSimpleMethod(type, "min", scope), scope);
+	const max = read(callSimpleMethod(type, "max", scope), scope);
 	return {
 		min,
 		max,
@@ -224,41 +369,6 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeA
 	));
 }
 
-function integerClampingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
-	expectLength(type.arguments.types, 1);
-	const source = rangeForNumericType(reifyType(type.arguments.types[0], scope), scope);
-	const dest = rangeForNumericType(typeArgument, scope);
-	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest);
-	const requiresLessThanCheck = possiblyLessThan(source, dest);
-	if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
-		return arg(0, "value");
-	}
-	const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope, "value");
-	if (requiresGreaterThanCheck && requiresLessThanCheck) {
-		return expr(conditionalExpression(
-			binaryExpression(">", first, dest.max),
-			dest.max,
-			conditionalExpression(
-				binaryExpression("<", after, dest.min),
-				dest.min,
-				after,
-			),
-		));
-	} else if (requiresGreaterThanCheck) {
-		return expr(conditionalExpression(
-			binaryExpression(">", first, dest.max),
-			dest.max,
-			after,
-		));
-	} else {
-		return expr(conditionalExpression(
-			binaryExpression("<", first, dest.min),
-			dest.min,
-			after,
-		));
-	}
-}
-
 function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, name: string) {
 	const typeArg = arg(0, "type");
 	return call(functionValue(name, typeArg, type), undefinedValue, [typeArg], scope);
@@ -274,36 +384,10 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 	return {
 		"Bool": BoolType,
 		"Int1": BoolType,
-		"SignedNumeric": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"-": (scope: Scope, arg: ArgGetter, type: Function) => {
-				const typeArg = arg(0, "type");
-				return call(functionValue("SignedNumeric.-", typeArg, type), undefinedValue, [typeArg], scope);
-			},
-		})),
-		"SignedInteger": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"init": wrapped(integerThrowingInit),
-			"init(exactly:)": wrapped(integerOptionalInit),
-			"==": binaryBuiltin("===", 1),
-			"!=": binaryBuiltin("!==", 1),
-			"&+": forwardToTypeArgument,
-			"&-": forwardToTypeArgument,
-		}),
-		"UnsignedInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"init": wrapped(integerThrowingInit),
-			"init(exactly:)": wrapped(integerOptionalInit),
-			"==": binaryBuiltin("===", 1),
-			"!=": binaryBuiltin("!==", 1),
-			"&+": forwardToTypeArgument,
-			"&-": forwardToTypeArgument,
-		})),
-		"FixedWidthInteger": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"init(clamping:)": wrapped(integerClampingInit),
-			"==": binaryBuiltin("===", 1),
-			"!=": binaryBuiltin("!==", 1),
-			"&+": forwardToTypeArgument,
-			"&-": forwardToTypeArgument,
-			"&*": forwardToTypeArgument,
-		})),
+		"SignedNumeric": cached(() => protocol("SignedNumeric")),
+		"SignedInteger": cached(() => protocol("SignedInteger")),
+		"UnsignedInteger": cached(() => protocol("UnsignedInteger")),
+		"FixedWidthInteger": cached(() => protocol("FixedWidthInteger")),
 		"UInt": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
 		"Int": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
 		"UInt8": cached(() => buildIntegerType(0, 255, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFF))))),
@@ -314,53 +398,9 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		"Int32": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
 		"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
 		"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
-		"FloatingPoint": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"==": binaryBuiltin("===", 0),
-			"!=": binaryBuiltin("!==", 0),
-			"squareRoot()": (scope, arg, type) => callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [read(arg(1, "value"), scope)])), returnType(type)),
-		})),
-		"Float": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-			"+": binaryBuiltin("+", 0),
-			"-": binaryBuiltin("-", 0),
-			"*": binaryBuiltin("*", 0),
-			"/": binaryBuiltin("/", 0),
-			"%": binaryBuiltin("%", 0),
-			"<": binaryBuiltin("<", 0),
-			">": binaryBuiltin(">", 0),
-			"<=": binaryBuiltin("<=", 0),
-			">=": binaryBuiltin(">=", 0),
-			"&": binaryBuiltin("&", 0),
-			"|": binaryBuiltin("|", 0),
-			"^": binaryBuiltin("^", 0),
-			"==": binaryBuiltin("===", 0),
-			"!=": binaryBuiltin("!==", 0),
-			"+=": updateBuiltin("+", 0),
-			"-=": updateBuiltin("-", 0),
-			"*=": updateBuiltin("*", 0),
-			"/=": updateBuiltin("/", 0),
-		})),
-		"Double": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [], {
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
-			"+": binaryBuiltin("+", 0),
-			"-": binaryBuiltin("-", 0),
-			"*": binaryBuiltin("*", 0),
-			"/": binaryBuiltin("/", 0),
-			"%": binaryBuiltin("%", 0),
-			"<": binaryBuiltin("<", 0),
-			">": binaryBuiltin(">", 0),
-			"<=": binaryBuiltin("<=", 0),
-			">=": binaryBuiltin(">=", 0),
-			"&": binaryBuiltin("&", 0),
-			"|": binaryBuiltin("|", 0),
-			"^": binaryBuiltin("^", 0),
-			"==": binaryBuiltin("===", 0),
-			"!=": binaryBuiltin("!==", 0),
-			"+=": updateBuiltin("+", 0),
-			"-=": updateBuiltin("-", 0),
-			"*=": updateBuiltin("*", 0),
-			"/=": updateBuiltin("/", 0),
-		})),
+		"FloatingPoint": cached(() => protocol("FloatingPoint")),
+		"Float": cached(() => buildFloatingType()),
+		"Double": cached(() => buildFloatingType()),
 		"String": (globalScope) => {
 			const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(literal([])), [
 				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
@@ -408,6 +448,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 					"!=": binaryBuiltin("!==", 0), // TODO: Fix to use proper comparator for internal type
 					"flatMap": returnTodo,
 				} as FunctionMap),
+				conformances: {},
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(emptyOptional(wrappedType));
@@ -549,6 +590,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						return expr(binaryExpression("-", read(end, scope), read(start, scope)));
 					}),
 				} as FunctionMap),
+				conformances: {},
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(literal([]));
@@ -631,6 +673,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 							},
 						},
 					} as FunctionMap),
+					conformances: {},
 					possibleRepresentations: PossibleRepresentation.Object,
 					defaultValue() {
 						return expr(literal({}));
@@ -681,32 +724,11 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			field("hashValue", reifyType("Int", globalScope), (value) => value),
 		], {
 		}),
-		"Collection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
-			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		], {
-			map: (scope, arg) => expr(callExpression(memberExpression(memberExpression(literal([]), identifier("map")), identifier("bind")), [read(arg(0, "element"), scope)])),
-		}),
-		"BidirectionalCollection": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [
-			field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
-		], {
-			"joined(separator:)": (scope, arg, type): Value => {
-				const collection = read(arg(0, "collection"), scope);
-				return callable((innerScope, innerArg) => {
-					const separator = read(innerArg(0, "separator"), scope);
-					return expr(callExpression(memberExpression(collection, identifier("join")), [separator]));
-				}, returnFunctionType(type));
-			},
-		}),
-		"ClosedRange": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([]))),
-		"Strideable": (globalScope, typeParameters) => primitive(PossibleRepresentation.Array, expr(literal([])), [], {
-			"...": wrapped((scope, arg) => array([arg(0, "low"), arg(1, "high")], scope)),
-		}),
-		"Hasher": cached(() => primitive(PossibleRepresentation.Number, expr(literal(0)), [
-		], {
-			"finalize()": wrapped((scope, arg, type): Value => {
-				return arg(0, "hash");
-			}),
-		})),
+		"Collection": () => protocol("Collection"),
+		"BidirectionalCollection": () => protocol("BidirectionalCollection"),
+		"ClosedRange": () => protocol("ClosedRange"),
+		"Strideable": () => protocol("Strideable"),
+		"Hasher": () => protocol("Hasher"),
 	};
 }
 
