@@ -492,7 +492,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				conformances: {},
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
-					return expr(emptyOptional(wrappedType));
+					return expr(emptyOptional(optionalType));
 				},
 				copy: reified.copy || isNestedOptional(optionalType) ? (value, scope) => {
 					const expression = read(value, scope);
