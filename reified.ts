@@ -85,11 +85,11 @@ const emptyFields: ReadonlyArray<Field> = [];
 const noFunctions: Readonly<FunctionMap> = {};
 const noInnerTypes: Readonly<TypeMap> = {};
 
-export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, conformances: { [protocolName: string]: ProtocolConformance } = Object.create(null), innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-		conformances: {},
+		conformances,
 		possibleRepresentations,
 		defaultValue() {
 			return defaultValue;

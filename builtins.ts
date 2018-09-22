@@ -411,13 +411,19 @@ function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expre
 	);
 }
 
+const BoolType = cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
+	"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
+	"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
+	"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
+	"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
+}, {
+	Equatable: {
+		"==": (scope, arg) => expr(binaryExpression("===", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
+		"!=": (scope, arg) => expr(binaryExpression("!==", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
+	},
+}));
+
 function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
-	const BoolType = cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
-		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
-		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
-		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
-	}));
 	return {
 		"Bool": BoolType,
 		"Int1": BoolType,
@@ -464,6 +470,9 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), [], scope), parseType("(String) -> String")),
 				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), [], scope), parseType("(String) -> String")),
 			}, {
+				Equatable: {
+				},
+			}, {
 				"UnicodeScalarView": () => UnicodeScalarView,
 				"UTF16View": () => UTF16View,
 				"UTF8View": () => UTF8View,
@@ -476,16 +485,65 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			const [ wrappedType ] = typeParameters(1);
 			const reified = reifyType(wrappedType, globalScope);
 			const optionalType: Type = { kind: "optional", type: wrappedType };
+			// Assume values that can be represented as boolean, number or string can be value-wise compared
+			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
+			const conformances: { [protocolName: string]: ProtocolConformance } = Object.create(null);
+			const compareEqual = (scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
+				return transform(arg(1, "rhs"), scope, (rhs) => {
+					if (isDirectlyComparable) {
+						return expr(binaryExpression("===", lhs, rhs));
+					}
+					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
+					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
+					return expr(conditionalExpression(
+						optionalIsNone(firstLeft, optionalType),
+						optionalIsNone(firstRight, optionalType),
+						logicalExpression("&&",
+							optionalIsSome(firstRight, optionalType),
+							read(call(functionValue("==", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> Bool`)), [
+								unwrapOptional(expr(afterLeft), optionalType, scope),
+								unwrapOptional(expr(afterRight), optionalType, scope),
+							], scope), scope),
+						),
+					));
+				});
+			});
+			const compareUnequal = (scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
+				return transform(arg(1, "rhs"), scope, (rhs) => {
+					if (isDirectlyComparable) {
+						return expr(binaryExpression("!==", lhs, rhs));
+					}
+					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
+					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
+					return expr(conditionalExpression(
+						optionalIsNone(firstLeft, optionalType),
+						optionalIsSome(firstRight, optionalType),
+						logicalExpression("||",
+							optionalIsNone(firstRight, optionalType),
+							read(call(functionValue("!=", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> Bool`)), [
+								unwrapOptional(expr(afterLeft), optionalType, scope),
+								unwrapOptional(expr(afterRight), optionalType, scope),
+							], scope), scope),
+						),
+					));
+				});
+			});
+			if (Object.hasOwnProperty.call(reified.conformances, "Equatable")) {
+				conformances.Equatable = {
+					"==": compareEqual,
+					"!=": compareUnequal,
+				};
+			}
 			return {
 				fields: [],
 				functions: lookupForMap({
 					"none": () => expr(emptyOptional(optionalType)),
 					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
-					"==": binaryBuiltin("===", 0), // TODO: Fix to use proper comparator for internal type
-					"!=": binaryBuiltin("!==", 0), // TODO: Fix to use proper comparator for internal type
+					"==": wrapped(compareEqual),
+					"!=": wrapped(compareUnequal),
 					"flatMap": returnTodo,
 				} as FunctionMap),
-				conformances: {},
+				conformances,
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(emptyOptional(optionalType));
@@ -819,6 +877,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				}, returnType(type));
 			},
 		}),
+		"Equatable": () => protocol("Equatable"),
 		"Sequence": () => protocol("Sequence"),
 		"Collection": () => protocol("Collection"),
 		"BidirectionalCollection": () => protocol("BidirectionalCollection"),
