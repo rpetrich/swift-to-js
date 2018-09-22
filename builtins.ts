@@ -411,19 +411,42 @@ function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expre
 	);
 }
 
-const BoolType = cached(() => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [], {
-	"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-	"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
-	"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
-	"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
-}, {
-	Equatable: {
-		"==": (scope, arg) => expr(binaryExpression("===", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
-		"!=": (scope, arg) => expr(binaryExpression("!==", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
-	},
-}));
-
 function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
+	const BoolType = (globalScope: Scope) => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [
+		field("description", reifyType(parseType("String"), globalScope), (target, scope) => {
+			return transform(target, scope, (expression) => expr(conditionalExpression(expression, literal("True"), literal("False"))));
+		}),
+	], {
+		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
+		"init": wrapped((scope, arg) => transform(arg(0, "string"), scope, (expression) => {
+			// Optional init from string
+			const [first, after] = reuseExpression(expression, scope, "string");
+			return expr(logicalExpression("||",
+				binaryExpression("===",
+					first,
+					literal("True"),
+				),
+				logicalExpression("&&",
+					binaryExpression("!==",
+						after,
+						literal("False"),
+					),
+					literal(null),
+				),
+			));
+		})),
+		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
+		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
+		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
+		"!": wrapped((scope, arg) => expr(unaryExpression("!", read(arg(0, "value"), scope)))),
+		"random": wrapped((scope, arg) => expr(binaryExpression("<", callExpression(memberExpression(identifier("Math"), identifier("random")), []), literal(0.5)))),
+	}, {
+		Equatable: {
+			"==": (scope, arg) => expr(binaryExpression("===", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
+			"!=": (scope, arg) => expr(binaryExpression("!==", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
+		},
+	});
+
 	return {
 		"Bool": BoolType,
 		"Int1": BoolType,
