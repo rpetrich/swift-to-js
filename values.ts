@@ -398,7 +398,7 @@ export function read(value: Value, scope: Scope): Expression {
 				builder = reifyType(value.parentType.type, scope).functions(value.name);
 			}
 			if (typeof builder === "undefined") {
-				throw new Error(`Could not find function for ${value.name}`);
+				throw new Error(`Could not find function to read for ${value.name}`);
 			}
 			return bind(annotate(insertFunction(value.name, scope, value.type, builder), value.location));
 		}
@@ -465,6 +465,23 @@ export function read(value: Value, scope: Scope): Expression {
 	}
 }
 
+export function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
+	if (value.kind === "statements") {
+		const contents = value.statements;
+		if (contents.length === 0) {
+			return callback(undefinedLiteral);
+		}
+		const lastStatement = contents[contents.length - 1];
+		if (lastStatement.type === "ReturnStatement") {
+			return statements(concat(
+				contents.slice(0, contents.length - 1),
+				[returnStatement(read(callback(lastStatement.argument), scope))],
+			));
+		}
+	}
+	return callback(read(value, scope));
+}
+
 export const undefinedValue = expr(undefinedLiteral);
 
 export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Value>, scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
@@ -497,47 +514,54 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 			} else {
 				targetFunctionType = target.type;
 			}
-			let lookup;
+			let fn;
 			if (typeof target.parentType === "undefined") {
-				lookup = lookupForMap(scope.functions);
+				// Global functions
+				fn = lookupForMap(scope.functions)(target.name);
+				if (typeof fn === "undefined") {
+					throw new Error(`Could not find function to call for ${target.name}`);
+				}
 			} else if (target.parentType.kind === "type") {
 				const parentType = target.parentType;
 				const reified = reifyType(parentType.type, scope);
 				const protocolName = parentType.protocol;
 				// TODO: Figure out proper way to determine if parentType.type already conforms
-				lookup = typeof protocolName === "undefined" || Object.keys(reified.conformances).length === 0 ? reified.functions : (functionName: string) => {
+				if (typeof protocolName === "undefined" || Object.keys(reified.conformances).length === 0) {
+					// Member functions
+					fn = reified.functions(target.name);
+					if (typeof fn === "undefined") {
+						throw new Error(`${stringifyType(parentType.type)} does not have a ${target.name} function`);
+					}
+				} else {
+					// Protocol functions
 					if (!Object.hasOwnProperty.call(reified.conformances, protocolName)) {
 						throw new TypeError(`${stringifyType(parentType.type)} does not conform to ${protocolName}`);
 					}
 					const protocol = reified.conformances[protocolName];
-					if (!Object.hasOwnProperty.call(protocol, functionName)) {
-						throw new TypeError(`${protocolName} conformance of ${stringifyType(parentType.type)} does not have a ${functionName}`);
+					if (!Object.hasOwnProperty.call(protocol, target.name)) {
+						throw new TypeError(`${protocolName} conformance of ${stringifyType(parentType.type)} does not have a ${target.name} function`);
 					}
-					return protocol[functionName];
-				};
+					fn = protocol[target.name];
+				}
 			} else {
+				// Function from a vtable at runtime
 				if (type !== "call") {
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
 				}
 				const func = memberExpression(read(target.parentType, scope), literal(target.name), true);
 				return call(expr(func, target.location), thisArgument, args, scope, location);
 			}
-			const fn = lookup(target.name);
-			if (typeof fn !== "undefined") {
-				switch (type) {
-					case "call":
-						if (typeof fn !== "function") {
-							throw new Error(`Expected a callable function!`);
-						}
-						return annotateValue(fn(scope, getter, targetFunctionType, target.name), location);
-					default:
-						if (typeof fn === "function") {
-							throw new Error(`Expected a ${type}ter!`);
-						}
-						return annotateValue(fn[type](scope, getter, targetFunctionType, target.name), location);
-				}
-			} else {
-				throw new Error(`Could not find function for ${target.name}`);
+			switch (type) {
+				case "call":
+					if (typeof fn !== "function") {
+						throw new Error(`Expected a callable function!`);
+					}
+					return annotateValue(fn(scope, getter, targetFunctionType, target.name), location);
+				default:
+					if (typeof fn === "function") {
+						throw new Error(`Expected a ${type}ter!`);
+					}
+					return annotateValue(fn[type](scope, getter, targetFunctionType, target.name), location);
 			}
 		case "callable":
 			if (type !== "call") {

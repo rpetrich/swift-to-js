@@ -5,7 +5,7 @@ export interface Declaration {
 	member?: string;
 	local?: string;
 	substitutions?: ReadonlyArray<Substitution>;
-	signature?: ReadonlyArray<GenericConformance>;
+	signature?: ReadonlyArray<GenericConformance | undefined>;
 }
 
 export interface Substitution {

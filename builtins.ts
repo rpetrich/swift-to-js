@@ -1,12 +1,12 @@
 import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
-import { emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
+import { addVariable, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
-import { assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -27,10 +27,16 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 }
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
-	if (typeof valueChecker !== "undefined") {
-		return wrapped((scope: Scope, arg: ArgGetter) => valueChecker(expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))), scope));
-	}
-	return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))));
+	// if (typeof valueChecker !== "undefined") {
+	// 	return wrapped((scope: Scope, arg: ArgGetter) => valueChecker(expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))), scope));
+	// }
+	// return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))));
+	return wrapped((scope: Scope, arg: ArgGetter) => transform(arg(typeArgumentCount, "lhs"), scope, (lhs) => {
+		return transform(arg(typeArgumentCount + 1, "rhs"), scope, (rhs) => {
+			const unchecked = expr(binaryExpression(operator, lhs, rhs));
+			return typeof valueChecker !== "undefined" ? valueChecker(unchecked, scope) : unchecked;
+		});
+	}));
 }
 
 function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
@@ -179,10 +185,18 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 			"+=": updateBuiltin("+", 0),
 			"-=": updateBuiltin("-", 0),
 			"*=": updateBuiltin("*", 0),
+			"...": wrapped((scope, arg) => {
+				return tuple([arg(0, "start"), arg(1, "end")]);
+			}),
 		} as FunctionMap),
 		conformances: {
 			[integerTypeName]: integerType,
 			FixedWidthInteger: fixedWidthIntegerType,
+			Strideable: {
+				"...": wrapped((scope, arg) => {
+					return tuple([arg(0, "start"), arg(1, "end")]);
+				}),
+			},
 			LosslessStringConvertible: {
 			},
 		},
@@ -589,8 +603,35 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						const end = arg(3, "end");
 						return expr(binaryExpression("-", read(end, scope), read(start, scope)));
 					}),
+					"joined(separator:)": (scope, arg, type) => {
+						return callable((innerScope, innerArg) => {
+							return transform(arg(1, "collection"), innerScope, (collection) => {
+								return call(
+									expr(memberExpression(collection, identifier("join"))),
+									undefinedValue,
+									[innerArg(0, "separator")],
+									scope,
+								);
+							});
+						}, returnType(type));
+					},
 				} as FunctionMap),
-				conformances: {},
+				conformances: {
+					BidirectionalCollection: {
+						"joined(separator:)": (scope, arg, type) => {
+							return callable((innerScope, innerArg) => {
+								return transform(arg(1, "collection"), innerScope, (collection) => {
+									return call(
+										expr(memberExpression(collection, identifier("join"))),
+										undefinedValue,
+										[innerArg(0, "separator")],
+										scope,
+									);
+								});
+							}, returnType(type));
+						},
+					},
+				},
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(literal([]));
@@ -724,9 +765,43 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			field("hashValue", reifyType("Int", globalScope), (value) => value),
 		], {
 		}),
+		"ClosedRange": () => primitive(PossibleRepresentation.Array, expr(arrayExpression([literal(0), literal(0)])), [], {
+			map: (scope, arg, type) => {
+				const range = arg(2, "range");
+				return callable((innerScope, innerArg) => {
+					let start;
+					let end;
+					if (range.kind === "tuple" && range.values.length === 2) {
+						start = read(range.values[0], scope);
+						end = read(range.values[1], scope);
+					} else {
+						const [first, after] = reuseExpression(read(range, scope), scope, "range");
+						start = memberExpression(first, literal(0), true);
+						end = memberExpression(after, literal(1), true);
+					}
+					const callback = innerArg(0, "callback");
+					const mapped = uniqueIdentifier(innerScope, "mapped");
+					addVariable(innerScope, mapped, undefined);
+					const i = uniqueIdentifier(innerScope, "i");
+					addVariable(innerScope, i, undefined);
+					return statements([
+						variableDeclaration("const", [variableDeclarator(mapped, arrayExpression([]))]),
+						forStatement(
+							variableDeclaration("let", [variableDeclarator(i, start)]),
+							binaryExpression("<=", i, end),
+							updateExpression("++", i),
+							blockStatement([
+								expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, undefinedValue, [expr(i)], scope), scope)])),
+							]),
+						),
+						returnStatement(mapped),
+					]);
+					return array([range, innerArg(0, "callback")], innerScope);
+				}, returnType(type));
+			},
+		}),
 		"Collection": () => protocol("Collection"),
 		"BidirectionalCollection": () => protocol("BidirectionalCollection"),
-		"ClosedRange": () => protocol("ClosedRange"),
 		"Strideable": () => protocol("Strideable"),
 		"Hasher": () => protocol("Hasher"),
 	};

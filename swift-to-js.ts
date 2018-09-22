@@ -119,7 +119,7 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 				let protocol;
 				if (typeof declaration.signature !== "undefined") {
 					for (const element of declaration.signature) {
-						if (element.name === substitution.from) {
+						if (typeof element !== "undefined" && element.name === substitution.from) {
 							protocol = element.protocol;
 						}
 					}
@@ -1381,11 +1381,15 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			for (const child of term.children) {
 				switch (child.name) {
 					case "var_decl": {
+						if (child.args.length < 1) {
 						expectLength(child.args, 1);
+						}
 						const propertyName = child.args[0];
 						if (requiresGetter(child)) {
 							// TODO: Implement getters/setters
+							if (child.children.length < 1) {
 							expectLength(child.children, 1);
+							}
 							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							const flags = flagsForDeclarationTerm(child);
 							const type = getType(declaration);
