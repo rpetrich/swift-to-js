@@ -1213,9 +1213,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				functions: lookupForMap(methods),
 				conformances: {},
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
-				defaultValue() {
-					throw new Error(`Unable to default instantiate enums`);
-				},
 				innerTypes: {},
 				copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
 					// Skip the copy if we can—must be done on this side of the inlining boundary
@@ -1368,7 +1365,15 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const bodyStatements: Statement[] = [variableDeclaration("const", [variableDeclarator(self, newExpression(classIdentifier, []))])];
 				for (const field of layout) {
 					if (field.stored) {
-						const fieldExpression = consume(field.name) || read(field.type.defaultValue(innerScope, () => undefined), innerScope);
+						let fieldExpression = consume(field.name);
+						if (typeof fieldExpression === "undefined") {
+							const defaultValue = field.type.defaultValue;
+							if (typeof defaultValue === "undefined") {
+								// Swift always ensures all mandatory fields are filled, so we can be certain that later in the body it will be assigned
+								continue;
+							}
+							fieldExpression = read(defaultValue(innerScope, () => undefined), innerScope);
+						}
 						bodyStatements.push(expressionStatement(assignmentExpression("=", memberExpression(self, identifier(field.name)), fieldExpression)));
 					}
 				}
@@ -1380,13 +1385,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				switch (child.name) {
 					case "var_decl": {
 						if (child.args.length < 1) {
-						expectLength(child.args, 1);
+							expectLength(child.args, 1);
 						}
 						const propertyName = child.args[0];
 						if (requiresGetter(child)) {
 							// TODO: Implement getters/setters
 							if (child.children.length < 1) {
-							expectLength(child.children, 1);
+								expectLength(child.children, 1);
 							}
 							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							const flags = flagsForDeclarationTerm(child);

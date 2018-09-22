@@ -219,9 +219,6 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 					},
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.All,
-					defaultValue() {
-						throw new Error(`No default value`);
-					},
 				};
 			}
 			return reified;
@@ -236,9 +233,6 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 				},
 				innerTypes: {},
 				possibleRepresentations: PossibleRepresentation.Object,
-				defaultValue() {
-					return undefinedValue;
-				},
 			};
 	}
 }

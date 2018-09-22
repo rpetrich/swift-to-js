@@ -3,7 +3,7 @@ import { parseType } from "./parse";
 import { mangleName, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, copy, expr, functionValue, literal, read, reuseExpression, undefinedValue, Value } from "./values";
+import { array, call, copy, expr, functionValue, literal, read, reuseExpression, stringifyType, undefinedValue, Value } from "./values";
 
 import { assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
@@ -28,7 +28,7 @@ export interface ReifiedType {
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	cases?: ReadonlyArray<EnumCase>;
-	defaultValue(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
+	defaultValue?(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
 	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
 }
@@ -109,9 +109,6 @@ export function protocol(name: string): ReifiedType {
 		},
 		conformances: Object.create(null),
 		possibleRepresentations: PossibleRepresentation.All,
-		defaultValue() {
-			throw new TypeError(`Protocols do not have a default value`);
-		},
 		innerTypes: noInnerTypes,
 	};
 }
@@ -154,8 +151,15 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue(scope, consume) {
 					return expr(objectExpression(onlyStored.map((field) => {
-						const value = consume(field.name);
-						return objectProperty(mangleName(field.name), value ? value : read(field.type.defaultValue(scope, alwaysUndefined), scope));
+						let value = consume(field.name);
+						if (typeof value === "undefined") {
+							const defaultValue = field.type.defaultValue;
+							if (typeof defaultValue === "undefined") {
+								throw new TypeError(`Cannot default instantiate ${field.name}`);
+							}
+							value = read(defaultValue(scope, alwaysUndefined), scope);
+						}
+						return objectProperty(mangleName(field.name), value);
 					})));
 				},
 				copy(value, scope) {
@@ -255,7 +259,11 @@ export function getField(value: Value, field: Field, scope: Scope) {
 }
 
 export function defaultInstantiateType(type: Type, scope: Scope, consume: (fieldName: string) => Expression | undefined): Value {
-	return reifyType(type, scope).defaultValue(scope, consume);
+	const reified = reifyType(type, scope);
+	if (!reified.defaultValue) {
+		throw new Error(`Cannot default instantiate ${stringifyType(type)}`);
+	}
+	return reified.defaultValue(scope, consume);
 }
 
 function typeArgumentsForArray(args: ReadonlyArray<Type>) {
@@ -307,7 +315,13 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 						conformances: {},
 						possibleRepresentations: PossibleRepresentation.Array,
 						defaultValue(innerScope) {
-							return array(reifiedTypes.map((inner) => inner.defaultValue(innerScope, alwaysUndefined)), innerScope);
+							return array(reifiedTypes.map((inner, i) => {
+								const defaultValue = inner.defaultValue;
+								if (typeof defaultValue === "undefined") {
+									throw new TypeError(`Tuple field ${i} of type ${stringifyType(type.types[i])} is not default instantiable`);
+								}
+								return defaultValue(innerScope, alwaysUndefined);
+							}), innerScope);
 						},
 						copy(value, innerScope) {
 							if (value.kind === "tuple") {
