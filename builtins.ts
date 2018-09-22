@@ -796,10 +796,44 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						),
 						returnStatement(mapped),
 					]);
-					return array([range, innerArg(0, "callback")], innerScope);
+				}, returnType(type));
+			},
+			reduce: (scope, arg, type) => {
+				const range = arg(2, "range");
+				return callable((innerScope, innerArg) => {
+					let start: Expression;
+					let end: Expression;
+					if (range.kind === "tuple" && range.values.length === 2) {
+						start = read(range.values[0], scope);
+						end = read(range.values[1], scope);
+					} else {
+						const [first, after] = reuseExpression(read(range, scope), scope, "range");
+						start = memberExpression(first, literal(0), true);
+						end = memberExpression(after, literal(1), true);
+					}
+					return transform(innerArg(0, "initialResult"), scope, (initialResult) => {
+						const next = innerArg(1, "next");
+						const result = uniqueIdentifier(innerScope, "result");
+						addVariable(innerScope, result, undefined);
+						const i = uniqueIdentifier(innerScope, "i");
+						addVariable(innerScope, i, undefined);
+						return statements([
+							variableDeclaration("let", [variableDeclarator(result, initialResult)]),
+							forStatement(
+								variableDeclaration("let", [variableDeclarator(i, start)]),
+								binaryExpression("<=", i, end),
+								updateExpression("++", i),
+								blockStatement([
+									expressionStatement(assignmentExpression("=", result, read(call(next, undefinedValue, [expr(result), expr(i)], scope), scope))),
+								]),
+							),
+							returnStatement(result),
+						]);
+					});
 				}, returnType(type));
 			},
 		}),
+		"Sequence": () => protocol("Sequence"),
 		"Collection": () => protocol("Collection"),
 		"BidirectionalCollection": () => protocol("BidirectionalCollection"),
 		"Strideable": () => protocol("Strideable"),
