@@ -23,10 +23,6 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 }
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
-	// if (typeof valueChecker !== "undefined") {
-	// 	return wrapped((scope: Scope, arg: ArgGetter) => valueChecker(expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))), scope));
-	// }
-	// return wrapped((scope: Scope, arg: ArgGetter) => expr(binaryExpression(operator, read(arg(typeArgumentCount, "lhs"), scope), read(arg(typeArgumentCount + 1, "rhs"), scope))));
 	return wrapped((scope: Scope, arg: ArgGetter) => transform(arg(typeArgumentCount, "lhs"), scope, (lhs) => {
 		return transform(arg(typeArgumentCount + 1, "rhs"), scope, (rhs) => {
 			const unchecked = expr(binaryExpression(operator, lhs, rhs));
