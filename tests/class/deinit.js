@@ -1,10 +1,6 @@
 export function allocate() {
-  const self = function () {
-    const deinit = new Deinit();
-    return deinit;
-  }();
-
+  const deinit = new Deinit();
   console.log("init called");
-  return self;
+  return deinit;
 }
 export class Deinit {}
