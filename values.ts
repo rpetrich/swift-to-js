@@ -8,7 +8,7 @@ import { addVariable, DeclarationFlags, emitScope, fullPathOfScope, mangleName, 
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
-export type ArgGetter = (index: number | "this", desiredName?: string) => Value;
+export type ArgGetter = (index: number, desiredName?: string) => Value;
 
 
 export interface Position {
@@ -277,11 +277,11 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			if (operator !== "=") {
 				// Call the getter, apply the operation, then apply the setter
 				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-				const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
+				const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), scope, location, "get");
 				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
 				setterArgs = reused.map(([first]) => expr(first));
 			}
-			return call(dest.setter, undefinedValue, concat(setterArgs, [source]), scope, location, "set");
+			return call(dest.setter, concat(setterArgs, [source]), scope, location, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
@@ -311,9 +311,9 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
 			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-			const valueFetched = call(dest.getter, undefinedValue, reused.map(([_, after]) => expr(after)), scope, location, "get");
+			const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), scope, location, "get");
 			const result = updater(valueFetched);
-			return call(dest.setter, undefinedValue, concat(reused.map(([first]) => expr(first)), [result]), scope, location, "set");
+			return call(dest.setter, concat(reused.map(([first]) => expr(first)), [result]), scope, location, "set");
 		default:
 			break;
 	}
@@ -426,7 +426,7 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 		}
 		case "subscript": {
-			return annotate(read(call(value.getter, undefinedValue, value.args, scope, value.location, "get"), scope), value.location);
+			return annotate(read(call(value.getter, value.args, scope, value.location, "get"), scope), value.location);
 		}
 		case "boxed": {
 			return annotate(read(value.contents, scope), value.location);
@@ -484,11 +484,8 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 
 export const undefinedValue = expr(undefinedLiteral);
 
-export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Value>, scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
+export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
-		if (i === "this") {
-			return thisArgument;
-		}
 		if (i < args.length) {
 			return args[i];
 		}
@@ -549,7 +546,7 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
 				}
 				const func = memberExpression(read(target.parentType, scope), literal(target.name), true);
-				return call(expr(func, target.location), thisArgument, args, scope, location);
+				return call(expr(func, target.location), args, scope, location);
 			}
 			switch (type) {
 				case "call":
@@ -568,7 +565,7 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 				throw new Error(`Unable to call a ${type}ter on a function!`);
 			}
 			// Inlining is responsible for making the codegen even remotely sane
-			// return call(expr(read(target, scope)), thisArgument, args, scope, location);
+			// return call(expr(read(target, scope)), args, scope, location);
 			return annotateValue(target.call(scope, getter), location);
 		default:
 			break;
@@ -576,11 +573,7 @@ export function call(target: Value, thisArgument: Value, args: ReadonlyArray<Val
 	if (type !== "call") {
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
-	if (thisArgument.kind === "direct" && thisArgument.ref.type === "Identifier" && thisArgument.ref.name === "undefined") {
-		return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))), location);
-	} else {
-		return expr(callExpression(memberExpression(read(target, scope), identifier("call")), concat([thisArgument as Value], args).map((value) => read(value, scope))), location);
-	}
+	return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))), location);
 }
 
 export function isPure(expression: Expression): boolean {

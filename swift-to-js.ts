@@ -424,7 +424,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 						};
 					}
 					// Remove the discriminant
-					patternValue = call(expr(memberExpression(after, identifier("slice")), term), undefinedValue, [expr(literal(1))], scope, term);
+					patternValue = call(expr(memberExpression(after, identifier("slice")), term), [expr(literal(1))], scope, term);
 					break;
 			}
 			// General case pattern matching on an enum
@@ -580,14 +580,13 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const type = getType(args);
 			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
 			if (argsValue.kind === "tuple") {
-				return call(targetValue, undefinedValue, argsValue.values, scope);
+				return call(targetValue, argsValue.values, scope);
 			} else {
 				let updatedArgs: Value = argsValue;
 				if (targetValue.kind === "function" && targetValue.substitutions.length !== 0) {
 					// Insert substitutions as a [Foo$Type].concat(realArgs) expression
 					updatedArgs = call(
 						expr(memberExpression(arrayExpression(targetValue.substitutions.map((sub) => read(sub, scope))), identifier("concat"))),
-						undefinedValue,
 						[argsValue],
 						scope,
 						argsValue.location,
@@ -595,7 +594,6 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				}
 				return call(
 					expr(memberExpression(read(targetValue, scope), identifier("apply")), term),
-					undefinedValue,
 					[undefinedValue, updatedArgs],
 					scope,
 				);
@@ -762,7 +760,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			return expr(conditionalExpression(
 				optionalIsSome(first, type),
 				read(unwrapOptional(expr(after), type, scope), scope),
-				read(call(forceUnwrapFailed, undefinedValue, [], scope), scope),
+				read(call(forceUnwrapFailed, [], scope), scope),
 			), term);
 		}
 		case "try_expr":
@@ -1199,7 +1197,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						callExpression(memberExpression(after, identifier("slice")), []) as Expression,
 					));
 				} else {
-					return call(expr(memberExpression(expression, identifier("slice"))), undefinedValue, [], innerScope);
+					return call(expr(memberExpression(expression, identifier("slice"))), [], innerScope);
 				}
 			}
 			const layout: Field[] = [];
@@ -1230,7 +1228,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					}
 					// Dispatch through the function so that recursion doesn't kill us
 					const copyFunctionType: Function = { kind: "function", arguments: { kind: "tuple", types: [selfType] }, return: selfType, throws: false, rethrows: false, attributes: [] };
-					return call(functionValue(copyFunctionName, typeValue(selfType), copyFunctionType), undefinedValue, [expr(expression)], scope);
+					return call(functionValue(copyFunctionName, typeValue(selfType), copyFunctionType), [expr(expression)], scope);
 				},
 				cases,
 			};
@@ -1298,7 +1296,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							}
 						} else {
 							layout.push(field(fieldName, reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
-								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], innerScope), [], innerScope);
 							}));
 						}
 						statements = concat(statements, translateStatement(child.children[0], scope, methods));
@@ -1323,7 +1321,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						expectLength(child.children, 1);
 						layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
 							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-							return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), undefinedValue, [value], innerScope), undefinedValue, [], innerScope);
+							return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], innerScope), [], innerScope);
 						}));
 						statements = concat(statements, translateStatement(child.children[0], scope, methods));
 					} else {

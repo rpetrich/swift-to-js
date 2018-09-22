@@ -28,9 +28,6 @@ export function functionize(scope: Scope, expression: (scope: Scope, arg: ArgGet
 		if (usedCount === -1) {
 			throw new Error(`Requested access to scope after it was generated!`);
 		}
-		if (i === "this") {
-			return expr(thisExpression());
-		}
 		if (usedCount <= i) {
 			usedCount = i + 1;
 		}
@@ -79,7 +76,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
-		return call(expr(insertFunction(name, scope, type, builder)), arg("this"), type.arguments.types.map((_, i) => arg(i)), scope);
+		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), scope);
 	};
 }
 
