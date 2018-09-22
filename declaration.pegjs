@@ -2,7 +2,7 @@ Top
   = _ Name '.(file).' body:(FunctionAndLocalReference / TypeAndMemberReference / FunctionReference / Name) specialization:Specialization? PathReference? afterSpecialization:Specialization? _ { return { ...body, ...specialization || afterSpecialization || undefined }; }
 
 FunctionAndLocalReference
-  = member:(TypeAndMemberReference / FunctionReference) '.' local:Name { return { type: member.type, member: member.member, local: local }; }
+  = member:(TypeAndMemberReference / FunctionReference) '.' ('explicit closure discriminator=' [0-9]+ '.')? local:Name { return { type: member.type, member: member.member, local: local }; }
 
 TypeAndMemberReference
   = type:Name (__ 'extension.' / '.') member:(FunctionReference / Name) { return { type: type, member: member.member, local: member.local }; }

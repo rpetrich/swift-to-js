@@ -84,7 +84,7 @@ BareStringParenPair "parenthesized string component"
 BareStringSquarePair "subscripted bare string"
   = ws: _ '[' body:BareStringTailWhitespace* ']' { return ws + "[" + body.join("") + "]"; }
 BareStringExtension
-  = ' extension.' // Special case for extension methods. At some point we will need declaration parsing in here
+  = ' extension.' / ' closure discriminator=' // Special case for declaration syntax that includes spaces
 
 BareStringNoWhitespace "bare string no whitespace"
   = prefix:BareStringNoWhitespaceToken remaining:BareStringNoWhitespaceTail* { return prefix + remaining.join(""); }
