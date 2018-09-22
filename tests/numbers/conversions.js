@@ -9,7 +9,7 @@ export function makeInt32$fromInt$(value) {
   return value;
 }
 export function makeInt16$fromInt$(value) {
-  return value > -32768 || value < 32767 ? $$numericRangeFailed() : value;
+  return value < -32768 || value > 32767 ? $$numericRangeFailed() : value;
 }
 export function makeClampedInt16$fromInt$(value) {
   return value > 32767 ? 32767 : value < -32768 ? -32768 : value;

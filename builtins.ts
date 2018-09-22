@@ -323,8 +323,8 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 	if (requiresGreaterThanCheck && requiresLessThanCheck) {
 		check = logicalExpression(
 			"||",
-			binaryExpression(">", first, dest.min),
-			binaryExpression("<", after, dest.max),
+			binaryExpression("<", first, dest.min),
+			binaryExpression(">", after, dest.max),
 		);
 	} else if (requiresGreaterThanCheck) {
 		check = binaryExpression(">", first, dest.max);
