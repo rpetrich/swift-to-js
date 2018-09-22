@@ -1428,6 +1428,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						}
 						break;
 					}
+					case "destructor_decl": {
+						const brace = findTermWithName(child.children, "brace_stmt");
+						if (typeof brace !== "undefined" && brace.children.length > 0) {
+							console.warn(`Non-trivial deinit method found on ${className}, will never be called at runtime`);
+						}
+						break;
+					}
 					case "constructor_decl":
 					case "func_decl": {
 						const isConstructor = child.name === "constructor_decl";
