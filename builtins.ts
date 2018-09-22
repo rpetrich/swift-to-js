@@ -4,9 +4,9 @@ import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout
 import { addVariable, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -386,6 +386,37 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeA
 function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, name: string) {
 	const typeArg = arg(0, "type");
 	return call(functionValue(name, typeArg, type), undefinedValue, [typeArg], scope);
+}
+
+function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expression) => Statement): Statement {
+	let start;
+	let end;
+	let declarators: VariableDeclarator[] = [];
+	const i = uniqueIdentifier(scope, "i");
+	addVariable(scope, i, undefined);
+	if (range.kind === "tuple" && range.values.length === 2) {
+		start = read(range.values[0], scope);
+		end = read(range.values[1], scope);
+		if (isPure(end)) {
+			declarators = [variableDeclarator(i, start)];
+		} else {
+			const endIdentifier = uniqueIdentifier(scope, "end");
+			addVariable(scope, endIdentifier, undefined);
+			declarators = [variableDeclarator(i, start), variableDeclarator(endIdentifier, end)];
+			end = endIdentifier;
+		}
+	} else {
+		const endIdentifier = uniqueIdentifier(scope, "end");
+		addVariable(scope, endIdentifier, undefined);
+		declarators = [variableDeclarator(arrayPattern([i, endIdentifier]), read(range, scope))];
+		end = endIdentifier;
+	}
+	return forStatement(
+		variableDeclaration("let", declarators),
+		binaryExpression("<=", i, end),
+		updateExpression("++", i),
+		body(i),
+	);
 }
 
 function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
@@ -769,31 +800,14 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			map: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
-					let start;
-					let end;
-					if (range.kind === "tuple" && range.values.length === 2) {
-						start = read(range.values[0], scope);
-						end = read(range.values[1], scope);
-					} else {
-						const [first, after] = reuseExpression(read(range, scope), scope, "range");
-						start = memberExpression(first, literal(0), true);
-						end = memberExpression(after, literal(1), true);
-					}
-					const callback = innerArg(0, "callback");
 					const mapped = uniqueIdentifier(innerScope, "mapped");
 					addVariable(innerScope, mapped, undefined);
-					const i = uniqueIdentifier(innerScope, "i");
-					addVariable(innerScope, i, undefined);
+					const callback = innerArg(0, "callback");
 					return statements([
 						variableDeclaration("const", [variableDeclarator(mapped, arrayExpression([]))]),
-						forStatement(
-							variableDeclaration("let", [variableDeclarator(i, start)]),
-							binaryExpression("<=", i, end),
-							updateExpression("++", i),
-							blockStatement([
-								expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, undefinedValue, [expr(i)], scope), scope)])),
-							]),
-						),
+						closedRangeIterate(range, innerScope, (i) => blockStatement([
+							expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, undefinedValue, [expr(i)], scope), scope)])),
+						])),
 						returnStatement(mapped),
 					]);
 				}, returnType(type));
@@ -801,35 +815,17 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			reduce: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
-					let start: Expression;
-					let end: Expression;
-					if (range.kind === "tuple" && range.values.length === 2) {
-						start = read(range.values[0], scope);
-						end = read(range.values[1], scope);
-					} else {
-						const [first, after] = reuseExpression(read(range, scope), scope, "range");
-						start = memberExpression(first, literal(0), true);
-						end = memberExpression(after, literal(1), true);
-					}
-					return transform(innerArg(0, "initialResult"), scope, (initialResult) => {
-						const next = innerArg(1, "next");
-						const result = uniqueIdentifier(innerScope, "result");
-						addVariable(innerScope, result, undefined);
-						const i = uniqueIdentifier(innerScope, "i");
-						addVariable(innerScope, i, undefined);
-						return statements([
-							variableDeclaration("let", [variableDeclarator(result, initialResult)]),
-							forStatement(
-								variableDeclaration("let", [variableDeclarator(i, start)]),
-								binaryExpression("<=", i, end),
-								updateExpression("++", i),
-								blockStatement([
-									expressionStatement(assignmentExpression("=", result, read(call(next, undefinedValue, [expr(result), expr(i)], scope), scope))),
-								]),
-							),
-							returnStatement(result),
-						]);
-					});
+					const result = uniqueIdentifier(innerScope, "result");
+					addVariable(innerScope, result, undefined);
+					const initialResult = innerArg(0, "initialResult");
+					const next = innerArg(1, "next");
+					return statements([
+						variableDeclaration("let", [variableDeclarator(result, read(initialResult, scope))]),
+						closedRangeIterate(range, innerScope, (i) => blockStatement([
+							expressionStatement(assignmentExpression("=", result, read(call(next, undefinedValue, [expr(result), expr(i)], scope), scope))),
+						])),
+						returnStatement(result),
+					]);
 				}, returnType(type));
 			},
 		}),
