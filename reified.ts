@@ -24,7 +24,7 @@ export enum PossibleRepresentation {
 export interface ReifiedType {
 	fields: ReadonlyArray<Field>;
 	functions: (name: string) => FunctionBuilder | GetterSetterBuilder | undefined;
-	conformances: { [protocolName: string]: ProtocolConformance };
+	conformances: ProtocolConformanceMap;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
 	cases?: ReadonlyArray<EnumCase>;
@@ -58,6 +58,10 @@ export interface ProtocolConformance {
 	[functionName: string]: FunctionBuilder;
 }
 
+export interface ProtocolConformanceMap {
+	[protocolName: string]: ProtocolConformance;
+}
+
 export type Field = {
 	name: string;
 	type: ReifiedType;
@@ -82,10 +86,11 @@ function representationForFields(storedFields: ReadonlyArray<Field>) {
 const emptyTypeParameters: ReadonlyArray<string> = [];
 const emptyTypes: ReadonlyArray<Type> = [];
 const emptyFields: ReadonlyArray<Field> = [];
-const noFunctions: Readonly<FunctionMap> = {};
-const noInnerTypes: Readonly<TypeMap> = {};
+const emptyConformances: ProtocolConformanceMap = Object.create(null);
+const noFunctions: Readonly<FunctionMap> = Object.create(null);
+const noInnerTypes: Readonly<TypeMap> = Object.create(null);
 
-export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, conformances: { [protocolName: string]: ProtocolConformance } = Object.create(null), innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		fields,
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
@@ -98,26 +103,26 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 	};
 }
 
-export function protocol(name: string): ReifiedType {
+export function protocol(conformances: ProtocolConformanceMap = emptyConformances): ReifiedType {
 	return {
 		fields: emptyFields,
 		functions(functionName) {
 			return (scope, arg, type) => {
-				const typeArg = arg(0, "type");
+				const typeArg = arg(0, "T");
 				return call(functionValue(functionName, typeArg, type), type.arguments.types.map((_, i) => i ? arg(i) : typeArg), scope);
 			};
 		},
-		conformances: Object.create(null),
+		conformances,
 		possibleRepresentations: PossibleRepresentation.All,
 		innerTypes: noInnerTypes,
 	};
 }
 
-export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes) {
+export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		fields,
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-		conformances: {},
+		conformances,
 		possibleRepresentations: type.possibleRepresentations,
 		defaultValue: type.defaultValue,
 		copy: type.copy,
@@ -126,14 +131,14 @@ export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, f
 	};
 }
 
-export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	const onlyStored = storedFields(fields);
 	switch (onlyStored.length) {
 		case 0:
 			return {
 				fields,
 				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-				conformances: {},
+				conformances,
 				possibleRepresentations: PossibleRepresentation.Undefined,
 				defaultValue() {
 					return undefinedValue;
@@ -142,12 +147,12 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 			};
 		case 1:
 			// TODO: Map fields appropriately on unary structs
-			return inheritLayout(onlyStored[0].type, fields, {}, innerTypes);
+			return inheritLayout(onlyStored[0].type, fields, functions, conformances, innerTypes);
 		default:
 			return {
 				fields,
 				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-				conformances: {},
+				conformances,
 				possibleRepresentations: PossibleRepresentation.Object,
 				defaultValue(scope, consume) {
 					return expr(objectExpression(onlyStored.map((field) => {
@@ -193,11 +198,11 @@ function cannotDefaultInstantiateClass(): never {
 	throw new TypeError(`Cannot default instantiate a class`);
 }
 
-export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
+export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
 	return {
 		fields,
 		functions: lookupForMap(functions),
-		conformances: {},
+		conformances,
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue,
 		innerTypes,

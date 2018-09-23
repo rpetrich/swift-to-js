@@ -88,6 +88,10 @@ export function wrapped(fn: (scope: Scope, arg: ArgGetter, type: Function, typeA
 	};
 }
 
+export const abstractMethod: FunctionBuilder = (scope, arg, type, name) => {
+	throw new TypeError(`Abstract method ${name} not overridden`);
+};
+
 export function returnType(type: Type) {
 	if (type.kind === "function") {
 		return type.return;

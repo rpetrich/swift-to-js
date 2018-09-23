@@ -3,7 +3,7 @@ import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome,
 import { Declaration } from "./declaration";
 import { FunctionBuilder, functionize, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
@@ -14,8 +14,6 @@ import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpressio
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
-
-const hasOwnProperty = Object.hasOwnProperty.call.bind(Object.hasOwnProperty);
 
 const emptyStatements: Statement[] = [];
 
@@ -60,7 +58,7 @@ function isString(value: any): value is string {
 
 function getProperty<T extends Property>(term: Term, key: string, checker: (prop: Property) => prop is T): T {
 	const props = term.properties;
-	if (hasOwnProperty(props, key)) {
+	if (Object.hasOwnProperty.call(props, key)) {
 		const value = props[key];
 		if (checker(value)) {
 			return value;
@@ -979,6 +977,23 @@ function noArguments(): never {
 	throw new Error(`Did not expect getters to inspect arguments`);
 }
 
+function nameForFunctionTerm(term: Term): string {
+	expectLength(term.args, 1, 2);
+	return term.args[0].replace(/\((_:)+\)$/, "");
+}
+
+function addFunctionToType(functions: FunctionMap, conformances: ProtocolConformanceMap | undefined, name: string, builder: FunctionBuilder) {
+	functions[name] = builder;
+	if (typeof conformances !== "undefined") {
+		for (const key of Object.keys(conformances)) {
+			const conformance = conformances[key];
+			if (Object.hasOwnProperty.call(conformance, name)) {
+				conformance[name] = builder;
+			}
+		}
+	}
+}
+
 function translateStatement(term: Term, scope: Scope, functions: FunctionMap, nextTerm?: Term): Statement[] {
 	switch (term.name) {
 		case "source_file": {
@@ -992,7 +1007,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "func_decl": {
 			const isConstructor = term.name === "constructor_decl";
 			expectLength(term.args, 1, 2);
-			const name = term.args[0];
+			const name = nameForFunctionTerm(term);
 			const parameters = termsWithName(term.children, "parameter");
 			const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(term.children, "parameter_list").map((paramList) => paramList.children));
 			if (parameterLists.length === 0) {
@@ -1002,10 +1017,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			if (/^anonname=/.test(name)) {
 				scope.functions[name] = fn;
 			} else if (!isConstructor && (flagsForDeclarationTerm(term) & DeclarationFlags.Export) && functions === scope.functions) {
-				functions[name] = noinline(fn);
+				addFunctionToType(functions, undefined, name, noinline(fn));
 				insertFunction(name, scope, getFunctionType(term), fn, undefined, true);
 			} else {
-				functions[name] = isConstructor ? fn : noinline(fn);
+				addFunctionToType(functions, undefined, name, isConstructor ? fn : noinline(fn));
 			}
 			return emptyStatements;
 		}
@@ -1216,9 +1231,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const reifiedSelfType: ReifiedType = {
 				fields: layout,
 				functions: lookupForMap(methods),
-				conformances: {},
+				conformances: Object.create(null),
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
-				innerTypes: {},
+				innerTypes: Object.create(null),
 				copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
 					// Skip the copy if we can—must be done on this side of the inlining boundary
 					const expression = read(value, scope);
@@ -1317,7 +1332,15 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const layout: Field[] = [];
 			const methods: FunctionMap = {};
 			const structName = term.args[0];
-			scope.types[structName] = () => struct(layout, methods);
+			const conformances: ProtocolConformanceMap = Object.create(null);
+			if (Object.hasOwnProperty.call(term.properties, "inherits")) {
+				const inherits = term.properties.inherits;
+				if (typeof inherits === "string") {
+					const inheritsReified = reifyType(inherits, scope);
+					conformances[inherits] = Object.assign(Object.create(null), inheritsReified.conformances[inherits]);
+				}
+			}
+			scope.types[structName] = () => struct(layout, methods, conformances);
 			for (const child of term.children) {
 				switch (child.name) {
 					case "var_decl": {
@@ -1338,14 +1361,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					case "func_decl": {
 						const isConstructor = child.name === "constructor_decl";
 						expectLength(child.args, 1, 2);
-						const name = child.args[0];
+						const name = nameForFunctionTerm(child);
 						const parameters = termsWithName(child.children, "parameter");
 						const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(child.children, "parameter_list").map((paramList) => paramList.children));
 						if (parameterLists.length === 0) {
 							throw new Error(`Expected a parameter list for a function declaration`);
 						}
 						const fn = translateFunctionTerm(name, child, parameterLists, isConstructor ? structName : undefined, scope, functions);
-						methods[name] = fn;
+						addFunctionToType(methods, conformances, name, fn);
 						break;
 					}
 					default: {
@@ -1383,7 +1406,8 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const methods: FunctionMap = Object.create(null);
 			const classIdentifier = mangleName(term.args[0]);
 			const className = term.args[0];
-			scope.types[className] = () => newClass(layout, methods, Object.create(null), (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
+			const conformances: ProtocolConformanceMap = Object.create(null);
+			scope.types[className] = () => newClass(layout, methods, conformances, Object.create(null), (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
 				const self = uniqueIdentifier(innerScope, camelCase(className));
 				addVariable(innerScope, self, undefined);
 				const bodyStatements: Statement[] = [];
@@ -1469,14 +1493,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					case "func_decl": {
 						const isConstructor = child.name === "constructor_decl";
 						expectLength(child.args, 1, 2);
-						const name = child.args[0];
+						const name = nameForFunctionTerm(child);
 						const parameters = termsWithName(child.children, "parameter");
 						const parameterLists = concat(parameters.length ? [parameters] : [], termsWithName(child.children, "parameter_list").map((paramList) => paramList.children));
 						if (parameterLists.length === 0) {
 							throw new Error(`Expected a parameter list for a function declaration`);
 						}
 						const fn = translateFunctionTerm(name, child, parameterLists, isConstructor ? className : undefined, scope, functions);
-						methods[name] = fn;
+						addFunctionToType(methods, conformances, name, fn);
 						break;
 					}
 					default:

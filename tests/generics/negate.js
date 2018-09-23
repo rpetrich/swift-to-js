@@ -4,6 +4,10 @@ export function negate$number$(T, number) {
 const $Int$SignedNumeric = {
   $minus$(value) {
     return -value;
+  },
+
+  negate(lhs, rhs) {
+    lhs = -rhs;
   }
 
 };
@@ -13,6 +17,10 @@ export function negate$integer$(integer) {
 const $Double$SignedNumeric = {
   $minus$(value) {
     return -value;
+  },
+
+  negate(lhs, rhs) {
+    lhs = -rhs;
   }
 
 };

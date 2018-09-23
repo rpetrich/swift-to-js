@@ -1,12 +1,12 @@
-import { noinline, returnFunctionType, returnType, wrapped } from "./functions";
+import { abstractMethod, FunctionBuilder, noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ReifiedType, reifyType, struct, TypeParameterHost } from "./reified";
+import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ProtocolConformanceMap, ReifiedType, reifyType, struct, TypeMap, TypeParameterHost } from "./reified";
 import { addVariable, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, expectLength, lookupForMap } from "./utils";
 import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
-import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator } from "babel-types";
+import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, breakStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -23,19 +23,19 @@ function returnLength(scope: Scope, arg: ArgGetter): Value {
 }
 
 function binaryBuiltin(operator: "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
-	return wrapped((scope: Scope, arg: ArgGetter) => transform(arg(typeArgumentCount, "lhs"), scope, (lhs) => {
+	return (scope: Scope, arg: ArgGetter) => transform(arg(typeArgumentCount, "lhs"), scope, (lhs) => {
 		return transform(arg(typeArgumentCount + 1, "rhs"), scope, (rhs) => {
 			const unchecked = expr(binaryExpression(operator, lhs, rhs));
 			return typeof valueChecker !== "undefined" ? valueChecker(unchecked, scope) : unchecked;
 		});
-	}));
+	});
 }
 
 function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
 	if (typeof valueChecker !== "undefined") {
-		return wrapped((scope: Scope, arg: ArgGetter) => update(arg(typeArgumentCount, "target"), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(typeArgumentCount + 1, "value"), scope))), scope)));
+		return (scope: Scope, arg: ArgGetter) => update(arg(typeArgumentCount, "target"), scope, (value) => valueChecker(expr(binaryExpression(operator, read(value, scope), read(arg(typeArgumentCount + 1, "value"), scope))), scope));
 	}
-	return wrapped((scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, operator + "=" as any));
+	return (scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, operator + "=" as any);
 }
 
 const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope));
@@ -56,7 +56,17 @@ const voidType: Tuple = { kind: "tuple", types: [] };
 
 export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
 
-function buildIntegerType(min: number, max: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
+function cachedBuilder(fn: (scope: Scope) => ReifiedType): (scope: Scope) => ReifiedType {
+	let value: ReifiedType | undefined;
+	return (scope: Scope) => {
+		if (typeof value === "undefined") {
+			return value = fn(scope);
+		}
+		return value;
+	};
+}
+
+function buildIntegerType(globalScope: Scope, min: number, max: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
 	const fields: Field[] = [];
 	const range: NumericRange = { min: literal(min), max: literal(max) };
 	const widerHigh: NumericRange = checked ? { min: literal(min), max: literal(max + 1) } : range;
@@ -109,11 +119,11 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 				after,
 			));
 		}),
-		"&-": binaryBuiltin("-", 0, wrap),
+		"&-": wrapped(binaryBuiltin("-", 0, wrap)),
 	};
 	const fixedWidthIntegerType: ProtocolConformance = {
-		"&+": binaryBuiltin("+", 0, wrap),
-		"&*": binaryBuiltin("*", 0, wrap),
+		"&+": wrapped(binaryBuiltin("+", 0, wrap)),
+		"&*": wrapped(binaryBuiltin("*", 0, wrap)),
 	};
 	const reifiedType: ReifiedType = {
 		fields,
@@ -164,34 +174,69 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 			}),
 			"*": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerBoth, range)),
 			"/": (scope, arg) => expr(binaryExpression("|", binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)), literal(0))),
-			"%": binaryBuiltin("%", 0),
-			"<": binaryBuiltin("<", 0),
-			">": binaryBuiltin(">", 0),
-			"<=": binaryBuiltin("<=", 0),
-			">=": binaryBuiltin(">=", 0),
-			"&": binaryBuiltin("&", 0),
-			"|": binaryBuiltin("|", 0),
-			"^": binaryBuiltin("^", 0),
-			"==": binaryBuiltin("===", 0),
-			"!=": binaryBuiltin("!==", 0),
-			"+=": updateBuiltin("+", 0),
-			"-=": updateBuiltin("-", 0),
-			"*=": updateBuiltin("*", 0),
+			"%": wrapped(binaryBuiltin("%", 0)),
+			"<": wrapped(binaryBuiltin("<", 0)),
+			">": wrapped(binaryBuiltin(">", 0)),
+			"<=": wrapped(binaryBuiltin("<=", 0)),
+			">=": wrapped(binaryBuiltin(">=", 0)),
+			"&": wrapped(binaryBuiltin("&", 0)),
+			"|": wrapped(binaryBuiltin("|", 0)),
+			"^": wrapped(binaryBuiltin("^", 0)),
+			"==": wrapped(binaryBuiltin("===", 0)),
+			"!=": wrapped(binaryBuiltin("!==", 0)),
+			"+=": wrapped(updateBuiltin("+", 0)),
+			"-=": wrapped(updateBuiltin("-", 0)),
+			"*=": wrapped(updateBuiltin("*", 0)),
 			"...": wrapped((scope, arg) => {
 				return tuple([arg(0, "start"), arg(1, "end")]);
 			}),
 		} as FunctionMap),
-		conformances: {
+		conformances: applyDefaultConformances({
+			Equatable: {
+				"==": wrapped(binaryBuiltin("===", 0)),
+				"!=": wrapped(binaryBuiltin("!==", 0)),
+			},
 			[integerTypeName]: integerType,
+			SignedNumeric: {
+				"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
+			},
 			FixedWidthInteger: fixedWidthIntegerType,
 			Strideable: {
 				"...": wrapped((scope, arg) => {
 					return tuple([arg(0, "start"), arg(1, "end")]);
 				}),
 			},
-			LosslessStringConvertible: {
+			CustomStringConvertible: {
 			},
-		},
+			LosslessStringConvertible: {
+				init: wrapped((scope, arg) => {
+					const input = read(arg(0, "description"), scope);
+					const value = valueOfExpression(input);
+					if (typeof value === "string") {
+						const convertedValue = parseInt(value, 10);
+						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
+					}
+					const result = uniqueIdentifier(scope, "integer");
+					addVariable(scope, result, undefined);
+					return statements([
+						variableDeclaration("const", [variableDeclarator(result, callExpression(identifier("parseInt"), [
+							input,
+							literal(10),
+						]))]),
+						returnStatement(
+							conditionalExpression(
+								binaryExpression("===",
+									result,
+									result,
+								),
+								literal(null),
+								result,
+							),
+						),
+					]);
+				}),
+			},
+		}, globalScope),
 		possibleRepresentations: PossibleRepresentation.Number,
 		defaultValue() {
 			return expr(literal(0));
@@ -204,16 +249,11 @@ function buildIntegerType(min: number, max: number, checked: boolean, wrap: (val
 			})),
 		},
 	};
-	if (min < 0) {
-		reifiedType.conformances.SignedNumeric = {
-			"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
-		};
-	}
 	fields.push(field("hashValue", reifiedType, (value) => value));
 	return reifiedType;
 }
 
-function buildFloatingType(): ReifiedType {
+function buildFloatingType(globalScope: Scope): ReifiedType {
 	const fields: Field[] = [];
 	const reifiedType: ReifiedType = {
 		fields,
@@ -228,32 +268,63 @@ function buildFloatingType(): ReifiedType {
 			}),
 			"*": wrapped((scope, arg, type) => expr(binaryExpression("*", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)))),
 			"/": wrapped((scope, arg, type) => expr(binaryExpression("/", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope)))),
-			"%": binaryBuiltin("%", 0),
-			"<": binaryBuiltin("<", 0),
-			">": binaryBuiltin(">", 0),
-			"<=": binaryBuiltin("<=", 0),
-			">=": binaryBuiltin(">=", 0),
-			"&": binaryBuiltin("&", 0),
-			"|": binaryBuiltin("|", 0),
-			"^": binaryBuiltin("^", 0),
-			"+=": updateBuiltin("+", 0),
-			"-=": updateBuiltin("-", 0),
-			"*=": updateBuiltin("*", 0),
-			"/=": updateBuiltin("/", 0),
+			"%": wrapped(binaryBuiltin("%", 0)),
+			"<": wrapped(binaryBuiltin("<", 0)),
+			">": wrapped(binaryBuiltin(">", 0)),
+			"<=": wrapped(binaryBuiltin("<=", 0)),
+			">=": wrapped(binaryBuiltin(">=", 0)),
+			"&": wrapped(binaryBuiltin("&", 0)),
+			"|": wrapped(binaryBuiltin("|", 0)),
+			"^": wrapped(binaryBuiltin("^", 0)),
+			"+=": wrapped(updateBuiltin("+", 0)),
+			"-=": wrapped(updateBuiltin("-", 0)),
+			"*=": wrapped(updateBuiltin("*", 0)),
+			"/=": wrapped(updateBuiltin("/", 0)),
 		} as FunctionMap),
-		conformances: {
+		conformances: applyDefaultConformances({
+			Equatable: {
+				"==": wrapped(binaryBuiltin("===", 0)),
+				"!=": wrapped(binaryBuiltin("!==", 0)),
+			},
 			SignedNumeric: {
 				"-": wrapped((scope, arg) => expr(unaryExpression("-", read(arg(0, "value"), scope)))),
 			},
 			FloatingPoint: {
-				"==": binaryBuiltin("===", 0),
-				"!=": binaryBuiltin("!==", 0),
+				"==": wrapped(binaryBuiltin("===", 0)),
+				"!=": wrapped(binaryBuiltin("!==", 0)),
 				"squareRoot()": (scope, arg, type) => {
 					const expression = read(arg(1, "value"), scope);
 					return callable(() => expr(callExpression(memberExpression(identifier("Math"), identifier("sqrt")), [expression])), returnType(type));
 				},
 			},
-		},
+			LosslessStringConvertible: {
+				init: wrapped((scope, arg) => {
+					const input = read(arg(0, "description"), scope);
+					const value = valueOfExpression(input);
+					if (typeof value === "string") {
+						const convertedValue = Number(value);
+						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
+					}
+					const result = uniqueIdentifier(scope, "number");
+					addVariable(scope, result, undefined);
+					return statements([
+						variableDeclaration("const", [variableDeclarator(result, callExpression(identifier("Number"), [
+							input,
+						]))]),
+						returnStatement(
+							conditionalExpression(
+								binaryExpression("===",
+									result,
+									result,
+								),
+								literal(null),
+								result,
+							),
+						),
+					]);
+				}),
+			},
+		}, globalScope),
 		possibleRepresentations: PossibleRepresentation.Number,
 		defaultValue() {
 			return expr(literal(0));
@@ -411,8 +482,118 @@ function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expre
 	);
 }
 
-function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope: Scope, typeParameters: TypeParameterHost) => ReifiedType } {
-	const BoolType = (globalScope: Scope) => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [
+function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, scope: Scope, arg: ArgGetter) => Value) {
+	return (scope: Scope, arg: ArgGetter, type: Function) => {
+		const typeArg = arg(0, "T");
+		const otherMethod = call(functionValue(otherMethodName, typeArg, type), [typeArg], scope);
+		return callable((innerScope, innerArg) => adapter(otherMethod, innerScope, innerArg), returnFunctionType(type));
+	};
+}
+
+function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: Scope): ProtocolConformanceMap {
+	const result: ProtocolConformanceMap = Object.create(null);
+	for (const key of Object.keys(conformances)) {
+		const reified = reifyType(key, scope);
+		if (!Object.hasOwnProperty.call(reified.conformances, key)) {
+			throw new TypeError(`${key} is not a protocol`);
+		}
+		result[key] = Object.assign(Object.assign(Object.create(null), reified.conformances[key]), conformances[key]);
+	}
+	return result;
+}
+
+function defaultTypes(checkedIntegers: boolean): TypeMap {
+	const protocolTypes: TypeMap = Object.create(null);
+	function addProtocol(name: string, conformance: ProtocolConformance) {
+		const result = protocol({
+			[name]: conformance,
+		});
+		protocolTypes[name] = () => result;
+	}
+
+	addProtocol("Equatable", {
+		"==": abstractMethod,
+		"!=": adaptedMethod("==", (equalsMethod, scope, arg) => transform(call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope, (equals) => {
+			return expr(unaryExpression("!", equals));
+		})),
+		"~=": adaptedMethod("==", (equalsMethod, scope, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], scope)),
+	});
+	addProtocol("Comparable", {
+		"<": abstractMethod,
+		">": adaptedMethod("<", (lessThanMethod, scope, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], scope)),
+		"<=": adaptedMethod("<", (lessThanMethod, scope, arg) => transform(call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], scope), scope, (lessThan) => {
+			return expr(unaryExpression("!", lessThan));
+		})),
+		">=": adaptedMethod("<", (lessThanMethod, scope, arg) => transform(call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope, (lessThan) => {
+			return expr(unaryExpression("!", lessThan));
+		})),
+	});
+	addProtocol("Numeric", {
+		"init(exactly:)": abstractMethod,
+		"+": abstractMethod,
+		"+=": abstractMethod,
+		"-": abstractMethod,
+		"-=": abstractMethod,
+		"*": abstractMethod,
+		"*=": abstractMethod,
+	});
+	addProtocol("SignedNumeric", {
+		"-": abstractMethod, // TODO: Implement - in terms of negate
+		"negate": adaptedMethod("-", (negateMethod, scope, arg) => {
+			return transform(set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], scope), scope), scope, (expression) => {
+				return statements([expressionStatement(expression)]);
+			});
+		}),
+	});
+	addProtocol("BinaryInteger", {
+		"init(exactly:)": abstractMethod,
+		"init(truncatingIfNeeded:)": abstractMethod,
+		"init(clamping:)": abstractMethod,
+		"/": abstractMethod,
+		"/=": abstractMethod,
+		"%": abstractMethod,
+		"%=": abstractMethod,
+		"+": abstractMethod,
+		"+=": abstractMethod,
+		"-": abstractMethod,
+		"-=": abstractMethod,
+		"*": abstractMethod,
+		"*=": abstractMethod,
+		"~": abstractMethod,
+		"&": abstractMethod,
+		"&=": abstractMethod,
+		"|": abstractMethod,
+		"|=": abstractMethod,
+		"^": abstractMethod,
+		"^=": abstractMethod,
+		">>": abstractMethod,
+		">>=": abstractMethod,
+		"<<": abstractMethod,
+		"<<=": abstractMethod,
+		"quotientAndRemainder(dividingBy:)": abstractMethod,
+		"isMultiple(of:)": abstractMethod,
+		"signum": abstractMethod,
+	});
+	addProtocol("SignedInteger", {});
+	addProtocol("UnsignedInteger", {});
+	addProtocol("FixedWidthInteger", {});
+	addProtocol("FloatingPoint", {});
+	addProtocol("Sequence", {});
+	addProtocol("Collection", {});
+	addProtocol("BidirectionalCollection", {});
+	addProtocol("Strideable", {
+		"distance(to:)": abstractMethod,
+		"advanced(by:)": abstractMethod,
+	});
+	addProtocol("Hasher", {});
+	addProtocol("CustomStringConvertible", {
+		// TODO: Support properties
+	});
+	addProtocol("LosslessStringConvertible", {
+		init: abstractMethod,
+	});
+
+	const BoolType = cachedBuilder((globalScope: Scope) => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [
 		field("description", reifyType(parseType("String"), globalScope), (target, scope) => {
 			return transform(target, scope, (expression) => expr(conditionalExpression(expression, literal("True"), literal("False"))));
 		}),
@@ -440,34 +621,29 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
 		"!": wrapped((scope, arg) => expr(unaryExpression("!", read(arg(0, "value"), scope)))),
 		"random": wrapped((scope, arg) => expr(binaryExpression("<", callExpression(memberExpression(identifier("Math"), identifier("random")), []), literal(0.5)))),
-	}, {
+	}, applyDefaultConformances({
 		Equatable: {
-			"==": (scope, arg) => expr(binaryExpression("===", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
-			"!=": (scope, arg) => expr(binaryExpression("!==", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))),
+			"==": wrapped(binaryBuiltin("===", 0)),
+			"!=": wrapped(binaryBuiltin("!==", 0)),
 		},
-	});
+	}, globalScope)));
 
-	return {
+	return Object.assign(Object.assign(Object.create(null), protocolTypes), {
 		"Bool": BoolType,
 		"Int1": BoolType,
-		"SignedNumeric": cached(() => protocol("SignedNumeric")),
-		"SignedInteger": cached(() => protocol("SignedInteger")),
-		"UnsignedInteger": cached(() => protocol("UnsignedInteger")),
-		"FixedWidthInteger": cached(() => protocol("FixedWidthInteger")),
-		"UInt": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
-		"Int": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
-		"UInt8": cached(() => buildIntegerType(0, 255, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFF))))),
-		"Int8": cached(() => buildIntegerType(-128, 127, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(24)), literal(24))))),
-		"UInt16": cached(() => buildIntegerType(0, 65535, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFFFF))))),
-		"Int16": cached(() => buildIntegerType(-32768, 32767, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(16)), literal(16))))),
-		"UInt32": cached(() => buildIntegerType(0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
-		"Int32": cached(() => buildIntegerType(-2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
-		"UInt64": cached(() => buildIntegerType(0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
-		"Int64": cached(() => buildIntegerType(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
-		"FloatingPoint": cached(() => protocol("FloatingPoint")),
-		"Float": cached(() => buildFloatingType()),
-		"Double": cached(() => buildFloatingType()),
-		"String": (globalScope) => {
+		"UInt": cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
+		"Int": cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
+		"UInt8": cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 255, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFF))))),
+		"Int8": cachedBuilder((globalScope) => buildIntegerType(globalScope, -128, 127, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(24)), literal(24))))),
+		"UInt16": cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 65535, checkedIntegers, (value, scope) => expr(binaryExpression("&", read(value, scope), literal(0xFFFF))))),
+		"Int16": cachedBuilder((globalScope) => buildIntegerType(globalScope, -32768, 32767, checkedIntegers, (value, scope) => expr(binaryExpression(">>", binaryExpression("<<", read(value, scope), literal(16)), literal(16))))),
+		"UInt32": cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, checkedIntegers, (value, scope) => expr(binaryExpression(">>>", read(value, scope), literal(0))))),
+		"Int32": cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, checkedIntegers, (value, scope) => expr(binaryExpression("|", read(value, scope), literal(0))))),
+		"UInt64": cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
+		"Int64": cachedBuilder((globalScope) => buildIntegerType(globalScope, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
+		"Float": cachedBuilder(buildFloatingType),
+		"Double": cachedBuilder(buildFloatingType),
+		"String": cachedBuilder((globalScope) => {
 			const UnicodeScalarView = primitive(PossibleRepresentation.Array, expr(literal([])), [
 				field("count", reifyType("Int", globalScope), (value, scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 				field("startIndex", reifyType("Int64", globalScope), (value, scope) => expr(literal(0))),
@@ -489,19 +665,21 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 				field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), [value], scope)),
 			], {
 				"init": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], scope)),
-				"+": binaryBuiltin("+", 0),
+				"+": wrapped(binaryBuiltin("+", 0)),
 				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), [], scope), parseType("(String) -> String")),
 				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), [], scope), parseType("(String) -> String")),
 			}, {
 				Equatable: {
+					"==": wrapped(binaryBuiltin("===", 0)),
+					"!=": wrapped(binaryBuiltin("!==", 0)),
 				},
 			}, {
 				"UnicodeScalarView": () => UnicodeScalarView,
 				"UTF16View": () => UTF16View,
 				"UTF8View": () => UTF8View,
 			});
-		},
-		"StaticString": cached(() => primitive(PossibleRepresentation.String, expr(literal("")), [
+		}),
+		"StaticString": cachedBuilder(() => primitive(PossibleRepresentation.String, expr(literal("")), [
 		], {
 		})),
 		"Optional": (globalScope, typeParameters) => {
@@ -510,12 +688,9 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			const optionalType: Type = { kind: "optional", type: wrappedType };
 			// Assume values that can be represented as boolean, number or string can be value-wise compared
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
-			const conformances: { [protocolName: string]: ProtocolConformance } = Object.create(null);
-			const compareEqual = (scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
+			const compareEqual = isDirectlyComparable ? wrapped(binaryBuiltin("===", 0)) : wrapped((scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
 				return transform(arg(1, "rhs"), scope, (rhs) => {
-					if (isDirectlyComparable) {
-						return expr(binaryExpression("===", lhs, rhs));
-					}
+					const equalMethod = call(functionValue("==", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], scope);
 					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
 					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
 					return expr(conditionalExpression(
@@ -523,19 +698,17 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						optionalIsNone(firstRight, optionalType),
 						logicalExpression("&&",
 							optionalIsSome(firstRight, optionalType),
-							read(call(functionValue("==", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> Bool`)), [
+							read(call(equalMethod, [
 								unwrapOptional(expr(afterLeft), optionalType, scope),
 								unwrapOptional(expr(afterRight), optionalType, scope),
 							], scope), scope),
 						),
 					));
 				});
-			});
-			const compareUnequal = (scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
+			}));
+			const compareUnequal = isDirectlyComparable ? wrapped(binaryBuiltin("!==", 0)) : wrapped((scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
 				return transform(arg(1, "rhs"), scope, (rhs) => {
-					if (isDirectlyComparable) {
-						return expr(binaryExpression("!==", lhs, rhs));
-					}
+					const unequalMethod = call(functionValue("!=", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], scope);
 					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
 					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
 					return expr(conditionalExpression(
@@ -543,30 +716,29 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						optionalIsSome(firstRight, optionalType),
 						logicalExpression("||",
 							optionalIsNone(firstRight, optionalType),
-							read(call(functionValue("!=", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> Bool`)), [
+							read(call(unequalMethod, [
 								unwrapOptional(expr(afterLeft), optionalType, scope),
 								unwrapOptional(expr(afterRight), optionalType, scope),
 							], scope), scope),
 						),
 					));
 				});
-			});
-			if (Object.hasOwnProperty.call(reified.conformances, "Equatable")) {
-				conformances.Equatable = {
-					"==": compareEqual,
-					"!=": compareUnequal,
-				};
-			}
+			}));
 			return {
 				fields: [],
 				functions: lookupForMap({
 					"none": () => expr(emptyOptional(optionalType)),
 					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
-					"==": wrapped(compareEqual),
-					"!=": wrapped(compareUnequal),
+					"==": compareEqual,
+					"!=": compareUnequal,
 					"flatMap": returnTodo,
 				} as FunctionMap),
-				conformances,
+				conformances: applyDefaultConformances({
+					Equatable: {
+						"==": compareEqual,
+						"!=": compareUnequal,
+					},
+				}, globalScope),
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(emptyOptional(optionalType));
@@ -596,7 +768,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			};
 		},
 		// Should be represented as an empty struct, but we currently
-		"_OptionalNilComparisonType": cached(() => primitive(PossibleRepresentation.Null, expr(literal(null)), [], {
+		"_OptionalNilComparisonType": cachedBuilder(() => primitive(PossibleRepresentation.Null, expr(literal(null)), [], {
 			"init(nilLiteral:)": wrapped((scope, arg, type) => expr(literal(null))),
 		})),
 		"Array": (globalScope, typeParameters) => {
@@ -604,6 +776,58 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 			const reified = reifyType(valueType, globalScope);
 			const optionalValueType: Type = { kind: "optional", type: valueType };
 			const reifiedOptional = reifyType(optionalValueType, globalScope);
+			function arrayCompare(comparison: "equal" | "unequal") {
+				return wrapped((scope, arg) => {
+					return transform(arg(0, "lhs"), scope, (lhs) => {
+						const [lhsFirst, lhsAfter] = reuseExpression(lhs, scope, "rhs");
+						return transform(arg(1, "rhs"), scope, (rhs) => {
+							const [rhsFirst, rhsAfter] = reuseExpression(rhs, scope, "rhs");
+							const result = uniqueIdentifier(scope, comparison);
+							addVariable(scope, result, undefined);
+							const i = uniqueIdentifier(scope, "i");
+							addVariable(scope, i, undefined);
+							return statements([
+								variableDeclaration("let", [variableDeclarator(result)]),
+								ifStatement(
+									binaryExpression("!==",
+										memberExpression(lhsFirst, identifier("length")),
+										memberExpression(rhsFirst, identifier("length")),
+									),
+									blockStatement([
+										expressionStatement(assignmentExpression("=", result, literal(comparison === "unequal"))),
+									]),
+									blockStatement([
+										variableDeclaration("let", [variableDeclarator(i, literal(0))]),
+										whileStatement(
+											logicalExpression("&&",
+												binaryExpression("<",
+													i,
+													memberExpression(lhsAfter, identifier("length")),
+												),
+												binaryExpression("===",
+													memberExpression(lhsAfter, i, true),
+													memberExpression(rhsAfter, i, true),
+												),
+											),
+											blockStatement([
+												expressionStatement(updateExpression("++", i)),
+											]),
+										),
+										expressionStatement(assignmentExpression("=",
+											result,
+											binaryExpression(comparison === "unequal" ? "!==" : "===",
+												i,
+												memberExpression(lhsAfter, identifier("length")),
+											),
+										)),
+									]),
+								),
+								returnStatement(result),
+							]);
+						});
+					});
+				});
+			}
 			return {
 				fields: [
 					readLengthField("count", globalScope),
@@ -719,7 +943,11 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 						}, returnType(type));
 					},
 				} as FunctionMap),
-				conformances: {
+				conformances: applyDefaultConformances({
+					Equatable: {
+						"==": arrayCompare("equal"),
+						"!=": arrayCompare("unequal"),
+					},
 					BidirectionalCollection: {
 						"joined(separator:)": (scope, arg, type) => {
 							return callable((innerScope, innerArg) => {
@@ -733,7 +961,7 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 							}, returnType(type));
 						},
 					},
-				},
+				}, globalScope),
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
 					return expr(literal([]));
@@ -816,7 +1044,11 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 							},
 						},
 					} as FunctionMap),
-					conformances: {},
+					conformances: applyDefaultConformances({
+						// TODO: Implement Equatable
+						Equatable: {
+						},
+					}, globalScope),
 					possibleRepresentations: PossibleRepresentation.Object,
 					defaultValue() {
 						return expr(literal({}));
@@ -863,11 +1095,11 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 					throw new Error(`No dictionary implementation for keys of type ${stringifyType(keyType)}`);
 			}
 		},
-		"Error": (globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [
+		"Error": cachedBuilder((globalScope) => primitive(PossibleRepresentation.Number, expr(literal(0)), [
 			field("hashValue", reifyType("Int", globalScope), (value) => value),
 		], {
-		}),
-		"ClosedRange": () => primitive(PossibleRepresentation.Array, tuple([expr(literal(0)), expr(literal(0))]), [], {
+		})),
+		"ClosedRange": cachedBuilder(() => primitive(PossibleRepresentation.Array, tuple([expr(literal(0)), expr(literal(0))]), [], {
 			map: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
@@ -899,14 +1131,14 @@ function defaultTypes(checkedIntegers: boolean): { [name: string]: (globalScope:
 					]);
 				}, returnType(type));
 			},
-		}),
-		"Equatable": () => protocol("Equatable"),
-		"Sequence": () => protocol("Sequence"),
-		"Collection": () => protocol("Collection"),
-		"BidirectionalCollection": () => protocol("BidirectionalCollection"),
-		"Strideable": () => protocol("Strideable"),
-		"Hasher": () => protocol("Hasher"),
-	};
+		}, {
+			// TODO: Implement Equatable
+			Equatable: {
+				"==": wrapped(binaryBuiltin("===", 0)),
+				"!=": wrapped(binaryBuiltin("!==", 0)),
+			},
+		})),
+	} as TypeMap);
 }
 
 export function emptyOptional(type: Type) {

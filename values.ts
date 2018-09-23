@@ -426,18 +426,25 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(read(value.contents, scope), value.location);
 		}
 		case "type": {
-			const name: string = `:${stringifyType(value.type)}.${typeof value.protocol !== "undefined" ? value.protocol : "Type"}`;
+			const stringified = stringifyType(value.type);
+			const name: string = `:${stringified}.${typeof value.protocol !== "undefined" ? value.protocol : "Type"}`;
 			const mangled = mangleName(name);
 			const reified = reifyType(value.type, scope);
 			if (typeof value.protocol !== "undefined") {
 				const globalScope = rootScope(scope);
-				if (!Object.hasOwnProperty.call(globalScope.declarations, value.protocol)) {
+				if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
 					if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
 						throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
 					}
+					globalScope.declarations[name] = {
+						flags: DeclarationFlags.Const,
+					};
 					const protocol = reified.conformances[value.protocol];
+					function returnValue() {
+						return value;
+					}
 					const witnessTable = objectExpression(Object.keys(protocol).map((key) => {
-						const result = protocol[key](globalScope, () => expr(mangled), voidToVoid, name);
+						const result = protocol[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
 						if (result.kind === "callable") {
 							const [args, statements] = functionize(globalScope, result.call);
 							return objectMethod("method", mangleName(key), args, blockStatement(statements));
@@ -539,7 +546,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, lo
 				if (type !== "call") {
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
 				}
-				const func = memberExpression(read(target.parentType, scope), literal(target.name), true);
+				const func = memberExpression(read(target.parentType, scope), mangleName(target.name));
 				return call(expr(func, target.location), args, scope, location);
 			}
 			switch (type) {
