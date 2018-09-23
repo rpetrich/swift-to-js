@@ -1,4 +1,4 @@
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 import { Term } from "./ast";
 import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
@@ -265,7 +265,8 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			if (dest.ref.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
 			}
-			return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
+			// return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
+			return statements([annotate(expressionStatement(assignmentExpression(operator, dest.ref, read(source, scope))), location)], location);
 		case "subscript":
 			let setterArgs: Value[] = dest.args;
 			if (operator !== "=") {
@@ -473,10 +474,21 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 			return callback(undefinedLiteral);
 		}
 		const lastStatement = contents[contents.length - 1];
+		let head: Statement[];
+		let tail: Value;
 		if (lastStatement.type === "ReturnStatement") {
+			head = contents.slice(0, contents.length - 1);
+			tail = callback(lastStatement.argument);
+		} else {
+			head = contents;
+			tail = callback(undefinedLiteral);
+		}
+		if (tail.kind === "statements") {
+			return statements(concat(head, tail.statements));
+		} else {
 			return statements(concat(
-				contents.slice(0, contents.length - 1),
-				[returnStatement(read(callback(lastStatement.argument), scope))],
+				head,
+				[returnStatement(read(tail, scope))],
 			));
 		}
 	}
