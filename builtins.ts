@@ -73,6 +73,35 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	const widerLow: NumericRange = checked ? { min: literal(min - 1), max: literal(max) } : range;
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
 	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
+	const initExactly = wrapped((scope, arg, type) => {
+		expectLength(type.arguments.types, 1);
+		const source = rangeForNumericType(typeFromValue(typeValue(type.arguments.types[0], integerTypeName), scope), scope);
+		const requiresGreaterThanCheck = possiblyGreaterThan(source, range);
+		const requiresLessThanCheck = possiblyLessThan(source, range);
+		if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
+			return arg(0, "value");
+		}
+		const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope, "value");
+		let check: Expression;
+		if (requiresGreaterThanCheck && requiresLessThanCheck) {
+			check = logicalExpression(
+				"||",
+				binaryExpression(">", first, range.min),
+				binaryExpression("<", after, range.max),
+			);
+		} else if (requiresGreaterThanCheck) {
+			check = binaryExpression(">", first, range.max);
+		} else if (requiresLessThanCheck) {
+			check = binaryExpression("<", first, range.min);
+		} else {
+			return arg(0, "value");
+		}
+		return expr(conditionalExpression(
+			check,
+			literal(null),
+			after,
+		));
+	});
 	const integerType: ProtocolConformance = {
 		"min"() {
 			return expr(literal(min));
@@ -90,35 +119,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				range,
 			);
 		}),
-		"init(exactly:)": wrapped((scope, arg, type) => {
-			expectLength(type.arguments.types, 1);
-			const source = rangeForNumericType(typeFromValue(typeValue(type.arguments.types[0], integerTypeName), scope), scope);
-			const requiresGreaterThanCheck = possiblyGreaterThan(source, range);
-			const requiresLessThanCheck = possiblyLessThan(source, range);
-			if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
-				return arg(0, "value");
-			}
-			const [first, after] = reuseExpression(read(arg(0, "value"), scope), scope, "value");
-			let check: Expression;
-			if (requiresGreaterThanCheck && requiresLessThanCheck) {
-				check = logicalExpression(
-					"||",
-					binaryExpression(">", first, range.min),
-					binaryExpression("<", after, range.max),
-				);
-			} else if (requiresGreaterThanCheck) {
-				check = binaryExpression(">", first, range.max);
-			} else if (requiresLessThanCheck) {
-				check = binaryExpression("<", first, range.min);
-			} else {
-				return arg(0, "value");
-			}
-			return expr(conditionalExpression(
-				check,
-				literal(null),
-				after,
-			));
-		}),
+		"init(exactly:)": initExactly,
 		"&-": wrapped(binaryBuiltin("-", 0, wrap)),
 	};
 	const fixedWidthIntegerType: ProtocolConformance = {
@@ -164,10 +165,8 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			}),
 			"+": wrapped((scope, arg, type) => integerRangeCheck(scope, expr(binaryExpression("+", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerHigh, range)),
 			"-": wrapped((scope, arg, type) => {
+				// TODO: Support detecting unary vs binary
 				if (type.arguments.types.length === 1) {
-					if (min >= 0) {
-						throw new TypeError(`Range does not permit negative values: ${min}...${max}`);
-					}
 					return integerRangeCheck(scope, expr(unaryExpression("-", read(arg(0, "value"), scope))), widerLow, range);
 				}
 				return integerRangeCheck(scope, expr(binaryExpression("-", read(arg(0, "lhs"), scope), read(arg(1, "rhs"), scope))), widerLow, range);
@@ -195,6 +194,12 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			Equatable: {
 				"==": wrapped(binaryBuiltin("===", 0)),
 				"!=": wrapped(binaryBuiltin("!==", 0)),
+			},
+			Numeric: {
+				"init(exactly:)": () => expr(literal(42)), // TODO: Figure out what to do here
+				"+": wrapped(binaryBuiltin("+", 0, (value, scope) => integerRangeCheck(scope, value, widerHigh, range))),
+				"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range))),
+				"*": wrapped(binaryBuiltin("*", 0, (value, scope) => integerRangeCheck(scope, value, widerBoth, range))),
 			},
 			[integerTypeName]: integerType,
 			SignedNumeric: {
@@ -490,6 +495,12 @@ function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, sco
 	};
 }
 
+function updateMethod(otherMethodName: string) {
+	return adaptedMethod(otherMethodName, (targetMethod, scope, arg) => {
+		return set(arg(0, "lhs"), call(targetMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope);
+	});
+}
+
 function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: Scope): ProtocolConformanceMap {
 	const result: ProtocolConformanceMap = Object.create(null);
 	for (const key of Object.keys(conformances)) {
@@ -531,18 +542,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	addProtocol("Numeric", {
 		"init(exactly:)": abstractMethod,
 		"+": abstractMethod,
-		"+=": abstractMethod,
+		"+=": updateMethod("+"),
 		"-": abstractMethod,
-		"-=": abstractMethod,
+		"-=": updateMethod("-"),
 		"*": abstractMethod,
-		"*=": abstractMethod,
+		"*=": updateMethod("*"),
 	});
 	addProtocol("SignedNumeric", {
 		"-": abstractMethod, // TODO: Implement - in terms of negate
 		"negate": adaptedMethod("-", (negateMethod, scope, arg) => {
-			return transform(set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], scope), scope), scope, (expression) => {
-				return statements([expressionStatement(expression)]);
-			});
+			return set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], scope), scope);
 		}),
 	});
 	addProtocol("BinaryInteger", {
