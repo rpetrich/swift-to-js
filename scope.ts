@@ -106,6 +106,15 @@ const mangledSymbols: { [symbol: string]: string } = {
 	"?": "$question$",
 	",": "$comma$",
 	"~": "$tilde$",
+	"==": "$equals$",
+	"!=": "$notequals$",
+	"~=": "$match$",
+	"<=": "$lessequal$",
+	">=": "$greaterequal$",
+	"+=": "$added$",
+	"-=": "$subtracted$",
+	"*=": "$multiplied$",
+	"/=": "$divided$",
 };
 
 function mangleSymbol(symbol: string) {
@@ -113,7 +122,7 @@ function mangleSymbol(symbol: string) {
 }
 
 export function mangleName(name: string) {
-	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|\(\)|\W)/g, mangleSymbol));
+	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
 }
 
 export function lookup(name: string, scope: Scope): MappedIdentifier {
