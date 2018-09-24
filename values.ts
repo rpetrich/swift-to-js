@@ -4,7 +4,7 @@ import { Term } from "./ast";
 import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, undefinedLiteral, uniqueIdentifier } from "./scope";
+import { addVariable, addDeclaration, DeclarationFlags, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -125,14 +125,15 @@ export function variable(ref: Identifier | MemberExpression | ThisExpression, lo
 export interface BoxedValue {
 	kind: "boxed";
 	contents: VariableValue | SubscriptValue;
+	type: Type;
 	location?: Location;
 }
 
-export function boxed(contents: Value, location?: Term | Location): BoxedValue {
+export function boxed(contents: Value, type: Type, location?: Term | Location): BoxedValue {
 	if (contents.kind !== "direct" && contents.kind !== "subscript") {
 		throw new TypeError(`Unable to box a ${contents.kind}`);
 	}
-	return { kind: "boxed", contents, location: readLocation(location) };
+	return { kind: "boxed", contents, type, location: readLocation(location) };
 }
 
 
@@ -248,19 +249,44 @@ const offsetProperty = identifier("offset");
 export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
 	if (value.kind === "boxed") {
 		return annotateValue(value.contents, value.location);
-	} else if (value.kind === "direct") {
-		return value;
-	} else if (value.kind === "subscript") {
-		return value;
-	} else {
-		throw new Error(`Unable to unbox from ${value.kind} value as pointer`);
+	// } else if (value.kind === "direct") {
+	// 	// TODO: Introduce real type for this case
+	// 	if (value.ref.type === "MemberExpression" && value.ref.property.type === "NumericLiteral" && value.ref.property.value === 0) {
+	// 		console.log(value);
+	// 		return annotateValue(expr(value.ref.object) as VariableValue, value.location);
+	// 	}
+	// } else if (value.kind === "subscript") {
+	// 	return value;
 	}
+	throw new Error(`Unable to unbox from ${value.kind} value`);
+}
+
+function typeRequiresBox(type: Type) {
+	// TODO: Figure out what types of things require a box
+	if (type.kind === "modified" && type.modifier === "inout") {
+		return type.type.kind !== "array" && type.type.kind !== "dictionary";
+	}
+	return false;
+}
+
+export function constructBox(expression: Expression | undefined, type: Type) {
+	if (typeRequiresBox(type)) {
+		return arrayExpression(typeof expression !== "undefined" ? [expression] : []);
+	}
+	return expression;
+}
+
+function contentsOfBox(target: BoxedValue, scope: Scope) {
+	if (typeRequiresBox(target.type)) {
+		return memberExpression(read(target.contents, scope), literal(0), true);
+	}
+	return read(target.contents, scope);
 }
 
 export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "=", location?: Term | Location): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return set(dest.contents, source, scope, operator, location);
+			return set(expr(contentsOfBox(dest, scope)), source, scope, operator, location);
 		case "direct":
 			if (dest.ref.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
@@ -272,11 +298,11 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			if (operator !== "=") {
 				// Call the getter, apply the operation, then apply the setter
 				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-				const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), scope, location, "get");
+				const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), [], scope, location, "get");
 				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
 				setterArgs = reused.map(([first]) => expr(first));
 			}
-			return call(dest.setter, concat(setterArgs, [source]), scope, location, "set");
+			return call(dest.setter, concat(setterArgs, [source]), [], scope, location, "set");
 		default:
 			throw new TypeError(`Unable to set a ${dest.kind} value!`);
 	}
@@ -285,7 +311,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: Term | Location): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return update(dest.contents, scope, updater);
+			return update(expr(contentsOfBox(dest, scope)), scope, updater);
 		case "direct":
 			switch (dest.ref.type) {
 				case "ThisExpression":
@@ -306,9 +332,9 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
 			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-			const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), scope, location, "get");
+			const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), [], scope, location, "get");
 			const result = updater(valueFetched);
-			return call(dest.setter, concat(reused.map(([first]) => expr(first)), [result]), scope, location, "set");
+			return call(dest.setter, concat(reused.map(([first]) => expr(first)), [result]), [], scope, location, "set");
 		default:
 			break;
 	}
@@ -326,18 +352,16 @@ export function array(values: Value[], scope: Scope, location?: Location | Term)
 				elements.unshift(argument);
 			} else {
 				const temp = uniqueIdentifier(scope, "element");
-				addVariable(scope, temp, undefined);
 				elements.unshift(temp);
-				newStatements.push(variableDeclaration("const", [variableDeclarator(temp, argument)]));
+				newStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, argument, DeclarationFlags.Const));
 			}
 			prefixStatements = concat(newStatements, prefixStatements);
 		} else {
 			const expression = read(value, scope);
 			if (prefixStatements.length !== 0 && !isPure(expression)) {
 				const temp = uniqueIdentifier(scope, "element");
-				addVariable(scope, temp, undefined);
 				elements.unshift(temp);
-				prefixStatements.push(variableDeclaration("const", [variableDeclarator(temp, expression)]));
+				prefixStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, expression, DeclarationFlags.Const));
 			} else {
 				elements.unshift(expression);
 			}
@@ -421,10 +445,10 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 		}
 		case "subscript": {
-			return annotate(read(call(value.getter, value.args, scope, value.location, "get"), scope), value.location);
+			return annotate(read(call(value.getter, value.args, [], scope, value.location, "get"), scope), value.location);
 		}
 		case "boxed": {
-			return annotate(read(value.contents, scope), value.location);
+			return annotate(contentsOfBox(value, scope), value.location);
 		}
 		case "type": {
 			const stringified = stringifyType(value.type);
@@ -495,9 +519,12 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 	return callback(read(value, scope));
 }
 
+export const undefinedLiteral = identifier("undefined");
 export const undefinedValue = expr(undefinedLiteral);
 
-export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
+export const typeType: Type = { kind: "name", name: "Type" };
+
+export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Type[], scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
 		if (i < args.length) {
 			return args[i];
@@ -510,11 +537,13 @@ export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, lo
 			if (target.substitutions.length !== 0) {
 				// Type substitutions are passed as prefix arguments
 				args = concat(target.substitutions, args);
+				const subsitutionTypes = target.substitutions.map(() => typeType);
+				argTypes = concat(subsitutionTypes, target.type.arguments.types);
 				targetFunctionType = {
 					kind: "function",
 					arguments: {
 						kind: "tuple",
-						types: concat(target.substitutions.map(() => ({ kind: "name", name: "Type" } as Type)), target.type.arguments.types),
+						types: concat(subsitutionTypes, target.type.arguments.types),
 					},
 					return: target.type.return,
 					attributes: target.type.attributes,
@@ -559,7 +588,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, lo
 					throw new Error(`Unable to runtime dispatch a ${type}ter!`);
 				}
 				const func = memberExpression(read(target.parentType, scope), mangleName(target.name));
-				return call(expr(func, target.location), args, scope, location);
+				return call(expr(func, target.location), args, argTypes, scope, location);
 			}
 			switch (type) {
 				case "call":
@@ -586,7 +615,13 @@ export function call(target: Value, args: ReadonlyArray<Value>, scope: Scope, lo
 	if (type !== "call") {
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
-	return expr(callExpression(read(target, scope), args.map((value) => read(value, scope))), location);
+	const targetExpression = read(target, scope);
+	const argExpressions: Expression[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const argType = argTypes[i];
+		argExpressions.push(argType.kind === "modified" && argType.modifier === "inout" ? read(unbox(args[i], scope), scope) : read(args[i], scope));
+	}
+	return expr(callExpression(targetExpression, argExpressions), location);
 }
 
 export function isPure(expression: Expression): boolean {
@@ -831,7 +866,7 @@ export function reuseExpression(expression: Expression, scope: Scope, uniqueIden
 		return [expression, expression.left];
 	} else {
 		const temp = annotate(uniqueIdentifier(scope, uniqueIdentifierPrefix), expression.loc);
-		addVariable(scope, temp, variableDeclaration("let", [variableDeclarator(temp)]));
+		addDeclaration(scope, temp, variableDeclaration("let", [variableDeclarator(temp)]));
 		return [annotate(assignmentExpression("=", temp, simplified), expression.loc), temp];
 	}
 }

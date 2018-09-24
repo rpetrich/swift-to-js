@@ -1,19 +1,19 @@
-import { BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, NullLiteral, NumericLiteral, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, memberExpression, NullLiteral, NumericLiteral, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
 import { concat } from "./utils";
-
-export const undefinedLiteral = identifier("undefined");
+import { constructBox, boxed, BoxedValue, expr, literal, ExpressionValue, VariableValue, SubscriptValue } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
 	Export = 1 << 0,
 	Const = 1 << 1,
+	Boxed = 1 << 2,
 }
 
-type MappedIdentifier = ThisExpression | Identifier | BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral;
+type MappedValue = BoxedValue | ExpressionValue | SubscriptValue | VariableValue;
 
 export interface Scope {
 	name: string;
@@ -21,16 +21,26 @@ export interface Scope {
 	types: TypeMap;
 	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
-	mapping: { [name: string]: MappedIdentifier };
+	mapping: { [name: string]: MappedValue };
 	parent: Scope | undefined;
 }
 
-export function addVariable(scope: Scope, name: Identifier, declaration: Declaration | undefined, flags: DeclarationFlags = DeclarationFlags.None) {
+export function addDeclaration(scope: Scope, name: Identifier, declaration?: Declaration, flags: DeclarationFlags = DeclarationFlags.None) {
 	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
 		throw new Error(`Declaration of ${name.name} already exists`);
 	}
-	scope.mapping[name.name] = name;
+	scope.mapping[name.name] = expr(name);
 	scope.declarations[name.name] = { flags, declaration };
+}
+
+export function addVariable(scope: Scope, name: Identifier, type: Type, init?: Expression, flags: DeclarationFlags = DeclarationFlags.None) {
+	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
+		throw new Error(`Declaration of ${name.name} already exists`);
+	}
+	// flags |= DeclarationFlags.Boxed;
+	scope.mapping[name.name] = flags & DeclarationFlags.Boxed ? boxed(expr(name), type) : expr(name);
+	scope.declarations[name.name] = { flags, declaration: undefined };
+	return variableDeclaration(flags & DeclarationFlags.Const ? "const" : "let", [variableDeclarator(name, flags & DeclarationFlags.Boxed ? constructBox(init, type) : init)]);
 }
 
 export function rootScope(scope: Scope) {
@@ -125,7 +135,7 @@ export function mangleName(name: string) {
 	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
 }
 
-export function lookup(name: string, scope: Scope): MappedIdentifier {
+export function lookup(name: string, scope: Scope): MappedValue {
 	let targetScope: Scope | undefined = scope;
 	do {
 		if (Object.hasOwnProperty.call(targetScope.mapping, name)) {
@@ -133,7 +143,7 @@ export function lookup(name: string, scope: Scope): MappedIdentifier {
 		}
 		targetScope = targetScope.parent;
 	} while (targetScope);
-	return mangleName(name);
+	return expr(mangleName(name));
 }
 
 export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {

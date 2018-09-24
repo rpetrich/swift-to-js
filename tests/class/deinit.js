@@ -1,5 +1,5 @@
 export function allocate() {
-  const deinit = new Deinit();
+  let deinit = new Deinit();
   console.log("init called");
   return deinit;
 }

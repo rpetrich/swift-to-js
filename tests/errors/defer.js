@@ -5,12 +5,10 @@ export function attempt$shouldThrow$(shouldThrow) {
 
   return true;
 }
-let processing = false;
 export function defers$shouldThrow$(shouldThrow) {
-  let $try;
-
   try {
     processing = true;
+    let $try;
 
     try {
       $try = attempt$shouldThrow$(shouldThrow);
@@ -23,3 +21,4 @@ export function defers$shouldThrow$(shouldThrow) {
     processing = false;
   }
 }
+let processing = false;

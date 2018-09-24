@@ -1,10 +1,10 @@
 import { abstractMethod, FunctionBuilder, noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ProtocolConformanceMap, ReifiedType, reifyType, struct, TypeMap, TypeParameterHost } from "./reified";
-import { addVariable, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
 import { Function, Tuple, Type } from "./types";
-import { cached, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { cached, concat, expectLength, lookupForMap } from "./utils";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeType, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, breakStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
 
@@ -14,7 +14,7 @@ function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 
 function returnTodo(scope: Scope, arg: ArgGetter, type: Type, name: string): Value {
 	console.error(name);
-	return call(expr(mangleName("todo_missing_builtin$" + name)), [], scope);
+	return call(expr(mangleName("todo_missing_builtin$" + name)), [], [], scope);
 }
 
 function returnLength(scope: Scope, arg: ArgGetter): Value {
@@ -214,7 +214,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			CustomStringConvertible: {
 			},
 			LosslessStringConvertible: {
-				init: wrapped((scope, arg) => {
+				"init": wrapped((scope, arg) => {
 					const input = read(arg(0, "description"), scope);
 					const value = valueOfExpression(input);
 					if (typeof value === "string") {
@@ -222,22 +222,21 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
 					}
 					const result = uniqueIdentifier(scope, "integer");
-					addVariable(scope, result, undefined);
 					return statements([
-						variableDeclaration("const", [variableDeclarator(result, callExpression(identifier("parseInt"), [
+						addVariable(scope, result, parseType("Int"), callExpression(identifier("parseInt"), [
 							input,
 							literal(10),
-						]))]),
+						]), DeclarationFlags.Const),
 						returnStatement(
 							conditionalExpression(
 								binaryExpression("===",
 									result,
-									result,
+									result
 								),
 								literal(null),
-								result,
-							),
-						),
+								result
+							)
+						)
 					]);
 				}),
 			},
@@ -303,7 +302,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 				},
 			},
 			LosslessStringConvertible: {
-				init: wrapped((scope, arg) => {
+				"init": wrapped((scope, arg) => {
 					const input = read(arg(0, "description"), scope);
 					const value = valueOfExpression(input);
 					if (typeof value === "string") {
@@ -311,21 +310,20 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
 					}
 					const result = uniqueIdentifier(scope, "number");
-					addVariable(scope, result, undefined);
 					return statements([
-						variableDeclaration("const", [variableDeclarator(result, callExpression(identifier("Number"), [
+						addVariable(scope, result, parseType("Int"), callExpression(identifier("Number"), [
 							input,
-						]))]),
+						]), DeclarationFlags.Const),
 						returnStatement(
 							conditionalExpression(
 								binaryExpression("===",
 									result,
-									result,
+									result
 								),
 								literal(null),
-								result,
-							),
-						),
+								result
+							)
+						)
 					]);
 				}),
 			},
@@ -403,9 +401,10 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 	} else {
 		check = binaryExpression("<", first, dest.min);
 	}
+	const functionType: Function = { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] };
 	return expr(conditionalExpression(
 		check,
-		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [], scope), scope),
+		read(call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, functionType), [], [], scope), scope),
 		after,
 	));
 }
@@ -453,51 +452,56 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeA
 
 function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, name: string) {
 	const typeArg = arg(0, "type");
-	return call(functionValue(name, typeArg, type), [typeArg], scope);
+	return call(functionValue(name, typeArg, type), [typeArg], [typeType], scope);
 }
 
-function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expression) => Statement): Statement {
+function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expression) => Statement): Statement[] {
 	let start;
 	let end;
-	let declarators: VariableDeclarator[] = [];
+	let contents = [];
+	const intType = parseType("Int");
 	const i = uniqueIdentifier(scope, "i");
-	addVariable(scope, i, undefined);
 	if (range.kind === "tuple" && range.values.length === 2) {
 		start = read(range.values[0], scope);
+		contents.push(addVariable(scope, i, intType, start));
 		end = read(range.values[1], scope);
-		if (isPure(end)) {
-			declarators = [variableDeclarator(i, start)];
-		} else {
+		if (!isPure(end)) {
 			const endIdentifier = uniqueIdentifier(scope, "end");
-			addVariable(scope, endIdentifier, undefined);
-			declarators = [variableDeclarator(i, start), variableDeclarator(endIdentifier, end)];
+			contents.push(addVariable(scope, endIdentifier, intType, end));
 			end = endIdentifier;
 		}
 	} else {
+		addVariable(scope, i, intType);
 		const endIdentifier = uniqueIdentifier(scope, "end");
-		addVariable(scope, endIdentifier, undefined);
-		declarators = [variableDeclarator(arrayPattern([i, endIdentifier]), read(range, scope))];
+		addVariable(scope, endIdentifier, intType);
+		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([i, endIdentifier]), read(range, scope))]));
 		end = endIdentifier;
 	}
-	return forStatement(
-		variableDeclaration("let", declarators),
+	const result = forStatement(
+		contents.length === 1 ? contents[0] : undefined,
 		binaryExpression("<=", i, end),
 		updateExpression("++", i),
 		body(i),
 	);
+	if (contents.length === 1) {
+		return [result];
+	} else {
+		return concat(contents as Statement[], [result]);
+	}
 }
 
-function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, scope: Scope, arg: ArgGetter) => Value) {
+function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, scope: Scope, arg: ArgGetter, type: Function) => Value) {
 	return (scope: Scope, arg: ArgGetter, type: Function) => {
 		const typeArg = arg(0, "T");
-		const otherMethod = call(functionValue(otherMethodName, typeArg, type), [typeArg], scope);
-		return callable((innerScope, innerArg) => adapter(otherMethod, innerScope, innerArg), returnFunctionType(type));
-	};
+		const otherMethod = call(functionValue(otherMethodName, typeArg, type), [typeArg], [typeType], scope);
+		const functionType = returnFunctionType(type);
+		return callable((innerScope, innerArg) => adapter(otherMethod, innerScope, innerArg, functionType), functionType);
+	}
 }
 
 function updateMethod(otherMethodName: string) {
-	return adaptedMethod(otherMethodName, (targetMethod, scope, arg) => {
-		return set(arg(0, "lhs"), call(targetMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope);
+	return adaptedMethod(otherMethodName, (targetMethod, scope, arg, type) => {
+		return set(arg(0, "lhs"), call(targetMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types, scope), scope);
 	});
 }
 
@@ -513,29 +517,31 @@ function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: S
 	return result;
 }
 
+const dummyType: Type = { kind: "name", name: "Dummy" };
+
 function defaultTypes(checkedIntegers: boolean): TypeMap {
 	const protocolTypes: TypeMap = Object.create(null);
 	function addProtocol(name: string, conformance: ProtocolConformance) {
 		const result = protocol({
-			[name]: conformance,
+			[name]: conformance
 		});
 		protocolTypes[name] = () => result;
 	}
 
 	addProtocol("Equatable", {
 		"==": abstractMethod,
-		"!=": adaptedMethod("==", (equalsMethod, scope, arg) => transform(call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope, (equals) => {
+		"!=": adaptedMethod("==", (equalsMethod, scope, arg, type) => transform(call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types, scope), scope, (equals) => {
 			return expr(unaryExpression("!", equals));
 		})),
-		"~=": adaptedMethod("==", (equalsMethod, scope, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], scope)),
+		"~=": adaptedMethod("==", (equalsMethod, scope, arg, type) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types, scope)),
 	});
 	addProtocol("Comparable", {
 		"<": abstractMethod,
-		">": adaptedMethod("<", (lessThanMethod, scope, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], scope)),
-		"<=": adaptedMethod("<", (lessThanMethod, scope, arg) => transform(call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], scope), scope, (lessThan) => {
+		">": adaptedMethod("<", (lessThanMethod, scope, arg, type) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types, scope)),
+		"<=": adaptedMethod("<", (lessThanMethod, scope, arg, type) => transform(call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types, scope), scope, (lessThan) => {
 			return expr(unaryExpression("!", lessThan));
 		})),
-		">=": adaptedMethod("<", (lessThanMethod, scope, arg) => transform(call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], scope), scope, (lessThan) => {
+		">=": adaptedMethod("<", (lessThanMethod, scope, arg, type) => transform(call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types, scope), scope, (lessThan) => {
 			return expr(unaryExpression("!", lessThan));
 		})),
 	});
@@ -550,8 +556,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	});
 	addProtocol("SignedNumeric", {
 		"-": abstractMethod, // TODO: Implement - in terms of negate
-		"negate": adaptedMethod("-", (negateMethod, scope, arg) => {
-			return set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], scope), scope);
+		"negate": adaptedMethod("-", (negateMethod, scope, arg, type) => {
+			return set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], type.arguments.types, scope), scope);
 		}),
 	});
 	addProtocol("BinaryInteger", {
@@ -599,7 +605,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		// TODO: Support properties
 	});
 	addProtocol("LosslessStringConvertible", {
-		init: abstractMethod,
+		"init": abstractMethod,
 	});
 
 	const BoolType = cachedBuilder((globalScope: Scope) => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [
@@ -626,8 +632,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			));
 		})),
 		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), parseType("() -> Int1")),
-		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
-		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], scope), scope)))),
+		"&&": wrapped((scope, arg) => expr(logicalExpression("&&", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], [], scope), scope)))),
+		"||": wrapped((scope, arg) => expr(logicalExpression("||", read(arg(0, "lhs"), scope), read(call(arg(1, "rhs"), [], [], scope), scope)))),
 		"!": wrapped((scope, arg) => expr(unaryExpression("!", read(arg(0, "value"), scope)))),
 		"random": wrapped((scope, arg) => expr(binaryExpression("<", callExpression(memberExpression(identifier("Math"), identifier("random")), []), literal(0.5)))),
 	}, applyDefaultConformances({
@@ -669,14 +675,14 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				field("endIndex", reifyType("Int64", globalScope), (value: Value, scope: Scope) => expr(memberExpression(read(value, scope), identifier("length")))),
 			]);
 			return primitive(PossibleRepresentation.String, expr(literal("")), [
-				field("unicodeScalars", UnicodeScalarView, (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [value], scope)),
+				field("unicodeScalars", UnicodeScalarView, (value, scope) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [value], [{ kind: "name", name: "String" }], scope)),
 				field("utf16", UTF16View, (value) => value),
-				field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), [value], scope)),
+				field("utf8", UTF8View, (value, scope) => call(expr(memberExpression(newExpression(identifier("TextEncoder"), [literal("utf-8")]), identifier("encode"))), [value], [{ kind: "name", name: "String" }], scope)),
 			], {
-				"init": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], scope)),
+				"init": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [{ kind: "name", name: "String" }], scope)),
 				"+": wrapped(binaryBuiltin("+", 0)),
-				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), [], scope), parseType("(String) -> String")),
-				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), [], scope), parseType("(String) -> String")),
+				"lowercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toLowerCase"))), [], [], scope), parseType("(String) -> String")),
+				"uppercased()": (scope, arg, type) => callable(() => call(expr(memberExpression(read(arg(0, "value"), scope), identifier("toUpperCase"))), [], [], scope), parseType("(String) -> String")),
 			}, {
 				Equatable: {
 					"==": wrapped(binaryBuiltin("===", 0)),
@@ -699,7 +705,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
 			const compareEqual = isDirectlyComparable ? wrapped(binaryBuiltin("===", 0)) : wrapped((scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
 				return transform(arg(1, "rhs"), scope, (rhs) => {
-					const equalMethod = call(functionValue("==", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], scope);
+					const equalMethod = call(functionValue("==", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], [typeType], scope);
 					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
 					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
 					return expr(conditionalExpression(
@@ -710,14 +716,14 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 							read(call(equalMethod, [
 								unwrapOptional(expr(afterLeft), optionalType, scope),
 								unwrapOptional(expr(afterRight), optionalType, scope),
-							], scope), scope),
+							], [wrappedType, wrappedType], scope), scope),
 						),
 					));
 				});
 			}));
 			const compareUnequal = isDirectlyComparable ? wrapped(binaryBuiltin("!==", 0)) : wrapped((scope: Scope, arg: ArgGetter) => transform(arg(0, "lhs"), scope, (lhs) => {
 				return transform(arg(1, "rhs"), scope, (rhs) => {
-					const unequalMethod = call(functionValue("!=", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], scope);
+					const unequalMethod = call(functionValue("!=", typeValue(wrappedType, "Equatable"), parseFunctionType(`() -> () -> Bool`)), [typeValue(wrappedType)], [typeType], scope);
 					const [firstLeft, afterLeft] = reuseExpression(lhs, scope, "lhs");
 					const [firstRight, afterRight] = reuseExpression(rhs, scope, "rhs");
 					return expr(conditionalExpression(
@@ -728,7 +734,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 							read(call(unequalMethod, [
 								unwrapOptional(expr(afterLeft), optionalType, scope),
 								unwrapOptional(expr(afterRight), optionalType, scope),
-							], scope), scope),
+							], [wrappedType, wrappedType], scope), scope),
 						),
 					));
 				});
@@ -792,44 +798,42 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						return transform(arg(1, "rhs"), scope, (rhs) => {
 							const [rhsFirst, rhsAfter] = reuseExpression(rhs, scope, "rhs");
 							const result = uniqueIdentifier(scope, comparison);
-							addVariable(scope, result, undefined);
 							const i = uniqueIdentifier(scope, "i");
-							addVariable(scope, i, undefined);
 							return statements([
-								variableDeclaration("let", [variableDeclarator(result)]),
+								addVariable(scope, result, parseType("Bool"), undefined),
 								ifStatement(
 									binaryExpression("!==",
 										memberExpression(lhsFirst, identifier("length")),
-										memberExpression(rhsFirst, identifier("length")),
+										memberExpression(rhsFirst, identifier("length"))
 									),
 									blockStatement([
 										expressionStatement(assignmentExpression("=", result, literal(comparison === "unequal"))),
 									]),
 									blockStatement([
-										variableDeclaration("let", [variableDeclarator(i, literal(0))]),
+										addVariable(scope, i, parseType("Int"), literal(0)),
 										whileStatement(
 											logicalExpression("&&",
 												binaryExpression("<",
 													i,
-													memberExpression(lhsAfter, identifier("length")),
+													memberExpression(lhsAfter, identifier("length"))
 												),
 												binaryExpression("===",
 													memberExpression(lhsAfter, i, true),
-													memberExpression(rhsAfter, i, true),
+													memberExpression(rhsAfter, i, true)
 												),
 											),
 											blockStatement([
 												expressionStatement(updateExpression("++", i)),
-											]),
+											])
 										),
 										expressionStatement(assignmentExpression("=",
 											result,
 											binaryExpression(comparison === "unequal" ? "!==" : "===",
 												i,
-												memberExpression(lhsAfter, identifier("length")),
-											),
+												memberExpression(lhsAfter, identifier("length"))
+											)
 										)),
-									]),
+									])
 								),
 								returnStatement(result),
 							]);
@@ -862,7 +866,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					}),
 				],
 				functions: lookupForMap({
-					"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [arg(0, "iterable")], scope)),
+					// TODO: Fill in proper init
+					"init": wrapped((scope, arg) => call(expr(memberExpression(identifier("Array"), identifier("from"))), [arg(0, "iterable")], [dummyType], scope)),
 					"count": returnLength,
 					"subscript": {
 						get(scope, arg) {
@@ -875,18 +880,18 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					"append()": wrapped((scope, arg) => {
 						const pushExpression = expr(memberExpression(read(arg(2, "array"), scope), identifier("push")));
 						const newElement = copy(arg(2, "newElement"), valueType);
-						return call(pushExpression, [newElement], scope);
+						return call(pushExpression, [newElement], [valueType], scope);
 					}),
 					"insert(at:)": wrapped((scope, arg) => {
 						const array = arg(1, "array");
 						const newElement = copy(arg(2, "newElement"), valueType);
 						const i = arg(3, "i");
-						return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [array, newElement, i], scope);
+						return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [array, newElement, i], [dummyType, valueType, dummyType], scope);
 					}),
 					"remove(at:)": wrapped((scope, arg) => {
 						const array = arg(1, "array");
 						const i = arg(2, "i");
-						return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [array, i], scope);
+						return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [array, i], [dummyType, valueType], scope);
 					}),
 					"removeFirst()": wrapped((scope, arg) => {
 						const [first, after] = reuseExpression(callExpression(memberExpression(read(arg(1, "array"), scope), identifier("shift")), []), scope, "element");
@@ -946,6 +951,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								return call(
 									expr(memberExpression(collection, identifier("join"))),
 									[innerArg(0, "separator")],
+									[dummyType],
 									scope,
 								);
 							});
@@ -964,6 +970,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 									return call(
 										expr(memberExpression(collection, identifier("join"))),
 										[innerArg(0, "separator")],
+										[dummyType],
 										scope,
 									);
 								});
@@ -1113,31 +1120,29 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
 					const mapped = uniqueIdentifier(innerScope, "mapped");
-					addVariable(innerScope, mapped, undefined);
 					const callback = innerArg(0, "callback");
-					return statements([
-						variableDeclaration("const", [variableDeclarator(mapped, arrayExpression([]))]),
+					return statements(concat(
+						[addVariable(innerScope, mapped, dummyType, arrayExpression([]), DeclarationFlags.Const)],
 						closedRangeIterate(range, innerScope, (i) => blockStatement([
-							expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, [expr(i)], scope), scope)])),
+							expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, [expr(i)], [dummyType], scope), scope)])),
 						])),
-						returnStatement(mapped),
-					]);
+						[returnStatement(mapped)]
+					));
 				}, returnType(type));
 			},
 			reduce: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
 					const result = uniqueIdentifier(innerScope, "result");
-					addVariable(innerScope, result, undefined);
 					const initialResult = innerArg(0, "initialResult");
 					const next = innerArg(1, "next");
-					return statements([
-						variableDeclaration("let", [variableDeclarator(result, read(initialResult, scope))]),
+					return statements(concat(
+						[addVariable(innerScope, result, dummyType, read(initialResult, scope))],
 						closedRangeIterate(range, innerScope, (i) => blockStatement([
-							expressionStatement(assignmentExpression("=", result, read(call(next, [expr(result), expr(i)], scope), scope))),
+							expressionStatement(assignmentExpression("=", result, read(call(next, [expr(result), expr(i)], [dummyType, dummyType], scope), scope))),
 						])),
-						returnStatement(result),
-					]);
+						[returnStatement(result)],
+					));
 				}, returnType(type));
 			},
 		}, {
@@ -1180,7 +1185,7 @@ export function optionalIsSome(expression: Expression, type: Type): Expression {
 }
 
 function arrayBoundsFailed(scope: Scope) {
-	return call(functionValue("Swift.(swift-to-js).arrayBoundsFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] }), [], scope);
+	return call(functionValue("Swift.(swift-to-js).arrayBoundsFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] }), [], [], scope);
 }
 
 function arrayBoundsCheck(array: Value, index: Value, scope: Scope, mode: "read" | "write") {
@@ -1263,18 +1268,18 @@ export const functions: FunctionMap = {
 		]);
 	}),
 	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
-		return call(expr(identifier("Sequence$reduce")), [arg(0)], scope);
+		return call(expr(identifier("Sequence$reduce")), [arg(0)], [dummyType], scope);
 	}, returnType(type)),
 	"??": returnTodo,
 	"~=": (scope, arg) => expr(binaryExpression("===", read(arg(1, "pattern"), scope), read(arg(2, "value"), scope))),
-	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), [arg(0, "items")], scope),
+	"print(_:separator:terminator:)": (scope, arg, type) => call(expr(memberExpression(identifier("console"), identifier("log"))), [arg(0, "items")], [dummyType], scope),
 	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
 		ifStatement(
-			unaryExpression("!", read(call(arg(0, "condition"), [], scope), scope)),
+			unaryExpression("!", read(call(arg(0, "condition"), [], [], scope), scope)),
 			blockStatement([
 				expressionStatement(identifier("debugger")),
 				throwStatement(newExpression(identifier("Error"), [
-					read(call(arg(1, "message"), [], scope), scope),
+					read(call(arg(1, "message"), [], [], scope), scope),
 					read(arg(2, "file"), scope),
 					read(arg(3, "line"), scope),
 				])),
@@ -1284,7 +1289,7 @@ export const functions: FunctionMap = {
 	"preconditionFailed(_:file:line:)": (scope, arg, type) => statements([
 		expressionStatement(identifier("debugger")),
 		throwStatement(newExpression(identifier("Error"), [
-			read(call(arg(0, "message"), [], scope), scope),
+			read(call(arg(0, "message"), [], [], scope), scope),
 			read(arg(1, "file"), scope),
 			read(arg(2, "line"), scope),
 		])),
@@ -1292,7 +1297,7 @@ export const functions: FunctionMap = {
 	"fatalError(_:file:line:)": (scope, arg, type) => statements([
 		expressionStatement(identifier("debugger")),
 		throwStatement(newExpression(identifier("Error"), [
-			read(call(arg(0, "message"), [], scope), scope),
+			read(call(arg(0, "message"), [], [], scope), scope),
 			read(arg(1, "file"), scope),
 			read(arg(2, "line"), scope),
 		])),

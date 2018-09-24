@@ -109,7 +109,7 @@ export function protocol(conformances: ProtocolConformanceMap = emptyConformance
 		functions(functionName) {
 			return (scope, arg, type) => {
 				const typeArg = arg(0, "T");
-				return call(functionValue(functionName, typeArg, type), type.arguments.types.map((_, i) => i ? arg(i) : typeArg), scope);
+				return call(functionValue(functionName, typeArg, type), type.arguments.types.map((_, i) => i ? arg(i) : typeArg), type.arguments.types, scope);
 			};
 		},
 		conformances,
@@ -337,7 +337,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 								return expr(expression);
 							}
 							if (!reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined")) {
-								return call(expr(memberExpression(expression, identifier("slice"))), [], scope);
+								return call(expr(memberExpression(expression, identifier("slice"))), [], [], scope);
 							}
 							let usedFirst = false;
 							const [first, after] = reuseExpression(expression, innerScope, "copySource");

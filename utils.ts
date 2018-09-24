@@ -8,14 +8,16 @@ export function expectLength<T extends ReadonlyArray<any>>(array: T, ...lengths:
 	throw new Error(`Expected ${lengths.join(" or ")} items, but got ${array.length}`);
 }
 
-export function concat<T>(head: T[], tail: T[]): T[];
-export function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T>;
-export function concat<T>(head: ReadonlyArray<T>, tail: ReadonlyArray<T>): ReadonlyArray<T> | T[] {
-	if (head.length) {
-		return tail.length ? head.concat(tail) : head;
-	} else {
-		return tail;
+export function concat<T>(first: T[], ...rest: T[][]): T[];
+export function concat<T>(first: ReadonlyArray<T>, ...rest: ReadonlyArray<T>[]): ReadonlyArray<T>;
+export function concat<T>(first: ReadonlyArray<T>, ...rest: ReadonlyArray<T>[]): ReadonlyArray<T> {
+	let result = first;
+	for (const other of rest) {
+		if (other.length !== 0) {
+			result = result.length !== 0 ? result.concat(other) : other;
+		}
 	}
+	return result;
 }
 
 export function cached<T>(fn: () => T): () => T {

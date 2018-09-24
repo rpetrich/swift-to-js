@@ -1,6 +1,6 @@
 import { Term } from "./ast";
 import { ReifiedType, reifyType } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { addVariable, addDeclaration, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
 
@@ -67,7 +67,7 @@ export function insertFunction(name: string, scope: Scope, type: Function, build
 	const globalScope = rootScope(scope);
 	const [args, statements] = functionize(globalScope, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
 	const fn = functionDeclaration(mangled, args, blockStatement(statements));
-	addVariable(globalScope, mangled, fn, shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
+	addDeclaration(globalScope, mangled, fn, shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 	return mangled;
 }
 
@@ -76,7 +76,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
-		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), scope);
+		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), type.arguments.types, scope);
 	};
 }
 
