@@ -3,7 +3,7 @@ import { parseType } from "./parse";
 import { mangleName, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, copy, expr, functionValue, literal, read, reuseExpression, stringifyType, undefinedValue, Value } from "./values";
+import { array, call, contentsOfBox, copy, expr, functionValue, literal, read, reuseExpression, set, stringifyType, undefinedValue, Value } from "./values";
 
 import { assignmentExpression, Expression, identifier, Identifier, isLiteral, memberExpression, MemberExpression, objectExpression, objectProperty } from "babel-types";
 
@@ -30,7 +30,7 @@ export interface ReifiedType {
 	cases?: ReadonlyArray<EnumCase>;
 	defaultValue?(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
-	store?(target: Identifier | MemberExpression, value: Value, scope: Scope): Expression[];
+	store?(target: Value, value: Value, scope: Scope): Value;
 }
 
 export interface TypeParameterHost {
@@ -246,12 +246,21 @@ export function expressionSkipsCopy(expr: Expression): boolean {
 	}
 }
 
-export function storeValue(dest: Identifier | MemberExpression, value: Value, type: Type, scope: Scope): Expression[] {
-	const reified = reifyType(type, scope);
-	if (reified.store) {
-		return reified.store(dest, value, scope);
-	} else {
-		return [assignmentExpression("=", dest, read(copy(value, type), scope))];
+export function store(dest: Value, source: Value, type: Type, scope: Scope): Value {
+	switch (dest.kind) {
+		case "boxed":
+			return store(expr(contentsOfBox(dest, scope)), source, type, scope);
+		case "direct":
+			const reified = reifyType(type, scope);
+			if (reified.store) {
+				return reified.store(dest, source, scope);
+			} else {
+				return set(dest, source, scope, "=");
+			}
+		case "subscript":
+			return set(dest, source, scope, "=");
+		default:
+			throw new TypeError(`Unable to store to a ${dest.kind} value`);
 	}
 }
 

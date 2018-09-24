@@ -1,6 +1,6 @@
 import { Term } from "./ast";
 import { ReifiedType, reifyType } from "./reified";
-import { addVariable, addDeclaration, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope } from "./scope";
+import { addVariable, addDeclaration, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
 
@@ -55,20 +55,17 @@ export function functionize(scope: Scope, expression: (scope: Scope, arg: ArgGet
 	return [args, result];
 }
 
-export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, location?: Location | Term, shouldExport: boolean = false): Identifier {
+export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, location?: Location | Term, shouldExport: boolean = false): Value {
 	if (typeof builder === "undefined") {
 		throw new Error(`Cannot find function named ${name}`);
 	}
-	const mangled = mangleName(name);
 	if (Object.hasOwnProperty.call(scope.functionUsage, name)) {
-		return mangled;
+		return lookup(name, scope);
 	}
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
 	const [args, statements] = functionize(globalScope, (inner, arg) => (typeof builder === "function" ? builder : builder.get)(inner, arg, type, name), location);
-	const fn = functionDeclaration(mangled, args, blockStatement(statements));
-	addDeclaration(globalScope, mangled, fn, shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
-	return mangled;
+	return addDeclaration(globalScope, name, (id) => functionDeclaration(id, args, blockStatement(statements)), shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 }
 
 export function noinline(builder: FunctionBuilder): FunctionBuilder {
@@ -76,7 +73,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
-		return call(expr(insertFunction(name, scope, type, builder)), type.arguments.types.map((_, i) => arg(i)), type.arguments.types, scope);
+		return call(insertFunction(name, scope, type, builder), type.arguments.types.map((_, i) => arg(i)), type.arguments.types, scope);
 	};
 }
 

@@ -4,7 +4,7 @@ import { Term } from "./ast";
 import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
-import { addVariable, addDeclaration, DeclarationFlags, emitScope, fullPathOfScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
+import { addVariable, addDeclaration, DeclarationFlags, emitScope, fullPathOfScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -276,7 +276,7 @@ export function constructBox(expression: Expression | undefined, type: Type) {
 	return expression;
 }
 
-function contentsOfBox(target: BoxedValue, scope: Scope) {
+export function contentsOfBox(target: BoxedValue, scope: Scope) {
 	if (typeRequiresBox(target.type)) {
 		return memberExpression(read(target.contents, scope), literal(0), true);
 	}
@@ -304,7 +304,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			}
 			return call(dest.setter, concat(setterArgs, [source]), [], scope, location, "set");
 		default:
-			throw new TypeError(`Unable to set a ${dest.kind} value!`);
+			throw new TypeError(`Unable to set a ${dest.kind} value`);
 	}
 }
 
@@ -351,17 +351,17 @@ export function array(values: Value[], scope: Scope, location?: Location | Term)
 			if (argument.type === "Identifier") {
 				elements.unshift(argument);
 			} else {
-				const temp = uniqueIdentifier(scope, "element");
-				elements.unshift(temp);
+				const temp = uniqueName(scope, "element");
 				newStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, argument, DeclarationFlags.Const));
+				elements.unshift(read(lookup(temp, scope), scope));
 			}
 			prefixStatements = concat(newStatements, prefixStatements);
 		} else {
 			const expression = read(value, scope);
 			if (prefixStatements.length !== 0 && !isPure(expression)) {
-				const temp = uniqueIdentifier(scope, "element");
-				elements.unshift(temp);
+				const temp = uniqueName(scope, "element");
 				prefixStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, expression, DeclarationFlags.Const));
+				elements.unshift(read(lookup(temp, scope), scope));
 			} else {
 				elements.unshift(expression);
 			}
@@ -407,7 +407,6 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(read(value.value, scope), value.location);
 		}
 		case "function": {
-			const bind = value.substitutions.length ? (expression: Expression) => annotate(callExpression(memberExpression(expression, identifier("bind")), concat([nullLiteral()], value.substitutions.map((substitution) => read(substitution, scope)))), value.location) : (expression: Expression) => expression;
 			let builder;
 			if (typeof value.parentType === "undefined") {
 				if (Object.hasOwnProperty.call(scope.functions, value.name)) {
@@ -419,7 +418,19 @@ export function read(value: Value, scope: Scope): Expression {
 			if (typeof builder === "undefined") {
 				throw new Error(`Could not find function to read for ${value.name}`);
 			}
-			return bind(annotate(insertFunction(value.name, scope, value.type, builder), value.location));
+			const unbound = annotateValue(insertFunction(value.name, scope, value.type, builder), value.location);
+			let func;
+			if (value.substitutions.length) {
+				func = call(
+					expr(memberExpression(read(unbound, scope), identifier("bind"))),
+					concat([expr(literal(null))], value.substitutions),
+					[], // TODO: Add types for this call expression
+					scope
+				);
+			} else {
+				func = unbound;
+			}
+			return read(func, scope);
 		}
 		case "tuple": {
 			switch (value.values.length) {
@@ -490,6 +501,16 @@ export function read(value: Value, scope: Scope): Expression {
 		}
 	}
 }
+
+export function ignore(value: Value, scope: Scope): Statement[] {
+	switch (value.kind) {
+		case "statements":
+			return value.statements;
+		default:
+			return [expressionStatement(read(value, scope))];
+	}
+}
+
 
 export function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
 	if (value.kind === "statements") {
@@ -858,16 +879,17 @@ export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | 
 	}
 }
 
-export function reuseExpression(expression: Expression, scope: Scope, uniqueIdentifierPrefix: string): [Expression, Expression] {
+export function reuseExpression(expression: Expression, scope: Scope, uniqueNamePrefix: string): [Expression, Expression] {
 	const simplified = annotate(simplify(expression), expression.loc);
 	if (isPure(simplified)) {
 		return [simplified, simplified];
 	} else if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
 		return [expression, expression.left];
 	} else {
-		const temp = annotate(uniqueIdentifier(scope, uniqueIdentifierPrefix), expression.loc);
-		addDeclaration(scope, temp, variableDeclaration("let", [variableDeclarator(temp)]));
-		return [annotate(assignmentExpression("=", temp, simplified), expression.loc), temp];
+		const tempName = uniqueName(scope, uniqueNamePrefix);
+		addDeclaration(scope, tempName, (id) => variableDeclaration("let", [variableDeclarator(id)]));
+		const temp = annotate(read(lookup(tempName, scope), scope), expression.loc);
+		return [annotate(assignmentExpression("=", temp as any, simplified), expression.loc), temp];
 	}
 }
 

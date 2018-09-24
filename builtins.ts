@@ -1,10 +1,10 @@
 import { abstractMethod, FunctionBuilder, noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ProtocolConformanceMap, ReifiedType, reifyType, struct, TypeMap, TypeParameterHost } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeType, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, ignore, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeType, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, breakStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
 
@@ -221,7 +221,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 						const convertedValue = parseInt(value, 10);
 						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
 					}
-					const result = uniqueIdentifier(scope, "integer");
+					const result = uniqueName(scope, "integer");
 					return statements([
 						addVariable(scope, result, parseType("Int"), callExpression(identifier("parseInt"), [
 							input,
@@ -230,11 +230,11 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 						returnStatement(
 							conditionalExpression(
 								binaryExpression("===",
-									result,
-									result
+									read(lookup(result, scope), scope),
+									read(lookup(result, scope), scope)
 								),
 								literal(null),
-								result
+								read(lookup(result, scope), scope)
 							)
 						)
 					]);
@@ -309,7 +309,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 						const convertedValue = Number(value);
 						return expr(literal(isNaN(convertedValue) ? null : convertedValue));
 					}
-					const result = uniqueIdentifier(scope, "number");
+					const result = uniqueName(scope, "number");
 					return statements([
 						addVariable(scope, result, parseType("Int"), callExpression(identifier("Number"), [
 							input,
@@ -317,11 +317,11 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 						returnStatement(
 							conditionalExpression(
 								binaryExpression("===",
-									result,
-									result
+									read(lookup(result, scope), scope),
+									read(lookup(result, scope), scope)
 								),
 								literal(null),
-								result
+								read(lookup(result, scope), scope)
 							)
 						)
 					]);
@@ -455,33 +455,35 @@ function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, nam
 	return call(functionValue(name, typeArg, type), [typeArg], [typeType], scope);
 }
 
-function closedRangeIterate(range: Value, scope: Scope, body: (expression: Expression) => Statement): Statement[] {
+function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {
 	let start;
 	let end;
 	let contents = [];
 	const intType = parseType("Int");
-	const i = uniqueIdentifier(scope, "i");
+	const i = uniqueName(scope, "i");
 	if (range.kind === "tuple" && range.values.length === 2) {
 		start = read(range.values[0], scope);
 		contents.push(addVariable(scope, i, intType, start));
-		end = read(range.values[1], scope);
-		if (!isPure(end)) {
-			const endIdentifier = uniqueIdentifier(scope, "end");
+		const endExpression = read(range.values[1], scope);
+		if (isPure(endExpression)) {
+			end = expr(endExpression);
+		} else {
+			const endIdentifier = uniqueName(scope, "end");
 			contents.push(addVariable(scope, endIdentifier, intType, end));
-			end = endIdentifier;
+			end = lookup(endIdentifier, scope);
 		}
 	} else {
 		addVariable(scope, i, intType);
-		const endIdentifier = uniqueIdentifier(scope, "end");
+		const endIdentifier = uniqueName(scope, "end");
 		addVariable(scope, endIdentifier, intType);
-		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([i, endIdentifier]), read(range, scope))]));
-		end = endIdentifier;
+		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([read(lookup(i, scope), scope), read(lookup(endIdentifier, scope), scope)]), read(range, scope))]));
+		end = lookup(endIdentifier, scope);
 	}
 	const result = forStatement(
 		contents.length === 1 ? contents[0] : undefined,
-		binaryExpression("<=", i, end),
-		updateExpression("++", i),
-		body(i),
+		binaryExpression("<=", read(lookup(i, scope), scope), read(end, scope)),
+		updateExpression("++", read(lookup(i, scope), scope)),
+		body(lookup(i, scope)),
 	);
 	if (contents.length === 1) {
 		return [result];
@@ -797,8 +799,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						const [lhsFirst, lhsAfter] = reuseExpression(lhs, scope, "rhs");
 						return transform(arg(1, "rhs"), scope, (rhs) => {
 							const [rhsFirst, rhsAfter] = reuseExpression(rhs, scope, "rhs");
-							const result = uniqueIdentifier(scope, comparison);
-							const i = uniqueIdentifier(scope, "i");
+							const result = uniqueName(scope, comparison);
+							const i = uniqueName(scope, "i");
 							return statements([
 								addVariable(scope, result, parseType("Bool"), undefined),
 								ifStatement(
@@ -806,36 +808,37 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 										memberExpression(lhsFirst, identifier("length")),
 										memberExpression(rhsFirst, identifier("length"))
 									),
-									blockStatement([
-										expressionStatement(assignmentExpression("=", result, literal(comparison === "unequal"))),
-									]),
-									blockStatement([
-										addVariable(scope, i, parseType("Int"), literal(0)),
-										whileStatement(
-											logicalExpression("&&",
-												binaryExpression("<",
-													i,
-													memberExpression(lhsAfter, identifier("length"))
+									blockStatement(ignore(set(lookup(result, scope), expr(literal(comparison === "unequal")), scope), scope)),
+									blockStatement(concat(
+										[
+											addVariable(scope, i, parseType("Int"), literal(0)),
+											whileStatement(
+												logicalExpression("&&",
+													binaryExpression("<",
+														read(lookup(i, scope), scope),
+														memberExpression(lhsAfter, identifier("length"))
+													),
+													binaryExpression("===",
+														memberExpression(lhsAfter, read(lookup(i, scope), scope), true),
+														memberExpression(rhsAfter, read(lookup(i, scope), scope), true)
+													),
 												),
-												binaryExpression("===",
-													memberExpression(lhsAfter, i, true),
-													memberExpression(rhsAfter, i, true)
-												),
+												blockStatement([
+													expressionStatement(updateExpression("++", read(lookup(i, scope), scope))),
+												])
 											),
-											blockStatement([
-												expressionStatement(updateExpression("++", i)),
-											])
-										),
-										expressionStatement(assignmentExpression("=",
-											result,
-											binaryExpression(comparison === "unequal" ? "!==" : "===",
-												i,
+										],
+										ignore(set(
+											lookup(result, scope),
+											expr(binaryExpression(comparison === "unequal" ? "!==" : "===",
+												read(lookup(i, scope), scope),
 												memberExpression(lhsAfter, identifier("length"))
-											)
-										)),
-									])
+											)),
+											scope
+										), scope),
+									))
 								),
-								returnStatement(result),
+								returnStatement(read(lookup(result, scope), scope)),
 							]);
 						});
 					});
@@ -989,8 +992,10 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					}
 					if (reified.copy) {
 						// Arrays of complex types are mapped using a generated copy function
-						const id = uniqueIdentifier(scope, "value");
-						const converter = functionExpression(undefined, [id], blockStatement([returnStatement(read(reified.copy(expr(id), scope), scope))]));
+						const id = uniqueName(scope, "value");
+						// TODO: Fill in addVariable
+						//addVariable();
+						const converter = functionExpression(undefined, [identifier(id)], blockStatement([returnStatement(read(reified.copy(expr(identifier(id)), scope), scope))]));
 						return expr(callExpression(memberExpression(expression, identifier("map")), [converter]));
 					} else {
 						// Simple arrays are sliced
@@ -1119,29 +1124,29 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			map: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
-					const mapped = uniqueIdentifier(innerScope, "mapped");
+					const mapped = uniqueName(innerScope, "mapped");
 					const callback = innerArg(0, "callback");
 					return statements(concat(
 						[addVariable(innerScope, mapped, dummyType, arrayExpression([]), DeclarationFlags.Const)],
 						closedRangeIterate(range, innerScope, (i) => blockStatement([
-							expressionStatement(callExpression(memberExpression(mapped, identifier("push")), [read(call(callback, [expr(i)], [dummyType], scope), scope)])),
+							expressionStatement(callExpression(memberExpression(read(lookup(mapped, scope), scope), identifier("push")), [read(call(callback, [i], [dummyType], scope), scope)])),
 						])),
-						[returnStatement(mapped)]
+						[returnStatement(read(lookup(mapped, scope), scope))]
 					));
 				}, returnType(type));
 			},
 			reduce: (scope, arg, type) => {
 				const range = arg(2, "range");
 				return callable((innerScope, innerArg) => {
-					const result = uniqueIdentifier(innerScope, "result");
+					const result = uniqueName(innerScope, "result");
 					const initialResult = innerArg(0, "initialResult");
 					const next = innerArg(1, "next");
 					return statements(concat(
 						[addVariable(innerScope, result, dummyType, read(initialResult, scope))],
-						closedRangeIterate(range, innerScope, (i) => blockStatement([
-							expressionStatement(assignmentExpression("=", result, read(call(next, [expr(result), expr(i)], [dummyType, dummyType], scope), scope))),
-						])),
-						[returnStatement(result)],
+						closedRangeIterate(range, innerScope, (i) => blockStatement(
+							ignore(set(lookup(result, scope), call(next, [lookup(result, scope), i], [dummyType, dummyType], scope), scope), scope),
+						)),
+						[returnStatement(read(lookup(result, scope), scope))],
 					));
 				}, returnType(type));
 			},

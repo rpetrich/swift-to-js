@@ -3,11 +3,11 @@ import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome,
 import { Declaration } from "./declaration";
 import { FunctionBuilder, functionize, insertFunction, noinline, returnType, wrapped } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, reifyType, storeValue, struct, TypeMap } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueIdentifier } from "./scope";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
+import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, annotateValue, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, ignore, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -319,21 +319,21 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 		case "pattern_named": {
 			expectLength(term.children, 0);
 			expectLength(term.args, 1);
-			const name = mangleName(term.args[0]);
+			const name = term.args[0];
 			const type = getType(term);
 			if (Object.hasOwnProperty.call(scope.declarations, name)) {
 				return {
-					prefix: storeValue(name, value, type, scope).map((expression) => annotate(expressionStatement(annotate(expression, term)), term)),
+					prefix: ignore(store(lookup(name, scope), value, type, scope), scope),
 					test: trueValue,
 				};
 			} else {
 				const pattern = convertToPattern(copy(value, type));
-				const patternExpression = read(pattern.test, scope);
-				const hasMapping = Object.hasOwnProperty.call(scope.mapping, name.name);
+				const hasMapping = Object.hasOwnProperty.call(scope.mapping, name);
 				let result: Statement;
 				if (hasMapping) {
-					result = expressionStatement(annotate(assignmentExpression("=", name, patternExpression), term));
+					result = expressionStatement(annotate(read(set(lookup(name, scope), pattern.test, scope), scope), term));
 				} else {
+					const patternExpression = read(pattern.test, scope);
 					result = addVariable(scope, name, type, isIdentifier(patternExpression) && patternExpression.name === "undefined" ? undefined : patternExpression, declarationFlags);
 					if (declarationFlags & DeclarationFlags.Export) {
 						result = exportNamedDeclaration(result, []);
@@ -774,20 +774,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
 			const type = getType(term);
-			const tempIdentifier = identifier("$try");
-			const bodyExpression = read(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope);
-			const contents: Statement[] = [];
-			if (!Object.hasOwnProperty.call(scope.declarations, tempIdentifier.name)) {
-				contents.push(addVariable(scope, tempIdentifier, type));
-			}
-			contents.push(tryStatement(
-				blockStatement([
-					expressionStatement(assignmentExpression("=", tempIdentifier, bodyExpression)),
-				]),
-				catchClause(identifier("e"), blockStatement([expressionStatement(assignmentExpression("=", tempIdentifier, emptyOptional(type)))])),
-			));
-			contents.push(annotate(returnStatement(tempIdentifier), term));
-			return statements(contents, term);
+			const temp = uniqueName(scope, ":try");
+			return statements([
+				addVariable(scope, temp, type),
+				tryStatement(
+					blockStatement(
+						ignore(set(lookup(temp, scope), wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope), scope)
+					),
+					catchClause(identifier("e"), blockStatement(
+						ignore(set(lookup(temp, scope), expr(emptyOptional(type)), scope), scope),
+					)),
+				),
+				annotate(returnStatement(read(lookup(temp, scope), scope)), term)
+			], term);
 		}
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
@@ -873,8 +872,8 @@ function applyParameterMappings(typeParameterCount: number, parameterTerms: Term
 				childScope.mapping[parameterName] = expr(literal(literalValue));
 				return statements;
 			}
-			const temporary = annotate(uniqueIdentifier(scope, parameterName), expression.loc);
-			childScope.mapping[parameterName] = expr(temporary);
+			const temporary = uniqueName(scope, parameterName);
+			childScope.mapping[parameterName] = expr(identifier(temporary), expression.loc);
 			return concat(statements, [addVariable(scope, temporary, type, expression, DeclarationFlags.Const)]);
 		}
 	}, emptyStatements);
@@ -945,8 +944,8 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 				const body = termWithName(term.children, "brace_stmt").children.slice();
 				if (typeof constructedTypeName === "string") {
 					const typeOfResult = returnType(returnType(getType(term)));
-					const selfMapping = uniqueIdentifier(childScope, camelCase(constructedTypeName));
-					childScope.mapping.self = expr(selfMapping);
+					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
+					childScope.mapping.self = expr(identifier(selfMapping));
 					const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, (fieldName) => {
 						if (body.length && body[0].name === "assign_expr") {
 							const children = body[0].children;
@@ -974,8 +973,8 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 			} else {
 				if (typeof constructedTypeName === "string") {
 					const typeOfResult = returnType(returnType(getType(term)));
-					const selfMapping = uniqueIdentifier(childScope, camelCase(constructedTypeName));
-					childScope.mapping.self = expr(selfMapping);
+					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
+					childScope.mapping.self = expr(identifier(selfMapping));
 					const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, () => undefined);
 					return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), term)])), term);
 				} else {
@@ -1063,10 +1062,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		}
 		case "var_decl": {
 			expectLength(term.children, 0);
-			const name = mangleName(term.args[0]);
-			if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
+			const name = term.args[0];
+			if (Object.hasOwnProperty.call(scope.declarations, name)) {
 				if (term.properties.access === "public") {
-					scope.declarations[name.name].flags |= DeclarationFlags.Export;
+					scope.declarations[name].flags |= DeclarationFlags.Export;
 				}
 				return emptyStatements;
 			} else {
@@ -1426,27 +1425,31 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const selfType: Type = { kind: "name", name: className };
 			const conformances: ProtocolConformanceMap = Object.create(null);
 			scope.types[className] = () => newClass(layout, methods, conformances, Object.create(null), (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
-				const self = uniqueIdentifier(innerScope, camelCase(className));
+				const self = uniqueName(innerScope, camelCase(className));
+				const selfValue = lookup(self, scope);
 				const newExpr = newExpression(classIdentifier, []);
-				const bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, newExpr, DeclarationFlags.Const)];
+				let bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, newExpr, DeclarationFlags.Const)];
 				for (const field of layout) {
 					if (field.stored) {
 						let fieldExpression = consume(field.name);
+						let fieldValue;
 						if (typeof fieldExpression === "undefined") {
 							const defaultValue = field.type.defaultValue;
 							if (typeof defaultValue === "undefined") {
 								// Swift always ensures all mandatory fields are filled, so we can be certain that later in the body it will be assigned
 								continue;
 							}
-							fieldExpression = read(defaultValue(innerScope, () => undefined), innerScope);
+							fieldValue = defaultValue(innerScope, () => undefined);
+						} else {
+							fieldValue = expr(fieldExpression);
 						}
-						bodyStatements.push(expressionStatement(assignmentExpression("=", memberExpression(self, identifier(field.name)), fieldExpression)));
+						bodyStatements = concat(bodyStatements, ignore(set(expr(memberExpression(read(selfValue, scope), identifier(field.name))), fieldValue, scope), scope));
 					}
 				}
 				if (bodyStatements.length === 1) {
 					return expr(newExpr);
 				} else {
-					bodyStatements.push(returnStatement(self));
+					bodyStatements.push(returnStatement(read(selfValue, scope)));
 					return statements(bodyStatements);
 				}
 			});
@@ -1482,9 +1485,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 									if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
 										return translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, selfExpression)(scope, noArguments);
 									} else {
-										const self = uniqueIdentifier(innerScope, "self");
+										const self = uniqueName(innerScope, "self");
 										const head = addVariable(innerScope, self, childType, selfExpression, DeclarationFlags.Const);
-										const result = translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, self)(scope, noArguments);
+										const func = translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, read(lookup(self, scope), scope) as any);
+										const result = func(scope, noArguments);
 										if (result.kind === "statements") {
 											return statements(concat([head], result.statements), result.location);
 										} else {

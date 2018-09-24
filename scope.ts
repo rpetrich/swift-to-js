@@ -25,22 +25,25 @@ export interface Scope {
 	parent: Scope | undefined;
 }
 
-export function addDeclaration(scope: Scope, name: Identifier, declaration?: Declaration, flags: DeclarationFlags = DeclarationFlags.None) {
-	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
-		throw new Error(`Declaration of ${name.name} already exists`);
+export function addDeclaration(scope: Scope, name: string, callback: (id: Identifier) => Declaration, flags: DeclarationFlags = DeclarationFlags.None) {
+	if (Object.hasOwnProperty.call(scope.declarations, name)) {
+		throw new Error(`Declaration of ${name} already exists`);
 	}
-	scope.mapping[name.name] = expr(name);
-	scope.declarations[name.name] = { flags, declaration };
+	const identifier = mangleName(name);
+	const result = expr(identifier);
+	scope.mapping[name] = result;
+	scope.declarations[name] = { flags, declaration: callback(identifier) };
+	return result;
 }
 
-export function addVariable(scope: Scope, name: Identifier, type: Type, init?: Expression, flags: DeclarationFlags = DeclarationFlags.None) {
-	if (Object.hasOwnProperty.call(scope.declarations, name.name)) {
-		throw new Error(`Declaration of ${name.name} already exists`);
+export function addVariable(scope: Scope, name: string, type: Type, init?: Expression, flags: DeclarationFlags = DeclarationFlags.None) {
+	if (Object.hasOwnProperty.call(scope.declarations, name)) {
+		throw new Error(`Declaration of ${name} already exists`);
 	}
 	// flags |= DeclarationFlags.Boxed;
-	scope.mapping[name.name] = flags & DeclarationFlags.Boxed ? boxed(expr(name), type) : expr(name);
-	scope.declarations[name.name] = { flags, declaration: undefined };
-	return variableDeclaration(flags & DeclarationFlags.Const ? "const" : "let", [variableDeclarator(name, flags & DeclarationFlags.Boxed ? constructBox(init, type) : init)]);
+	scope.mapping[name] = flags & DeclarationFlags.Boxed ? boxed(expr(mangleName(name)), type) : expr(mangleName(name));
+	scope.declarations[name] = { flags, declaration: undefined };
+	return variableDeclaration(flags & DeclarationFlags.Const ? "const" : "let", [variableDeclarator(mangleName(name), flags & DeclarationFlags.Boxed ? constructBox(init, type) : init)]);
 }
 
 export function rootScope(scope: Scope) {
@@ -146,13 +149,13 @@ export function lookup(name: string, scope: Scope): MappedValue {
 	return expr(mangleName(name));
 }
 
-export function uniqueIdentifier(scope: Scope, prefix: string = "$temp") {
+export function uniqueName(scope: Scope, prefix: string = "$temp") {
 	let i = 0;
 	let name = prefix;
 	while (hasNameInScope(scope, name)) {
 		name = prefix + i++;
 	}
-	return identifier(name);
+	return name;
 }
 
 export function emitScope(scope: Scope, statements: Statement[]): Statement[] {
