@@ -1,9 +1,9 @@
 export function silly_math$num$(num) {
-  let result = num;
+  const result = [num];
 
-  while (result < 10000) {
-    result *= result;
+  while (result[0] < 10000) {
+    result[0] *= result[0];
   }
 
-  return result;
+  return result[0];
 }

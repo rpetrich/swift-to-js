@@ -7,7 +7,7 @@ import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, Fu
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, functionValue, FunctionValue, isNestedOptional, ignore, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, annotateValue, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, ignore, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
@@ -779,13 +779,13 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				addVariable(scope, temp, type),
 				tryStatement(
 					blockStatement(
-						ignore(set(lookup(temp, scope), wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope), scope)
+						ignore(set(lookup(temp, scope), wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope), scope),
 					),
 					catchClause(identifier("e"), blockStatement(
 						ignore(set(lookup(temp, scope), expr(emptyOptional(type)), scope), scope),
 					)),
 				),
-				annotate(returnStatement(read(lookup(temp, scope), scope)), term)
+				annotate(returnStatement(read(lookup(temp, scope), scope)), term),
 			], term);
 		}
 		case "erasure_expr": {
@@ -859,7 +859,8 @@ function applyParameterMappings(typeParameterCount: number, parameterTerms: Term
 			// if (value.kind !== "boxed") {
 			// 	throw new TypeError(`Expected a boxed value, got a ${value.kind}`);
 			// }
-			childScope.mapping[parameterName] = value.kind === "boxed" ? value : boxed(value, { kind: "modified", type, modifier: "inout" });//.contents : expr(memberExpression(read(value, scope), literal(0), true));
+			// childScope.mapping[parameterName] = value.kind === "boxed" ? value : boxed(value, { kind: "modified", type, modifier: "inout" });
+			childScope.mapping[parameterName] = value.kind === "boxed" ? value : boxed(value, type);
 			return statements;
 		} else {
 			const expression = read(value, scope);
@@ -881,8 +882,10 @@ function applyParameterMappings(typeParameterCount: number, parameterTerms: Term
 
 function flagsForDeclarationTerm(term: Term): DeclarationFlags {
 	let flags: DeclarationFlags = DeclarationFlags.None;
-	if (term.properties.let) {
+	if (term.properties.let || term.properties.immutable) {
 		flags |= DeclarationFlags.Const;
+	} else {
+		flags |= DeclarationFlags.Boxed;
 	}
 	if (term.properties.access === "public") {
 		flags |= DeclarationFlags.Export;
@@ -1399,7 +1402,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const valueChild = term.children[1];
 				// const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
 				const value = translateTermToValue(valueChild, scope);
-				let flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
+				const flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
 				const pattern = translatePattern(term.children[0], value, scope, flags);
 				if (typeof pattern.next !== "undefined") {
 					throw new Error(`Chained patterns are not supported on binding declarations`);

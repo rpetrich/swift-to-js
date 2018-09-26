@@ -4,7 +4,7 @@ import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
 import { concat } from "./utils";
-import { constructBox, boxed, BoxedValue, expr, literal, ExpressionValue, VariableValue, SubscriptValue } from "./values";
+import { boxed, BoxedValue, constructBox, expr, ExpressionValue, literal, stringifyType, SubscriptValue, typeRequiresBox, VariableValue } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
@@ -40,10 +40,11 @@ export function addVariable(scope: Scope, name: string, type: Type, init?: Expre
 	if (Object.hasOwnProperty.call(scope.declarations, name)) {
 		throw new Error(`Declaration of ${name} already exists`);
 	}
-	// flags |= DeclarationFlags.Boxed;
-	scope.mapping[name] = flags & DeclarationFlags.Boxed ? boxed(expr(mangleName(name)), type) : expr(mangleName(name));
+	const isBoxed = flags & DeclarationFlags.Boxed;
+	scope.mapping[name] = isBoxed ? boxed(expr(mangleName(name)), type) : expr(mangleName(name));
 	scope.declarations[name] = { flags, declaration: undefined };
-	return variableDeclaration(flags & DeclarationFlags.Const ? "const" : "let", [variableDeclarator(mangleName(name), flags & DeclarationFlags.Boxed ? constructBox(init, type) : init)]);
+	const requiresBox = isBoxed && typeRequiresBox(type, scope);
+	return variableDeclaration(flags & DeclarationFlags.Const || requiresBox ? "const" : "let", [variableDeclarator(mangleName(name), requiresBox ? constructBox(init, type, scope) : init)]);
 }
 
 export function rootScope(scope: Scope) {

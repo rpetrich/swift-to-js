@@ -1,8 +1,8 @@
 export function addOne$to$(int) {
-  int += 1;
+  int[0] += 1;
 }
 export function incremented$integer$(integer) {
-  let copy = integer;
+  const copy = [integer];
   addOne$to$(copy);
-  return copy;
+  return copy[0];
 }

@@ -1,6 +1,6 @@
 import { Term } from "./ast";
 import { ReifiedType, reifyType } from "./reified";
-import { addVariable, addDeclaration, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
+import { addDeclaration, addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
 

@@ -4,7 +4,7 @@ import { Term } from "./ast";
 import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
-import { addVariable, addDeclaration, DeclarationFlags, emitScope, fullPathOfScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
+import { addDeclaration, addVariable, DeclarationFlags, emitScope, fullPathOfScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -261,23 +261,27 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 	throw new Error(`Unable to unbox from ${value.kind} value`);
 }
 
-function typeRequiresBox(type: Type) {
-	// TODO: Figure out what types of things require a box
-	if (type.kind === "modified" && type.modifier === "inout") {
-		return type.type.kind !== "array" && type.type.kind !== "dictionary";
+const unboxedRepresentations = PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array;
+
+export function typeRequiresBox(type: Type, scope: Scope): boolean {
+	switch (type.kind) {
+		case "array":
+		case "dictionary":
+			return false;
+		case "modified":
+			return typeRequiresBox(type.type, scope);
+		default:
+			const possibleRepresentations = reifyType(type, scope).possibleRepresentations;
+			return (possibleRepresentations & unboxedRepresentations) !== possibleRepresentations;
 	}
-	return false;
 }
 
-export function constructBox(expression: Expression | undefined, type: Type) {
-	if (typeRequiresBox(type)) {
-		return arrayExpression(typeof expression !== "undefined" ? [expression] : []);
-	}
-	return expression;
+export function constructBox(expression: Expression | undefined, type: Type, scope: Scope) {
+	return arrayExpression(typeof expression !== "undefined" ? [expression] : []);
 }
 
 export function contentsOfBox(target: BoxedValue, scope: Scope) {
-	if (typeRequiresBox(target.type)) {
+	if (typeRequiresBox(target.type, scope)) {
 		return memberExpression(read(target.contents, scope), literal(0), true);
 	}
 	return read(target.contents, scope);
@@ -425,7 +429,7 @@ export function read(value: Value, scope: Scope): Expression {
 					expr(memberExpression(read(unbound, scope), identifier("bind"))),
 					concat([expr(literal(null))], value.substitutions),
 					[], // TODO: Add types for this call expression
-					scope
+					scope,
 				);
 			} else {
 				func = unbound;

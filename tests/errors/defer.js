@@ -7,7 +7,7 @@ export function attempt$shouldThrow$(shouldThrow) {
 }
 export function defers$shouldThrow$(shouldThrow) {
   try {
-    processing = true;
+    processing[0] = true;
     let $try;
 
     try {
@@ -18,7 +18,7 @@ export function defers$shouldThrow$(shouldThrow) {
 
     return $try;
   } finally {
-    processing = false;
+    processing[0] = false;
   }
 }
-let processing = false;
+const processing = [false];

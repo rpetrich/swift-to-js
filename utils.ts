@@ -9,8 +9,8 @@ export function expectLength<T extends ReadonlyArray<any>>(array: T, ...lengths:
 }
 
 export function concat<T>(first: T[], ...rest: T[][]): T[];
-export function concat<T>(first: ReadonlyArray<T>, ...rest: ReadonlyArray<T>[]): ReadonlyArray<T>;
-export function concat<T>(first: ReadonlyArray<T>, ...rest: ReadonlyArray<T>[]): ReadonlyArray<T> {
+export function concat<T>(first: ReadonlyArray<T>, ...rest: Array<ReadonlyArray<T>>): ReadonlyArray<T>;
+export function concat<T>(first: ReadonlyArray<T>, ...rest: Array<ReadonlyArray<T>>): ReadonlyArray<T> {
 	let result = first;
 	for (const other of rest) {
 		if (other.length !== 0) {

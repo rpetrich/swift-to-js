@@ -1,1 +1,1 @@
-public var emptyInit: () = ()
+public let emptyInit: () = ()

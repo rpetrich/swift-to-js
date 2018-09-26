@@ -1,1 +1,1 @@
-public var unaryInit: (Double) = (0)
+public let unaryInit: (Double) = (0)

@@ -1,1 +1,1 @@
-export let emptyInit;
+export const emptyInit;
