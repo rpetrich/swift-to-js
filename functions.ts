@@ -1,6 +1,6 @@
 import { Term } from "./ast";
 import { ReifiedType, reifyType } from "./reified";
-import { addDeclaration, addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
+import { addDeclaration, addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
 
@@ -20,39 +20,37 @@ function getArgumentPointers(type: Type): boolean[] {
 	throw new TypeError(`Expected a function, got a ${type.kind}: ${stringifyType(type)}`);
 }
 
+export function statementsInValue(value: Value, scope: Scope): Statement[] {
+	return value.kind === "statements" ? value.statements : [returnStatement(read(value, scope))];
+}
+
 export function functionize(scope: Scope, expression: (scope: Scope, arg: ArgGetter) => Value, location?: Location | Term): [Identifier[], Statement[]] {
-	const inner: Scope = newScope("anonymous", scope);
-	let usedCount = 0;
-	const identifiers: { [index: number]: Identifier } = Object.create(null);
-	const newValue = expression(inner, (i, name) => {
-		if (usedCount === -1) {
-			throw new Error(`Requested access to scope after it was generated!`);
-		}
-		if (usedCount <= i) {
-			usedCount = i + 1;
-		}
-		let result: Identifier;
-		if (Object.hasOwnProperty.call(identifiers, i)) {
-			result = identifiers[i];
-		} else {
-			result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
-		}
-		// TODO: Determine what to do about inout parameters
-		return expr(result);
-	});
 	const args: Identifier[] = [];
-	for (let i = 0; i < usedCount; i++) {
-		args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + i);
-	}
-	let statements: Statement[];
-	if (newValue.kind === "statements") {
-		statements = newValue.statements;
-	} else {
-		statements = [annotate(returnStatement(read(newValue, inner)), newValue.location || location)];
-	}
-	const result = emitScope(inner, statements);
-	usedCount = -1;
-	return [args, result];
+	return [args, statementsInValue(newScope("anonymous", scope, (inner) => {
+		let usedCount = 0;
+		const identifiers: { [index: number]: Identifier } = Object.create(null);
+		const newValue = expression(inner, (i, name) => {
+			if (usedCount === -1) {
+				throw new Error(`Requested access to scope after it was generated!`);
+			}
+			if (usedCount <= i) {
+				usedCount = i + 1;
+			}
+			let result: Identifier;
+			if (Object.hasOwnProperty.call(identifiers, i)) {
+				result = identifiers[i];
+			} else {
+				result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
+			}
+			// TODO: Determine what to do about inout parameters
+			return expr(result);
+		});
+		for (let i = 0; i < usedCount; i++) {
+			args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + i);
+		}
+		usedCount = -1;
+		return newValue;
+	}), scope)];
 }
 
 export function insertFunction(name: string, scope: Scope, type: Function, builder: FunctionBuilder | GetterSetterBuilder, location?: Location | Term, shouldExport: boolean = false): Value {

@@ -1,3 +1,3 @@
 export function isEmpty$size$(size) {
-  return size.width === 0 && size.height === 0;
+  return self.width === 0 && self.height === 0;
 }

@@ -1,10 +1,10 @@
 import { abstractMethod, FunctionBuilder, noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ProtocolConformanceMap, ReifiedType, reifyType, struct, TypeMap, TypeParameterHost } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
+import { addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, ignore, isNestedOptional, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeType, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, call, callable, copy, expr, ExpressionValue, functionValue, isNestedOptional, ignore, isPure, literal, read, reuseExpression, set, simplify, statements, stringifyType, transform, tuple, typeFromValue, typeType, typeValue, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, arrayPattern, assignmentExpression, binaryExpression, blockStatement, breakStatement, callExpression, conditionalExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, logicalExpression, memberExpression, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
 
@@ -214,7 +214,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			CustomStringConvertible: {
 			},
 			LosslessStringConvertible: {
-				init: wrapped((scope, arg) => {
+				"init": wrapped((scope, arg) => {
 					const input = read(arg(0, "description"), scope);
 					const value = valueOfExpression(input);
 					if (typeof value === "string") {
@@ -231,12 +231,12 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 							conditionalExpression(
 								binaryExpression("===",
 									read(lookup(result, scope), scope),
-									read(lookup(result, scope), scope),
+									read(lookup(result, scope), scope)
 								),
 								literal(null),
-								read(lookup(result, scope), scope),
-							),
-						),
+								read(lookup(result, scope), scope)
+							)
+						)
 					]);
 				}),
 			},
@@ -302,7 +302,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 				},
 			},
 			LosslessStringConvertible: {
-				init: wrapped((scope, arg) => {
+				"init": wrapped((scope, arg) => {
 					const input = read(arg(0, "description"), scope);
 					const value = valueOfExpression(input);
 					if (typeof value === "string") {
@@ -318,12 +318,12 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 							conditionalExpression(
 								binaryExpression("===",
 									read(lookup(result, scope), scope),
-									read(lookup(result, scope), scope),
+									read(lookup(result, scope), scope)
 								),
 								literal(null),
-								read(lookup(result, scope), scope),
-							),
-						),
+								read(lookup(result, scope), scope)
+							)
+						)
 					]);
 				}),
 			},
@@ -498,7 +498,7 @@ function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, sco
 		const otherMethod = call(functionValue(otherMethodName, typeArg, type), [typeArg], [typeType], scope);
 		const functionType = returnFunctionType(type);
 		return callable((innerScope, innerArg) => adapter(otherMethod, innerScope, innerArg, functionType), functionType);
-	};
+	}
 }
 
 function updateMethod(otherMethodName: string) {
@@ -525,7 +525,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	const protocolTypes: TypeMap = Object.create(null);
 	function addProtocol(name: string, conformance: ProtocolConformance) {
 		const result = protocol({
-			[name]: conformance,
+			[name]: conformance
 		});
 		protocolTypes[name] = () => result;
 	}
@@ -607,7 +607,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		// TODO: Support properties
 	});
 	addProtocol("LosslessStringConvertible", {
-		init: abstractMethod,
+		"init": abstractMethod,
 	});
 
 	const BoolType = cachedBuilder((globalScope: Scope) => primitive(PossibleRepresentation.Boolean, expr(literal(false)), [
@@ -806,7 +806,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								ifStatement(
 									binaryExpression("!==",
 										memberExpression(lhsFirst, identifier("length")),
-										memberExpression(rhsFirst, identifier("length")),
+										memberExpression(rhsFirst, identifier("length"))
 									),
 									blockStatement(ignore(set(lookup(result, scope), expr(literal(comparison === "unequal")), scope), scope)),
 									blockStatement(concat(
@@ -816,27 +816,27 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 												logicalExpression("&&",
 													binaryExpression("<",
 														read(lookup(i, scope), scope),
-														memberExpression(lhsAfter, identifier("length")),
+														memberExpression(lhsAfter, identifier("length"))
 													),
 													binaryExpression("===",
 														memberExpression(lhsAfter, read(lookup(i, scope), scope), true),
-														memberExpression(rhsAfter, read(lookup(i, scope), scope), true),
+														memberExpression(rhsAfter, read(lookup(i, scope), scope), true)
 													),
 												),
 												blockStatement([
 													expressionStatement(updateExpression("++", read(lookup(i, scope), scope))),
-												]),
+												])
 											),
 										],
 										ignore(set(
 											lookup(result, scope),
 											expr(binaryExpression(comparison === "unequal" ? "!==" : "===",
 												read(lookup(i, scope), scope),
-												memberExpression(lhsAfter, identifier("length")),
+												memberExpression(lhsAfter, identifier("length"))
 											)),
-											scope,
+											scope
 										), scope),
-									)),
+									))
 								),
 								returnStatement(read(lookup(result, scope), scope)),
 							]);
@@ -1131,7 +1131,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						closedRangeIterate(range, innerScope, (i) => blockStatement([
 							expressionStatement(callExpression(memberExpression(read(lookup(mapped, scope), scope), identifier("push")), [read(call(callback, [i], [dummyType], scope), scope)])),
 						])),
-						[returnStatement(read(lookup(mapped, scope), scope))],
+						[returnStatement(read(lookup(mapped, scope), scope))]
 					));
 				}, returnType(type));
 			},

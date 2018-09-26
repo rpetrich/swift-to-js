@@ -1,10 +1,10 @@
-import { arrayExpression, BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, memberExpression, NullLiteral, NumericLiteral, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, memberExpression, NullLiteral, NumericLiteral, returnStatement, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
 import { concat } from "./utils";
-import { boxed, BoxedValue, constructBox, expr, ExpressionValue, literal, stringifyType, SubscriptValue, typeRequiresBox, VariableValue } from "./values";
+import { boxed, BoxedValue, constructBox, expr, read, ExpressionValue, literal, stringifyType, statements, SubscriptValue, typeRequiresBox, VariableValue, Value } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
@@ -55,8 +55,8 @@ export function rootScope(scope: Scope) {
 	return result;
 }
 
-export function newScope(name: string, parent: Scope, types: TypeMap = parent.types): Scope {
-	return {
+export function newScope(name: string, parent: Scope, callback: (scope: Scope) => Value, types: TypeMap = parent.types): Value {
+	const scope: Scope = {
 		name,
 		declarations: Object.create(null),
 		types,
@@ -65,6 +65,8 @@ export function newScope(name: string, parent: Scope, types: TypeMap = parent.ty
 		mapping: Object.create(null),
 		parent,
 	};
+	const statements = callback(scope);
+	return emitScope(scope, statements);
 }
 
 export function hasNameInScope(scope: Scope, name: string): boolean {
@@ -159,11 +161,13 @@ export function uniqueName(scope: Scope, prefix: string = "$temp") {
 	return name;
 }
 
-export function emitScope(scope: Scope, statements: Statement[]): Statement[] {
+export function emitScope<T extends Value>(scope: Scope, value: Value): Value {
 	const keys = Object.keys(scope.declarations);
 	if (keys.length === 0) {
-		return statements;
+		return value;
 	}
+	// Because reading can add declarations
+	const tail = value.kind !== "statements" ? [returnStatement(read(value, scope))] : [];
 	const result: Statement[] = [];
 	for (const key of keys) {
 		const declaration = scope.declarations[key];
@@ -171,5 +175,8 @@ export function emitScope(scope: Scope, statements: Statement[]): Statement[] {
 			result.push(declaration.flags & DeclarationFlags.Export ? exportNamedDeclaration(declaration.declaration, []) : declaration.declaration);
 		}
 	}
-	return concat(result, statements);
+	if (value.kind === "statements") {
+		return statements(concat(result, value.statements));
+	}
+	return statements(concat(result, tail));
 }

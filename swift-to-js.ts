@@ -1,7 +1,7 @@
 import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { Declaration } from "./declaration";
-import { FunctionBuilder, functionize, insertFunction, noinline, returnType, wrapped } from "./functions";
+import { FunctionBuilder, functionize, insertFunction, noinline, returnType, statementsInValue, wrapped } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
@@ -699,10 +699,15 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 2);
 			const parameterList = termWithName(term.children, "parameter_list");
 			return callable((innerScope, arg) => {
-				const childScope = newScope("anonymous", innerScope);
-				const paramStatements = applyParameterMappings(0, termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
-				const result = translateTermToValue(term.children[1], childScope, bindingContext);
-				return statements(emitScope(childScope, concat(paramStatements, [returnStatement(read(result, childScope))])));
+				return newScope("anonymous", innerScope, (childScope) => {
+					const paramStatements = applyParameterMappings(0, termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
+					const result = translateTermToValue(term.children[1], childScope, bindingContext);
+					if (paramStatements.length) {
+						return statements(concat(paramStatements, [returnStatement(read(result, childScope))]));
+					} else {
+						return result;
+					}
+				});
 			}, getType(term));
 		}
 		case "tuple_shuffle_expr": {
@@ -918,28 +923,26 @@ function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): Ty
 }
 
 function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][], constructedTypeName: string | undefined, scope: Scope, functions: FunctionMap, selfIdentifier?: Identifier | ThisExpression): (scope: Scope, arg: ArgGetter) => Value {
-	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, initialScope?: Scope): (scope: Scope, arg: ArgGetter) => Value {
-		return (targetScope: Scope, arg: ArgGetter) => {
+	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, isInitial: boolean): (scope: Scope, arg: ArgGetter) => Value {
+		return (targetScope: Scope, arg: ArgGetter) => newScope(isInitial ? name : "inner", targetScope, (childScope) => {
 			// Apply generic function mapping for outermost function
 			let typeArgumentCount: number;
-			let childScope: Scope;
-			if (typeof initialScope !== "undefined") {
+			if (!isInitial) {
 				typeArgumentCount = 0;
-				childScope = initialScope;
 			} else {
 				const typeMap: TypeMap = term.args.length >= 2 ? typeMappingForGenericArguments(parseType("Base" + term.args[1]), arg) : Object.create(null);
 				typeArgumentCount = Object.keys(typeMap).length;
-				childScope = newScope(name, targetScope, typeMap);
+				// childScope = newScope(name, targetScope, typeMap);
 				if (typeof selfIdentifier !== "undefined") {
 					childScope.mapping.self = expr(selfIdentifier);
 				}
 			}
 			// Apply parameters
 			const parameterList = parameterLists[parameterListIndex];
-			let parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, typeof initialScope === "undefined" && !!constructedTypeName));
+			let parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
 			if (parameterListIndex !== parameterLists.length - 1) {
 				// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
-				return callable(constructCallable(emitScope(childScope, parameterStatements), parameterListIndex + 1, returnType(functionType), childScope), functionType);
+				return callable(constructCallable(parameterStatements, parameterListIndex + 1, returnType(functionType), false), functionType);
 			}
 			// Emit the innermost function
 			const brace = findTermWithName(term.children, "brace_stmt");
@@ -964,30 +967,30 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 					});
 					if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
 						const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
-						return statements(concat(parameterStatements, emitScope(childScope, defaultStatements)), brace);
+						return statements(concat(parameterStatements, defaultStatements), brace);
 					}
 					return transform(defaultInstantiation, childScope, (selfExpression) => {
 						const declarations: Statement[] = [addVariable(childScope, selfMapping, typeOfResult, selfExpression)];
-						const constructorBody: Statement[] = emitScope(childScope, translateAllStatements(body, childScope, functions));
+						const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
 						return statements(concat(concat(parameterStatements, declarations), constructorBody), brace);
 					});
 				}
-				return statements(concat(parameterStatements, emitScope(childScope, translateAllStatements(body, childScope, functions))), brace);
+				return statements(concat(parameterStatements, translateAllStatements(body, childScope, functions)), brace);
 			} else {
 				if (typeof constructedTypeName === "string") {
 					const typeOfResult = returnType(returnType(getType(term)));
 					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
 					childScope.mapping.self = expr(identifier(selfMapping));
 					const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, () => undefined);
-					return statements(concat(parameterStatements, emitScope(childScope, [annotate(returnStatement(read(defaultInstantiation, scope)), term)])), term);
+					return statements(concat(parameterStatements, [annotate(returnStatement(read(defaultInstantiation, scope)), term)]), term);
 				} else {
 					return statements(parameterStatements, term);
 				}
 			}
-		};
+		});
 	}
 
-	return constructCallable(emptyStatements, 0, getType(term));
+	return constructCallable(emptyStatements, 0, getType(term), true);
 }
 
 function noArguments(): never {
@@ -1115,28 +1118,29 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				if (childTerm.children.length < 1) {
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
-				const childScope = newScope("case", scope);
-				const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
 				let mergedPrefix: Statement[] = emptyStatements;
 				let mergedTest: Expression = literal(false);
 				let mergedSuffix: Statement[] = emptyStatements;
-				for (const child of remainingChildren) {
-					const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope), scope, term);
-					mergedPrefix = concat(mergedPrefix, prefix);
-					if (valueOfExpression(mergedTest) === false) {
-						mergedTest = test;
-					} else if (!isTrueExpression(mergedTest)) {
-						mergedTest = logicalExpression("||", mergedTest, test);
+				const body = newScope("case", scope, (childScope) => {
+					const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
+					for (const child of remainingChildren) {
+						const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope), scope, term);
+						mergedPrefix = concat(mergedPrefix, prefix);
+						if (valueOfExpression(mergedTest) === false) {
+							mergedTest = test;
+						} else if (!isTrueExpression(mergedTest)) {
+							mergedTest = logicalExpression("||", mergedTest, test);
+						}
+						mergedSuffix = concat(mergedSuffix, suffix);
 					}
-					mergedSuffix = concat(mergedSuffix, suffix);
-				}
-				const body = emitScope(childScope, concat(mergedSuffix, translateStatement(childTerm.children[childTerm.children.length - 1], childScope, functions)));
+					return statements(concat(mergedSuffix, translateStatement(childTerm.children[childTerm.children.length - 1], childScope, functions)));
+				});
 				// Basic optimization for else case in switch statement
 				if (typeof previous === "undefined" && isTrueExpression(mergedTest)) {
-					return blockStatement(concat(mergedPrefix, body));
+					return blockStatement(concat(mergedPrefix, statementsInValue(body, scope)));
 				}
 				// Push the if statement into a block if the test required prefix statements
-				const pendingStatement = ifStatement(mergedTest, blockStatement(body), previous);
+				const pendingStatement = ifStatement(mergedTest, blockStatement(statementsInValue(body, scope)), previous);
 				if (mergedPrefix.length) {
 					return blockStatement(concat(mergedPrefix, [pendingStatement]));
 				}
@@ -1556,13 +1560,16 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 }
 
 function translateInNewScope(term: Term, scope: Scope, functions: FunctionMap, scopeName: string): Statement[] {
-	const childScope = newScope(scopeName, scope);
-	return emitScope(childScope, translateStatement(term, childScope, functions));
+	return statementsInValue(newScope(scopeName, scope, (childScope) => statements(translateStatement(term, childScope, functions))), scope);
 }
 
 export function compileTermToProgram(root: Term): Program {
 	const programScope = newScopeWithBuiltins();
-	return program(emitScope(programScope, translateStatement(root, programScope, programScope.functions)));
+	const programValue = emitScope(programScope, statements(translateStatement(root, programScope, programScope.functions)));
+	if (programValue.kind !== "statements") {
+		throw new TypeError(`Expected program to emit statements, not a ${programValue.kind}`);
+	}
+	return program(programValue.statements);
 }
 
 function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
