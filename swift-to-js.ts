@@ -3,14 +3,14 @@ import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome,
 import { Declaration } from "./declaration";
 import { FunctionBuilder, functionize, insertFunction, noinline, returnType, statementsInValue, wrapped } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
+import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, primitive, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
 import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, ArgGetter, array, boxed, call, callable, copy, expr, ExpressionValue, FunctionValue, functionValue, ignore, isNestedOptional, isPure, literal, read, reuseExpression, set, statements, stringifyType, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, annotateValue, ArgGetter, array, binary, boxed, call, callable, conditional, conformance, copy, expr, ExpressionValue, FunctionValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, TupleValue, typeFromValue, typeValue, unary, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, memberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -114,15 +114,15 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 		let substitutionValues: Value[];
 		if (typeof declaration.substitutions !== "undefined") {
 			substitutionValues = declaration.substitutions.map((substitution) => {
-				let protocol;
+				let result: Value = typeValue(parseType(substitution.to));
 				if (typeof declaration.signature !== "undefined") {
-					for (const element of declaration.signature) {
-						if (typeof element !== "undefined" && element.name === substitution.from) {
-							protocol = element.protocol;
+					for (const element of declaration.signature.slice().reverse()) {
+						if (typeof element !== "undefined" && element.name === substitution.from && typeof element.protocol !== "undefined") {
+							result = conformance(result, element.protocol, scope);
 						}
 					}
 				}
-				return typeValue(parseType(substitution.to), protocol);
+				return result;
 			});
 		} else {
 			substitutionValues = [];
@@ -139,6 +139,10 @@ function getType(term: Term) {
 		console.error(term);
 		throw e;
 	}
+}
+
+function getTypeValue(term: Term) {
+	return typeValue(getType(term), term);
 }
 
 function findFunctionType(type: Type): Function {
@@ -181,7 +185,7 @@ interface PatternOutput {
 	next?: PatternOutput;
 }
 
-const trueValue = expr(literal(true));
+const trueValue = literal(true);
 
 function isTrueExpression(expression: Expression) {
 	return expression.type === "BooleanLiteral" && expression.value === true;
@@ -192,15 +196,15 @@ const emptyPattern: PatternOutput = {
 	test: trueValue,
 };
 
-function mergeDeclarationStatements(statements: Statement[]) {
-	let result = statements;
-	let i = statements.length - 1;
+function mergeDeclarationStatements(body: Statement[]) {
+	let result = body;
+	let i = body.length - 1;
 	while (i--) {
-		const current = statements[i];
-		const previous = statements[i + 1];
+		const current = body[i];
+		const previous = body[i + 1];
 		if (current.type === "VariableDeclaration" && previous.type === "VariableDeclaration" && current.kind === previous.kind) {
-			if (result === statements) {
-				result = statements.slice();
+			if (result === body) {
+				result = body.slice();
 			}
 			result.splice(i, 2, variableDeclaration(current.kind, concat(current.declarations, previous.declarations)));
 		}
@@ -229,7 +233,7 @@ function mergePatterns(first: PatternOutput, second: PatternOutput, scope: Scope
 	}
 	return {
 		prefix,
-		test: expr(logicalExpression("&&", firstExpression, secondExpression), term),
+		test: logical("&&", expr(firstExpression), expr(secondExpression), scope, term),
 		next,
 	};
 }
@@ -244,7 +248,7 @@ export function convertToPattern(value: Value): PatternOutput {
 	}
 	let prefix: Statement[] = emptyStatements;
 	if (value.kind === "statements") {
-		const returningIndex = value.statements.findIndex((statements) => statements.type === "ReturnStatement");
+		const returningIndex = value.statements.findIndex((statement) => statement.type === "ReturnStatement");
 		if (returningIndex === value.statements.length - 1) {
 			prefix = value.statements.slice(0, value.statements.length - 1);
 			value = expr((value.statements[value.statements.length - 1] as ReturnStatement).argument, value.location);
@@ -280,15 +284,14 @@ function unwrapCopies(value: Value): Value {
 
 function translatePattern(term: Term, value: Value, scope: Scope, declarationFlags: DeclarationFlags = DeclarationFlags.None): PatternOutput {
 	switch (term.name) {
-		case "pattern_optional_some": // Development
-		case "optional_some_element": { // Swift 4.1
+		case "pattern_optional_some": {
 			expectLength(term.children, 1);
-			const type = getType(term);
-			const [first, second] = reuseExpression(read(value, scope), scope, "optional");
-			const assign = translatePattern(term.children[0], unwrapOptional(expr(first), type, scope), scope, declarationFlags);
+			const type = getTypeValue(term);
+			const [first, second] = reuse(value, scope, "optional");
+			const assign = translatePattern(term.children[0], unwrapOptional(first, type, scope), scope, declarationFlags);
 			return {
 				prefix: emptyStatements,
-				test: expr(optionalIsSome(second, type), term),
+				test: annotateValue(optionalIsSome(second, type, scope), term),
 				next: assign,
 			};
 		}
@@ -299,11 +302,11 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 		case "pattern_let": {
 			expectLength(term.children, 1);
 			// TODO: Figure out how to avoid the copy here since it should only be necessary on var patterns
-			return translatePattern(term.children[0], copy(value, getType(term)), scope, declarationFlags | DeclarationFlags.Const);
+			return translatePattern(term.children[0], copy(value, getTypeValue(term)), scope, declarationFlags | DeclarationFlags.Const);
 		}
 		case "pattern_var": {
 			expectLength(term.children, 1);
-			return translatePattern(term.children[0], copy(value, getType(term)), scope, declarationFlags & ~DeclarationFlags.Const);
+			return translatePattern(term.children[0], copy(value, getTypeValue(term)), scope, declarationFlags & ~DeclarationFlags.Const);
 		}
 		case "pattern_expr": {
 			expectLength(term.children, 1);
@@ -320,7 +323,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 			expectLength(term.children, 0);
 			expectLength(term.args, 1);
 			const name = term.args[0];
-			const type = getType(term);
+			const type = getTypeValue(term);
 			if (Object.hasOwnProperty.call(scope.declarations, name)) {
 				return {
 					prefix: ignore(store(lookup(name, scope), value, type, scope), scope),
@@ -333,8 +336,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 				if (hasMapping) {
 					result = expressionStatement(annotate(read(set(lookup(name, scope), pattern.test, scope), scope), term));
 				} else {
-					const patternExpression = read(pattern.test, scope);
-					result = addVariable(scope, name, type, isIdentifier(patternExpression) && patternExpression.name === "undefined" ? undefined : patternExpression, declarationFlags);
+					result = addVariable(scope, name, type, pattern.test, declarationFlags);
 					if (declarationFlags & DeclarationFlags.Export) {
 						result = exportNamedDeclaration(result, []);
 					}
@@ -360,28 +362,28 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
-			const [first, second] = reuseExpression(read(value, scope), scope, "tuple");
+			const [first, second] = reuse(value, scope, "tuple");
 			return term.children.reduce((existing, child, i) => {
-				const childPattern = translatePattern(child, expr(memberExpression(i ? second : first, literal(i), true), term), scope, declarationFlags);
+				const childPattern = translatePattern(child, member(i ? second : first, i, scope, term), scope, declarationFlags);
 				return mergePatterns(existing, childPattern, scope, term);
 			}, emptyPattern);
 		}
 		case "pattern_enum_element": {
-			const type = getType(term);
-			const reified = reifyType(type, scope);
+			const type = getTypeValue(term);
+			const reified = typeFromValue(type, scope);
 			const cases = reified.cases;
 			if (typeof cases === "undefined") {
-				throw new TypeError(`Expected ${stringifyType(type)} to be an enum, but it didn't have any cases.`);
+				throw new TypeError(`Expected ${stringifyValue(type)} to be an enum, but it didn't have any cases.`);
 			}
 			const discriminant = discriminantForPatternTerm(term);
 			const index = cases.findIndex((possibleCase) => possibleCase.name === discriminant);
 			if (index === -1) {
-				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyType(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
+				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyValue(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
 			}
 			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
-			const [first, after] = reuseExpression(read(value, scope), scope, "enum");
-			const discriminantExpression = isDirectRepresentation ? first : memberExpression(first, literal(0), true);
-			const test = expr(binaryExpression("===", discriminantExpression, literal(index)), term);
+			const [first, after] = reuse(value, scope, "enum");
+			const discriminantValue = isDirectRepresentation ? first : member(first, 0, scope, term);
+			const test = binary("===", discriminantValue, literal(index), scope, term);
 			expectLength(term.children, 0, 1);
 			if (term.children.length === 0) {
 				return {
@@ -396,7 +398,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					throw new Error(`Tried to use a pattern on an enum case that has no fields`);
 				case 1:
 					// Index 1 to account for the discriminant
-					patternValue = expr(memberExpression(after, literal(1), true), term);
+					patternValue = member(after, 1, scope, term);
 					// Special-case pattern matching using pattern_paren on a enum case with one field
 					if (child.name === "pattern_paren") {
 						return {
@@ -411,7 +413,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					if (child.name === "pattern_tuple") {
 						const next = child.children.reduce((existing, tupleChild, i) => {
 							// Offset by 1 to account for the discriminant
-							const childPattern = translatePattern(tupleChild, expr(memberExpression(after, literal(i + 1), true), term), scope, declarationFlags);
+							const childPattern = translatePattern(tupleChild, member(after, i + 1, scope, term), scope, declarationFlags);
 							return mergePatterns(existing, childPattern, scope, term);
 						}, emptyPattern);
 						return {
@@ -421,7 +423,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 						};
 					}
 					// Remove the discriminant
-					patternValue = call(expr(memberExpression(after, identifier("slice")), term), [expr(literal(1))], [{ kind: "name", name: "Int" }], scope, term);
+					patternValue = call(member(after, "slice", scope, term), [literal(1)], ["Int"], scope, term);
 					break;
 			}
 			// General case pattern matching on an enum
@@ -447,9 +449,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 function valueForPattern(pattern: PatternOutput, scope: Scope, term: Term): Value {
 	let test: Value;
 	if (typeof pattern.next !== "undefined") {
-		const currentExpression = read(pattern.test, scope);
-		const nextExpression = read(valueForPattern(pattern.next, scope, term), scope);
-		test = expr(logicalExpression("&&", currentExpression, nextExpression), term);
+		test = logical("&&", pattern.test, valueForPattern(pattern.next, scope, term), scope, term);
 	} else {
 		test = pattern.test;
 	}
@@ -461,14 +461,14 @@ function valueForPattern(pattern: PatternOutput, scope: Scope, term: Term): Valu
 
 function flattenPattern(pattern: PatternOutput, scope: Scope, term: Term): { prefix: Statement[]; test: Expression; suffix: Statement[] } {
 	let prefix: Statement[] = emptyStatements;
-	let test: Expression = annotate(literal(true), term);
+	let test: Value = literal(true, term);
 	let currentPattern: PatternOutput | undefined = pattern;
 	while (currentPattern) {
 		prefix = concat(prefix, currentPattern.prefix);
 		const currentTest = read(currentPattern.test, scope);
 		currentPattern = currentPattern.next;
 		if (!isTrueExpression(currentTest)) {
-			test = currentTest;
+			test = expr(currentTest);
 			break;
 		}
 	}
@@ -478,34 +478,34 @@ function flattenPattern(pattern: PatternOutput, scope: Scope, term: Term): { pre
 		const currentTest = read(currentPattern.test, scope);
 		currentPattern = currentPattern.next;
 		if (!isTrueExpression(currentTest)) {
-			test = annotate(logicalExpression("&&", test, read(statements(concat(suffix, [annotate(returnStatement(currentTest), term)])), scope)), term);
+			test = logical("&&", test, statements(concat(suffix, [annotate(returnStatement(currentTest), term)])), scope, term);
 			suffix = emptyStatements;
 		}
 	}
 	return {
 		prefix,
-		test,
+		test: read(test, scope),
 		suffix,
 	};
 }
 
-function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value: Value, optionalType: Type) => Value): Value {
+function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value: Value, optionalType: Value) => Value): Value {
 	switch (term.name) {
 		case "member_ref_expr": {
 			expectLength(term.children, 1);
 			const child = term.children[0];
-			const type = getType(child);
+			const type = getTypeValue(child);
 			const decl = getProperty(term, "decl", isString);
-			const { member } = parseDeclaration(decl);
-			if (typeof member !== "string") {
+			const { member: memberName } = parseDeclaration(decl);
+			if (typeof memberName !== "string") {
 				throw new TypeError(`Expected a member expression when parsing declaration: ${decl}`);
 			}
-			for (const field of reifyType(type, scope).fields) {
-				if (field.name === member) {
-					return getField(translateTermToValue(term.children[0], scope, bindingContext), field, scope);
+			for (const fieldDeclaration of typeFromValue(type, scope).fields) {
+				if (fieldDeclaration.name === memberName) {
+					return getField(translateTermToValue(term.children[0], scope, bindingContext), fieldDeclaration, scope);
 				}
 			}
-			throw new TypeError(`Could not find ${member} in ${stringifyType(type)}`);
+			throw new TypeError(`Could not find ${memberName} in ${stringifyValue(type)}`);
 		}
 		case "tuple_element_expr": {
 			expectLength(term.children, 1);
@@ -517,11 +517,11 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			if (tupleType.types.length === 1) {
 				return translateTermToValue(child, scope, bindingContext);
 			}
-			return variable(memberExpression(
-				read(translateTermToValue(child, scope, bindingContext), scope),
+			return member(
+				translateTermToValue(child, scope, bindingContext),
 				literal(+getProperty(term, "field", isString)),
-				true,
-			));
+				scope,
+			);
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
@@ -529,7 +529,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "declref_expr": {
 			expectLength(term.children, 0);
-			const type = getType(term);
+			const type = getTypeValue(term);
 			return extractReference(term, scope);
 		}
 		case "subscript_expr": {
@@ -577,7 +577,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const targetValue = translateTermToValue(target, scope, bindingContext);
 			const type = getType(args);
 			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
-			const argTypes = type.kind === "tuple" ? type.types : [type];
+			const argTypes = type.kind === "tuple" ? type.types.map((innerType) => typeValue(innerType)) : [typeValue(type)];
 			if (argsValue.kind === "tuple") {
 				return call(targetValue, argsValue.values, argTypes, scope);
 			} else {
@@ -585,7 +585,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				if (targetValue.kind === "function" && targetValue.substitutions.length !== 0) {
 					// Insert substitutions as a [Foo$Type].concat(realArgs) expression
 					updatedArgs = call(
-						expr(memberExpression(arrayExpression(targetValue.substitutions.map((sub) => read(sub, scope))), identifier("concat"))),
+						member(array(targetValue.substitutions, scope, term), "concat", scope, term),
 						[argsValue],
 						argTypes,
 						scope,
@@ -593,7 +593,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 					);
 				}
 				return call(
-					expr(memberExpression(read(targetValue, scope), identifier("apply")), term),
+					member(targetValue, "apply", scope, term),
 					[undefinedValue, updatedArgs],
 					argTypes,
 					scope,
@@ -611,24 +611,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "type_expr": {
 			expectLength(term.children, 0);
-			let type = getType(term);
-			// TODO: Properly unwrap the .Type part
-			if (type.kind === "namespaced" && type.type.kind === "name" && type.type.name === "Type") {
-				type = type.namespace;
-			}
-			return typeValue(type, undefined, term);
+			return getTypeValue(term);
 		}
 		case "boolean_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(literal(getProperty(term, "value", isString) === "true"), term);
+			return literal(getProperty(term, "value", isString) === "true", term);
 		}
 		case "integer_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(literal(+getProperty(term, "value", isString)), term);
+			return literal(+getProperty(term, "value", isString), term);
 		}
 		case "string_literal_expr": {
 			expectLength(term.children, 0);
-			return expr(literal(getProperty(term, "value", isString)), term);
+			return literal(getProperty(term, "value", isString), term);
 		}
 		case "array_expr": {
 			const type = getType(term);
@@ -643,6 +638,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				console.error(term);
 				throw new TypeError(`Expected a dictionary type, got a ${stringifyType(type)}`);
 			}
+			// Reify type so that if the dictionary type isn't supported we throw
 			reifyType(type, scope);
 			const properties: ObjectProperty[] = [];
 			for (const child of term.children.filter(noSemanticExpressions)) {
@@ -660,15 +656,17 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "if_expr": {
 			expectLength(term.children, 3);
-			return expr(conditionalExpression(
-				read(translateTermToValue(term.children[0], scope, bindingContext), scope),
-				read(translateTermToValue(term.children[1], scope, bindingContext), scope),
-				read(translateTermToValue(term.children[2], scope, bindingContext), scope),
-			), term);
+			return conditional(
+				translateTermToValue(term.children[0], scope, bindingContext),
+				translateTermToValue(term.children[1], scope, bindingContext),
+				translateTermToValue(term.children[2], scope, bindingContext),
+				scope,
+				term,
+			);
 		}
 		case "inject_into_optional": {
 			expectLength(term.children, 1);
-			return wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getType(term), scope);
+			return wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term), scope);
 		}
 		case "function_conversion_expr": {
 			expectLength(term.children, 1);
@@ -680,7 +678,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "assign_expr": {
 			expectLength(term.children, 2);
-			const type = getType(term.children[0]);
+			const type = getTypeValue(term.children[0]);
 			const dest = translateTermToValue(term.children[0], scope, bindingContext);
 			const source = translateTermToValue(term.children[1], scope, bindingContext);
 			return set(dest, source, scope);
@@ -723,7 +721,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				const numeric = parseInt(source, 10);
 				switch (numeric) {
 					case -1: { // DefaultInitialize
-						return defaultInstantiateType(valueTypes[i], scope, returnUndef);
+						return defaultInstantiateType(typeValue(valueTypes[i]), scope, returnUndef);
 					}
 					case -2: { // Variadic
 						if (variadicSources.length === 0) {
@@ -736,7 +734,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						return values[index];
 					}
 					case -3: { // CallerDefaultInitialize
-						return defaultInstantiateType(valueTypes[i], scope, returnUndef);
+						return defaultInstantiateType(typeValue(valueTypes[i]), scope, returnUndef);
 					}
 					default: {
 						if (numeric < 0) {
@@ -752,7 +750,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 							}
 							return firstValue.values[numeric];
 						} else {
-							return expr(memberExpression(read(firstValue, scope), literal(numeric), true), term);
+							return member(firstValue, numeric, scope, term);
 						}
 					}
 				}
@@ -761,14 +759,16 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "force_value_expr": {
 			expectLength(term.children, 1);
 			const value = translateTermToValue(term.children[0], scope, bindingContext);
-			const [first, after] = reuseExpression(read(value, scope), scope, "optional");
+			const [first, after] = reuse(value, scope, "optional");
 			// TODO: Optimize some cases where we can prove it to be a .some
-			const type = getType(term.children[0]);
-			return expr(conditionalExpression(
-				optionalIsSome(first, type),
-				read(unwrapOptional(expr(after), type, scope), scope),
-				read(call(forceUnwrapFailed, [], [], scope), scope),
-			), term);
+			const type = getTypeValue(term.children[0]);
+			return conditional(
+				optionalIsSome(first, type, scope),
+				unwrapOptional(after, type, scope),
+				call(forceUnwrapFailed, [], [], scope),
+				scope,
+				term,
+			);
 		}
 		case "try_expr":
 		case "force_try_expr": {
@@ -778,7 +778,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
-			const type = getType(term);
+			const type = getTypeValue(term);
 			const temp = uniqueName(scope, ":try");
 			return statements([
 				addVariable(scope, temp, type),
@@ -787,7 +787,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						ignore(set(lookup(temp, scope), wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope), scope),
 					),
 					catchClause(identifier("e"), blockStatement(
-						ignore(set(lookup(temp, scope), expr(emptyOptional(type)), scope), scope),
+						ignore(set(lookup(temp, scope), emptyOptional(type, scope), scope), scope),
 					)),
 				),
 				annotate(returnStatement(read(lookup(temp, scope), scope)), term),
@@ -805,20 +805,26 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "optional_evaluation_expr": {
 			expectLength(term.children, 1);
-			const optionalType = getType(term);
-			let testExpression: Expression | undefined;
-			const someCase = translateTermToValue(term.children[0], scope, (value: Value, innerOptionalType: Type) => {
-				if (typeof testExpression !== "undefined") {
+			const optionalType = getTypeValue(term);
+			let testValue: Value | undefined;
+			const someCase = translateTermToValue(term.children[0], scope, (value: Value, innerOptionalType: Value) => {
+				if (typeof testValue !== "undefined") {
 					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
 				}
-				const [first, after] = reuseExpression(read(value, scope), scope, "optional");
-				testExpression = optionalIsSome(first, innerOptionalType);
-				return unwrapOptional(expr(after), innerOptionalType, scope);
+				const [first, after] = reuse(value, scope, "optional");
+				testValue = optionalIsSome(first, innerOptionalType, scope);
+				return unwrapOptional(after, innerOptionalType, scope);
 			});
-			if (typeof testExpression === "undefined") {
+			if (typeof testValue === "undefined") {
 				throw new Error(`Expected a binding expression to bind to this optional evaluation`);
 			}
-			return expr(conditionalExpression(testExpression, read(someCase, scope), emptyOptional(optionalType)));
+			return conditional(
+				testValue,
+				someCase,
+				emptyOptional(optionalType, scope),
+				scope,
+				term,
+			);
 		}
 		case "bind_optional_expr": {
 			if (typeof bindingContext !== "function") {
@@ -827,7 +833,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
 			const wrappedValue = translateTermToValue(expressionTerm, scope);
-			return bindingContext(wrappedValue, getType(expressionTerm));
+			return bindingContext(wrappedValue, getTypeValue(expressionTerm));
 		}
 		default: {
 			console.error(term);
@@ -855,32 +861,35 @@ function translateAllStatements(terms: Term[], scope: Scope, functions: Function
 }
 
 function applyParameterMappings(typeParameterCount: number, parameterTerms: Term[], arg: ArgGetter, scope: Scope, childScope: Scope, ignoreSelf: boolean = false): Statement[] {
-	return parameterTerms.reduce((statements, param, index) => {
+	return parameterTerms.reduce((body, param, index) => {
 		expectLength(param.args, 1);
 		const parameterName = param.args[0];
 		const value = arg(index + typeParameterCount, parameterName);
-		let type = getType(param);
+		const type = getTypeValue(param);
 		if (Object.hasOwnProperty.call(param.properties, "inout") && (index !== 0 || !ignoreSelf)) {
 			// if (value.kind !== "boxed") {
 			// 	throw new TypeError(`Expected a boxed value, got a ${value.kind}`);
 			// }
 			// childScope.mapping[parameterName] = value.kind === "boxed" ? value : boxed(value, { kind: "modified", type, modifier: "inout" });
 			childScope.mapping[parameterName] = value.kind === "boxed" ? value : boxed(value, type);
-			return statements;
+			return body;
+		} else if (value.kind === "type" || value.kind === "conformance") {
+			childScope.mapping[parameterName] = value;
+			return body;
 		} else {
 			const expression = read(value, scope);
 			if (isIdentifier(expression) || expression.type === "ThisExpression") {
 				childScope.mapping[parameterName] = expr(expression);
-				return statements;
+				return body;
 			}
 			const literalValue = valueOfExpression(expression);
 			if (typeof literalValue === "boolean" || typeof literalValue === "number" || typeof literalValue === "string" || literalValue === null) {
-				childScope.mapping[parameterName] = expr(literal(literalValue));
-				return statements;
+				childScope.mapping[parameterName] = literal(literalValue);
+				return body;
 			}
 			const temporary = uniqueName(scope, parameterName);
 			childScope.mapping[parameterName] = expr(identifier(temporary), expression.loc);
-			return concat(statements, [addVariable(scope, temporary, type, expression, DeclarationFlags.Const)]);
+			return concat(body, [addVariable(scope, temporary, type, expr(expression), DeclarationFlags.Const)]);
 		}
 	}, emptyStatements);
 }
@@ -939,7 +948,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 			}
 			// Apply parameters
 			const parameterList = parameterLists[parameterListIndex];
-			let parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
+			const parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
 			if (parameterListIndex !== parameterLists.length - 1) {
 				// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
 				return callable(constructCallable(parameterStatements, parameterListIndex + 1, returnType(functionType), false), functionType);
@@ -952,7 +961,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 					const typeOfResult = returnType(returnType(getType(term)));
 					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
 					childScope.mapping.self = expr(identifier(selfMapping));
-					const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, (fieldName) => {
+					const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, (fieldName) => {
 						if (body.length && body[0].name === "assign_expr") {
 							const children = body[0].children;
 							expectLength(children, 2);
@@ -969,11 +978,9 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 						const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
 						return statements(concat(parameterStatements, defaultStatements), brace);
 					}
-					return transform(defaultInstantiation, childScope, (selfExpression) => {
-						const declarations: Statement[] = [addVariable(childScope, selfMapping, typeOfResult, selfExpression)];
-						const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
-						return statements(concat(concat(parameterStatements, declarations), constructorBody), brace);
-					});
+					const declarations: Statement[] = [addVariable(childScope, selfMapping, typeValue(typeOfResult), defaultInstantiation)];
+					const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
+					return statements(concat(concat(parameterStatements, declarations), constructorBody), brace);
 				}
 				return statements(concat(parameterStatements, translateAllStatements(body, childScope, functions)), brace);
 			} else {
@@ -981,7 +988,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 					const typeOfResult = returnType(returnType(getType(term)));
 					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
 					childScope.mapping.self = expr(identifier(selfMapping));
-					const defaultInstantiation = defaultInstantiateType(typeOfResult, scope, () => undefined);
+					const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, () => undefined);
 					return statements(concat(parameterStatements, [annotate(returnStatement(read(defaultInstantiation, scope)), term)]), term);
 				} else {
 					return statements(parameterStatements, term);
@@ -1006,9 +1013,9 @@ function addFunctionToType(functions: FunctionMap, conformances: ProtocolConform
 	functions[name] = builder;
 	if (typeof conformances !== "undefined") {
 		for (const key of Object.keys(conformances)) {
-			const conformance = conformances[key];
-			if (Object.hasOwnProperty.call(conformance, name)) {
-				conformance[name] = builder;
+			const protocolConformance = conformances[key].functions;
+			if (Object.hasOwnProperty.call(protocolConformance, name)) {
+				protocolConformance[name] = builder;
 			}
 		}
 	}
@@ -1055,7 +1062,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
 					return [annotate(returnStatement(expression), term)];
 				}
-				const copied = copy(expr(expression), getType(term.children[0]));
+				const copied = copy(expr(expression), getTypeValue(term.children[0]));
 				return [annotate(returnStatement(read(copied, scope)), term)];
 			} else if (term.properties.implicit) {
 				return [annotate(returnStatement(read(lookup("self", scope), scope)), term)];
@@ -1075,8 +1082,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 				return emptyStatements;
 			} else {
-				const defaultInstantiation = read(defaultInstantiateType(getType(term), scope, returnUndef), scope);
-				return [addVariable(scope, name, getType(term), defaultInstantiation, flagsForDeclarationTerm(term))];
+				const type = getTypeValue(term);
+				const defaultInstantiation = defaultInstantiateType(type, scope, returnUndef);
+				return [addVariable(scope, name, type, defaultInstantiation, flagsForDeclarationTerm(term))];
 			}
 			break;
 		}
@@ -1119,7 +1127,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					throw new Error(`Expected at least one term, got ${childTerm.children.length}`);
 				}
 				let mergedPrefix: Statement[] = emptyStatements;
-				let mergedTest: Expression = literal(false);
+				let mergedTest: Expression = literal(false).expression;
 				let mergedSuffix: Statement[] = emptyStatements;
 				const body = newScope("case", scope, (childScope) => {
 					const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
@@ -1157,7 +1165,10 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [ifStatement(unaryExpression("!", read(translateTermToValue(testTerm, scope), scope)), blockStatement(translateInNewScope(bodyTerm, scope, functions, "alternate")))];
+			return [ifStatement(
+				read(unary("!", translateTermToValue(testTerm, scope), scope), scope),
+				blockStatement(translateInNewScope(bodyTerm, scope, functions, "alternate")),
+			)];
 		}
 		case "do_catch_stmt": {
 			if (term.children.length < 2) {
@@ -1165,7 +1176,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			}
 			const bodyTerm = term.children[0];
 			checkTermName(bodyTerm, "brace_stmt", "as first child of a do catch statement");
-			return term.children.slice(1).reduce((statements, catchTerm) => {
+			return term.children.slice(1).reduce((body, catchTerm) => {
 				checkTermName(catchTerm, "catch", "as non-first child of a do catch");
 				expectLength(catchTerm.children, 2);
 				const patternTerm = catchTerm.children[0];
@@ -1178,7 +1189,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const catchBodyTerm = catchTerm.children[1];
 				checkTermName(catchBodyTerm, "brace_stmt", "as only child of a catch clause");
 				const catchBodyStatements = translateInNewScope(catchBodyTerm, scope, functions, "catch");
-				return [tryStatement(blockStatement(statements), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
+				return [tryStatement(blockStatement(body), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
 			}, translateInNewScope(bodyTerm, scope, functions, "body"));
 		}
 		case "defer_stmt": {
@@ -1197,7 +1208,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const inherits = term.properties.inherits;
 			const baseType = typeof inherits === "string" ? parseType(inherits) : undefined;
 			const baseReifiedType = typeof baseType !== "undefined" ? reifyType(baseType, scope) : undefined;
-			let statements = emptyStatements;
+			let body = emptyStatements;
 			const enumName = term.args[0];
 			const copyFunctionName = `${enumName}.copy`;
 			const methods: FunctionMap = {
@@ -1214,31 +1225,35 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 				if (requiresCopyHelper) {
 					// Emit checks for cases that have field that require copying
-					const [first, after] = reuseExpression(expression, scope, "copySource");
+					const [first, after] = reuse(expr(expression), scope, "copySource");
 					let usedFirst = false;
-					return expr(cases.reduce(
+					return cases.reduce(
 						(previous, enumCase, i) => {
 							if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
-								const test = binaryExpression("===", memberExpression(usedFirst ? after : first, literal(0), true), literal(i));
+								const test = binary("===",
+									member(usedFirst ? after : first, 0, scope),
+									literal(i),
+									scope,
+								);
 								usedFirst = true;
-								const copyCase = arrayExpression(concat([literal(i) as Expression], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
+								const copyCase = array(concat([literal(i)], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
 									// if (fieldType === baseReifiedType) {
 										// TODO: Avoid resetting this each time
 										// methods["$copy"] = noinline((innermostScope, arg) => copyHelper(arg(0), innermostScope));
 									// }
-									const fieldExpression = memberExpression(after, literal(fieldIndex + 1), true);
-									return fieldType.copy ? read(fieldType.copy(expr(fieldExpression), scope), scope) : fieldExpression;
-								})));
-								return conditionalExpression(test, copyCase, previous);
+									const fieldValue = member(after, fieldIndex + 1, scope);
+									return fieldType.copy ? fieldType.copy(fieldValue, scope) : fieldValue;
+								})), scope);
+								return conditional(test, copyCase, previous, scope);
 							} else {
 								return previous;
 							}
 						},
 						// Fallback to slicing the array for remaining simple cases
-						callExpression(memberExpression(after, identifier("slice")), []) as Expression,
-					));
+						call(member(after, "slice", scope), [], [], scope),
+					);
 				} else {
-					return call(expr(memberExpression(expression, identifier("slice"))), [], [], innerScope);
+					return call(member(expr(expression), "slice", scope), [], [], innerScope);
 				}
 			}
 			const layout: Field[] = [];
@@ -1248,13 +1263,15 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				kind: "name",
 				name: enumName,
 			};
+			const innerTypes: TypeMap = Object.create(null);
+			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
 			// Reify self
 			const reifiedSelfType: ReifiedType = {
 				fields: layout,
 				functions: lookupForMap(methods),
 				conformances: Object.create(null),
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
-				innerTypes: Object.create(null),
+				innerTypes,
 				copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
 					// Skip the copy if we can—must be done on this side of the inlining boundary
 					const expression = read(value, scope);
@@ -1266,7 +1283,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					}
 					// Dispatch through the function so that recursion doesn't kill us
 					const copyFunctionType: Function = { kind: "function", arguments: { kind: "tuple", types: [selfType] }, return: selfType, throws: false, rethrows: false, attributes: [] };
-					return call(functionValue(copyFunctionName, typeValue(selfType), copyFunctionType), [expr(expression)], [selfType], scope);
+					return call(functionValue(copyFunctionName, typeValue(selfType), copyFunctionType), [expr(expression)], [typeValue(selfType)], scope);
 				},
 				cases,
 			};
@@ -1280,8 +1297,8 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const type = returnType(getType(elementDecl));
 				if (type.kind === "function") {
 					methods[name] = wrapped((innerScope, arg) => {
-						const args = type.arguments.types.map((argType, argIndex) => copy(arg(argIndex), argType));
-						return array(concat([expr(literal(index)) as Value], args), scope);
+						const args = type.arguments.types.map((argType, argIndex) => copy(arg(argIndex), typeValue(argType)));
+						return array(concat([literal(index) as Value], args), scope);
 					});
 					cases.push({
 						name,
@@ -1297,9 +1314,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 				if (baseType) {
 					// TODO: Extract the underlying value, which may actually not be numeric!
-					methods[name] = () => expr(literal(index));
+					methods[name] = () => literal(index);
 				} else {
-					methods[name] = () => expr(literal([index]));
+					methods[name] = () => literal([index]);
 				}
 				cases.push({
 					name,
@@ -1316,15 +1333,15 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						const fieldName = child.args[0];
 						if (fieldName === "rawValue") {
 							// The built-in rawValue accessors don't have proper pattern matching :(
-							if (baseReifiedType) {
-								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copy(value, baseType!)));
+							if (typeof baseType !== "undefined" && typeof baseReifiedType !== "undefined") {
+								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copy(value, typeValue(baseType))));
 							} else {
 								throw new TypeError(`Unable to synthesize rawValue for ${enumName}`);
 							}
 						} else if (fieldName === "hashValue") {
 							// The built-in hashValue accessors don't have proper pattern matching :(
 							if (baseReifiedType) {
-								const passthroughField = baseReifiedType.fields.find((field) => field.name === "hashValue");
+								const passthroughField = baseReifiedType.fields.find((fieldDeclaration) => fieldDeclaration.name === "hashValue");
 								if (!passthroughField) {
 									throw new Error(`Unable to synthsize hashValue for ${enumName} because underlying type ${inherits} does not have a hashValue`);
 								}
@@ -1333,24 +1350,24 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 								throw new TypeError(`Unable to synthesize hashValue for ${enumName}`);
 							}
 						} else {
-							const fieldType = getType(child);
-							layout.push(field(fieldName, reifyType(fieldType, scope), (value: Value, innerScope: Scope) => {
+							const fieldType = getTypeValue(child);
+							layout.push(field(fieldName, typeFromValue(fieldType, scope), (value: Value, innerScope: Scope) => {
 								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], [fieldType], innerScope), [], [], innerScope);
 							}));
 						}
-						statements = concat(statements, translateStatement(child.children[0], scope, methods));
+						body = concat(body, translateStatement(child.children[0], scope, methods));
 					} else {
 						throw new TypeError(`Enums should not have any stored fields`);
 					}
 				} else if (child.name !== "enum_case_decl" && child.name !== "enum_element_decl" && child.name !== "typealias") {
-					statements = concat(statements, translateStatement(child, scope, methods));
+					body = concat(body, translateStatement(child, scope, methods));
 				}
 			}
-			return statements;
+			return body;
 		}
 		case "struct_decl": {
 			expectLength(term.args, 1);
-			let statements: Statement[] = [];
+			let body: Statement[] = [];
 			const layout: Field[] = [];
 			const methods: FunctionMap = {};
 			const structName = term.args[0];
@@ -1362,21 +1379,23 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					conformances[inherits] = Object.assign(Object.create(null), inheritsReified.conformances[inherits]);
 				}
 			}
-			scope.types[structName] = () => struct(layout, methods, conformances);
+			const innerTypes: TypeMap = Object.create(null);
+			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
+			scope.types[structName] = () => struct(layout, methods, conformances, innerTypes);
 			for (const child of term.children) {
 				switch (child.name) {
 					case "var_decl": {
 						expectLength(child.args, 1);
+						const childTypeValue = getTypeValue(child);
 						if (requiresGetter(child)) {
 							expectLength(child.children, 1);
-							const childType = getType(child);
-							layout.push(field(child.args[0], reifyType(childType, scope), (value: Value, innerScope: Scope) => {
+							layout.push(field(child.args[0], typeFromValue(childTypeValue, scope), (value: Value, innerScope: Scope) => {
 								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], [childType], innerScope), [], [], innerScope);
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], [childTypeValue], innerScope), [], [], innerScope);
 							}));
-							statements = concat(statements, translateStatement(child.children[0], scope, methods));
+							body = concat(body, translateStatement(child.children[0], scope, methods));
 						} else {
-							layout.push(field(child.args[0], reifyType(getType(child), scope)));
+							layout.push(field(child.args[0], typeFromValue(childTypeValue, scope)));
 						}
 						break;
 					}
@@ -1395,16 +1414,16 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						break;
 					}
 					default: {
-						statements = concat(statements, translateStatement(child, scope, methods));
+						body = concat(body, translateStatement(child, scope, methods));
 					}
 				}
 			}
-			return statements;
+			return body;
 		}
 		case "pattern_binding_decl": {
 			if (term.children.length === 2) {
 				const valueChild = term.children[1];
-				// const value = copy(translateTermToValue(valueChild, scope), getType(valueChild));
+				// const value = copy(translateTermToValue(valueChild, scope), getTypeValue(valueChild));
 				const value = translateTermToValue(valueChild, scope);
 				const flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
 				const pattern = translatePattern(term.children[0], value, scope, flags);
@@ -1429,19 +1448,21 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const methods: FunctionMap = Object.create(null);
 			const classIdentifier = mangleName(term.args[0]);
 			const className = term.args[0];
-			const selfType: Type = { kind: "name", name: className };
+			const selfType = typeValue({ kind: "name", name: className });
 			const conformances: ProtocolConformanceMap = Object.create(null);
-			scope.types[className] = () => newClass(layout, methods, conformances, Object.create(null), (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
+			const innerTypes: TypeMap = Object.create(null);
+			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
+			scope.types[className] = () => newClass(layout, methods, conformances, innerTypes, (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
 				const self = uniqueName(innerScope, camelCase(className));
 				const selfValue = lookup(self, scope);
 				const newExpr = newExpression(classIdentifier, []);
-				let bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, newExpr, DeclarationFlags.Const)];
-				for (const field of layout) {
-					if (field.stored) {
-						let fieldExpression = consume(field.name);
+				let bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, expr(newExpr), DeclarationFlags.Const)];
+				for (const fieldDeclaration of layout) {
+					if (fieldDeclaration.stored) {
+						const fieldExpression = consume(fieldDeclaration.name);
 						let fieldValue;
 						if (typeof fieldExpression === "undefined") {
-							const defaultValue = field.type.defaultValue;
+							const defaultValue = fieldDeclaration.type.defaultValue;
 							if (typeof defaultValue === "undefined") {
 								// Swift always ensures all mandatory fields are filled, so we can be certain that later in the body it will be assigned
 								continue;
@@ -1450,7 +1471,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						} else {
 							fieldValue = expr(fieldExpression);
 						}
-						bodyStatements = concat(bodyStatements, ignore(set(expr(memberExpression(read(selfValue, scope), identifier(field.name))), fieldValue, scope), scope));
+						bodyStatements = concat(bodyStatements, ignore(set(member(selfValue, fieldDeclaration.name, scope), fieldValue, scope), scope));
 					}
 				}
 				if (bodyStatements.length === 1) {
@@ -1473,28 +1494,27 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							if (child.children.length < 1) {
 								expectLength(child.children, 1);
 							}
-							const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-							const flags = flagsForDeclarationTerm(child);
-							const type = getType(declaration);
-							if (flags & DeclarationFlags.Export) {
-								const fn = translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, thisExpression());
-								const [args, statements] = functionize(scope, (innerScope) => fn(innerScope, () => expr(thisExpression())));
-								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(statements)));
+							const childDeclaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
+							const type = getTypeValue(childDeclaration);
+							if (flagsForDeclarationTerm(child) & DeclarationFlags.Export) {
+								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, thisExpression());
+								const [args, body] = functionize(scope, (innerScope) => fn(innerScope, () => expr(thisExpression())));
+								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(body)));
 								// Default implementation will call getter/setter
-								layout.push(field(child.args[0], reifyType(getType(child), scope)));
+								layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope)));
 							} else {
-								// layout.push(field(child.args[0], reifyType(getType(child), scope), (value: Value, innerScope: Scope) => {
-								// 	return callable(fn, type, declaration);
+								// layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope), (value: Value, innerScope: Scope) => {
+								// 	return callable(fn, type, childDeclaration);
 								// }));
-								const childType = getType(child);
-								layout.push(field(child.args[0], reifyType(childType, scope), (value: Value, innerScope: Scope) => {
-									let selfExpression = read(value, innerScope);
+								const childType = getTypeValue(child);
+								layout.push(field(child.args[0], typeFromValue(childType, scope), (value: Value, innerScope: Scope) => {
+									const selfExpression = read(value, innerScope);
 									if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
-										return translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, selfExpression)(scope, noArguments);
+										return translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, selfExpression)(scope, noArguments);
 									} else {
 										const self = uniqueName(innerScope, "self");
-										const head = addVariable(innerScope, self, childType, selfExpression, DeclarationFlags.Const);
-										const func = translateFunctionTerm(propertyName + ".get", declaration, [[]], undefined, scope, functions, read(lookup(self, scope), scope) as any);
+										const head = addVariable(innerScope, self, childType, expr(selfExpression), DeclarationFlags.Const);
+										const func = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, read(lookup(self, scope), scope) as any);
 										const result = func(scope, noArguments);
 										if (result.kind === "statements") {
 											return statements(concat([head], result.statements), result.location);
@@ -1505,7 +1525,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 								}));
 							}
 						} else {
-							layout.push(field(child.args[0], reifyType(getType(child), scope)));
+							layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope)));
 						}
 						break;
 					}
@@ -1644,8 +1664,8 @@ export async function compile(path: string): Promise<CompilerOutput> {
 	// console.log(ast);
 	const rootTerm = parseAST(ast);
 	await stdout;
-	const program = compileTermToProgram(rootTerm);
-	const result = transformFromAst(program, undefined, {
+	const convertedProgram = compileTermToProgram(rootTerm);
+	const result = transformFromAst(convertedProgram, undefined, {
 		babelrc: false,
 		filename: path,
 		code: true,

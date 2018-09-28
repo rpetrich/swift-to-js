@@ -2,7 +2,7 @@ import { Term } from "./ast";
 import { ReifiedType, reifyType } from "./reified";
 import { addDeclaration, addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
 import { Function, Type } from "./types";
-import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, Value } from "./values";
+import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, typeValue, Value } from "./values";
 
 import { blockStatement, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
 
@@ -71,7 +71,7 @@ export function noinline(builder: FunctionBuilder): FunctionBuilder {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
-		return call(insertFunction(name, scope, type, builder), type.arguments.types.map((_, i) => arg(i)), type.arguments.types, scope);
+		return call(insertFunction(name, scope, type, builder), type.arguments.types.map((_, i) => arg(i)), type.arguments.types.map((innerType) => typeValue(innerType)), scope);
 	};
 }
 

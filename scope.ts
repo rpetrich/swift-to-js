@@ -1,10 +1,11 @@
 import { arrayExpression, BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, memberExpression, NullLiteral, NumericLiteral, returnStatement, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
+import { parseType } from "./parse";
 import { ReifiedType, TypeMap } from "./reified";
 import { Type } from "./types";
 import { concat } from "./utils";
-import { boxed, BoxedValue, constructBox, expr, read, ExpressionValue, literal, stringifyType, statements, SubscriptValue, typeRequiresBox, VariableValue, Value } from "./values";
+import { boxed, BoxedValue, ConformanceValue, constructBox, expr, ExpressionValue, literal, read, statements, stringifyType, SubscriptValue, typeRequiresBox, typeValue, TypeValue, Value, VariableValue } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
@@ -13,7 +14,7 @@ export enum DeclarationFlags {
 	Boxed = 1 << 2,
 }
 
-type MappedValue = BoxedValue | ExpressionValue | SubscriptValue | VariableValue;
+type MappedValue = BoxedValue | ExpressionValue | SubscriptValue | VariableValue | TypeValue | ConformanceValue;
 
 export interface Scope {
 	name: string;
@@ -29,22 +30,35 @@ export function addDeclaration(scope: Scope, name: string, callback: (id: Identi
 	if (Object.hasOwnProperty.call(scope.declarations, name)) {
 		throw new Error(`Declaration of ${name} already exists`);
 	}
-	const identifier = mangleName(name);
-	const result = expr(identifier);
+	const id = mangleName(name);
+	const result = expr(id);
 	scope.mapping[name] = result;
-	scope.declarations[name] = { flags, declaration: callback(identifier) };
+	scope.declarations[name] = { flags, declaration: callback(id) };
 	return result;
 }
 
-export function addVariable(scope: Scope, name: string, type: Type, init?: Expression, flags: DeclarationFlags = DeclarationFlags.None) {
+export function addVariable(scope: Scope, name: string, typeOrTypeString: string | Value, init?: Value, flags: DeclarationFlags = DeclarationFlags.None) {
 	if (Object.hasOwnProperty.call(scope.declarations, name)) {
 		throw new Error(`Declaration of ${name} already exists`);
 	}
+	const type = typeof typeOrTypeString === "string" ? typeValue(parseType(typeOrTypeString)) : typeOrTypeString;
 	const isBoxed = flags & DeclarationFlags.Boxed;
-	scope.mapping[name] = isBoxed ? boxed(expr(mangleName(name)), type) : expr(mangleName(name));
+	const mangled = mangleName(name);
+	scope.mapping[name] = isBoxed ? boxed(expr(mangled), type) : expr(mangled);
 	scope.declarations[name] = { flags, declaration: undefined };
-	const requiresBox = isBoxed && typeRequiresBox(type, scope);
-	return variableDeclaration(flags & DeclarationFlags.Const || requiresBox ? "const" : "let", [variableDeclarator(mangleName(name), requiresBox ? constructBox(init, type, scope) : init)]);
+	if (type.kind !== "type") {
+		// TODO: Support runtime types
+		throw new TypeError(`Do not support runtime types in addVariable!`);
+	}
+	const requiresBox = isBoxed && typeRequiresBox(type.type, scope);
+	if (requiresBox) {
+		init = constructBox(init, type.type, scope);
+	}
+	const initExpression = typeof init !== "undefined" ? read(init, scope) : undefined;
+	return variableDeclaration(
+		flags & DeclarationFlags.Const || requiresBox ? "const" : "let",
+		[variableDeclarator(mangled, typeof initExpression !== "undefined" && (initExpression.type !== "Identifier" || initExpression.name !== "undefined") ? initExpression : undefined)],
+	);
 }
 
 export function rootScope(scope: Scope) {
@@ -65,8 +79,7 @@ export function newScope(name: string, parent: Scope, callback: (scope: Scope) =
 		mapping: Object.create(null),
 		parent,
 	};
-	const statements = callback(scope);
-	return emitScope(scope, statements);
+	return emitScope(scope, callback(scope));
 }
 
 export function hasNameInScope(scope: Scope, name: string): boolean {

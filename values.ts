@@ -1,4 +1,5 @@
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, ExpressionStatement, functionExpression, Identifier, identifier, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { transformFromAst } from "babel-core";
+import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, ExpressionStatement, functionExpression, Identifier, identifier, isLiteral, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
 
 import { Term } from "./ast";
 import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
@@ -48,8 +49,10 @@ export function locationForTerm(term: Term): Location | undefined {
 	return undefined;
 }
 
-function readLocation(locationOrTerm?: Term | Location): Location | undefined {
-	return typeof locationOrTerm === "undefined" || !Object.hasOwnProperty.call(locationOrTerm, "properties") ? locationOrTerm as any as Location : locationForTerm(locationOrTerm as any as Term);
+type LocationSource = Location | Term;
+
+function readLocation(source?: LocationSource): Location | undefined {
+	return typeof source === "undefined" || !Object.hasOwnProperty.call(source, "properties") ? source as any as Location : locationForTerm(source as any as Term);
 }
 
 
@@ -59,13 +62,13 @@ export interface ExpressionValue {
 	location?: Location;
 }
 
-export function expr(expression: Identifier | ThisExpression, location?: Term | Location): VariableValue;
-export function expr(expression: Expression, location?: Term | Location): ExpressionValue | VariableValue;
-export function expr(expression: Expression, location?: Term | Location): ExpressionValue | ReturnType<typeof variable> {
+export function expr(expression: Identifier | ThisExpression, location?: LocationSource): VariableValue;
+export function expr(expression: Expression, location?: LocationSource): ExpressionValue | VariableValue;
+export function expr(expression: Expression, location?: LocationSource): ExpressionValue | ReturnType<typeof variable> {
 	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
 		return variable(expression, location);
 	}
-	return { kind: "expression", expression: simplify(expression), location: readLocation(location) };
+	return { kind: "expression", expression: simplifyExpression(expression), location: readLocation(location) };
 }
 
 
@@ -75,15 +78,15 @@ export interface StatementsValue {
 	location?: Location;
 }
 
-export function statements(statements: Statement[], location?: Term | Location): StatementsValue | ReturnType<typeof expr> {
-	if (statements.length >= 1) {
-		const lastStatement = statements[statements.length - 1];
+export function statements(body: Statement[], location?: LocationSource): StatementsValue | ReturnType<typeof expr> {
+	if (body.length >= 1) {
+		const lastStatement = body[body.length - 1];
 		if (lastStatement.type === "ReturnStatement") {
 			const last = lastStatement.argument === null ? undefinedLiteral : lastStatement.argument;
-			if (statements.length === 1) {
+			if (body.length === 1) {
 				return expr(last, lastStatement.loc || location);
 			}
-			const exceptLast = statements.slice(0, statements.length - 1);
+			const exceptLast = body.slice(0, body.length - 1);
 			if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
 				return expr(sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [last])), lastStatement.loc || location);
 			}
@@ -91,7 +94,7 @@ export function statements(statements: Statement[], location?: Term | Location):
 	}
 	return {
 		kind: "statements",
-		statements,
+		statements: body,
 		location: readLocation(location),
 	};
 }
@@ -103,33 +106,33 @@ export interface CallableValue {
 	location?: Location;
 }
 
-export function callable(call: (scope: Scope, arg: ArgGetter) => Value, type: Type, location?: Term | Location): CallableValue {
+export function callable(callback: (scope: Scope, arg: ArgGetter) => Value, type: Type, location?: LocationSource): CallableValue {
 	if (type.kind !== "function") {
 		throw new TypeError(`Expected a function type when constructing a callable, got a ${type.kind}!`);
 	}
-	return { kind: "callable", call, type, location: readLocation(location) };
+	return { kind: "callable", call: callback, type, location: readLocation(location) };
 }
 
 
 export interface VariableValue {
 	kind: "direct";
-	ref: Identifier | MemberExpression | ThisExpression;
+	expression: Identifier | MemberExpression | ThisExpression;
 	location?: Location;
 }
 
-export function variable(ref: Identifier | MemberExpression | ThisExpression, location?: Term | Location): VariableValue {
-	return { kind: "direct", ref, location: readLocation(location) };
+export function variable(expression: Identifier | MemberExpression | ThisExpression, location?: LocationSource): VariableValue {
+	return { kind: "direct", expression, location: readLocation(location) };
 }
 
 
 export interface BoxedValue {
 	kind: "boxed";
 	contents: VariableValue | SubscriptValue;
-	type: Type;
+	type: Value;
 	location?: Location;
 }
 
-export function boxed(contents: Value, type: Type, location?: Term | Location): BoxedValue {
+export function boxed(contents: Value, type: Value, location?: LocationSource): BoxedValue {
 	if (contents.kind !== "direct" && contents.kind !== "subscript") {
 		throw new TypeError(`Unable to box a ${contents.kind}`);
 	}
@@ -146,7 +149,7 @@ export interface FunctionValue {
 	location?: Location;
 }
 
-export function functionValue(name: string, parentType: Value | undefined, type: Function, substitutions: Value[] = [], location?: Term | Location): FunctionValue {
+export function functionValue(name: string, parentType: Value | undefined, type: Function, substitutions: Value[] = [], location?: LocationSource): FunctionValue {
 	return { kind: "function", name, parentType, type, substitutions, location: readLocation(location) };
 }
 
@@ -157,7 +160,7 @@ export interface TupleValue {
 	location?: Location;
 }
 
-export function tuple(values: Value[], location?: Term | Location): TupleValue {
+export function tuple(values: Value[], location?: LocationSource): TupleValue {
 	return { kind: "tuple", values, location: readLocation(location) };
 }
 
@@ -170,19 +173,74 @@ export interface SubscriptValue {
 	location?: Location;
 }
 
-export function subscript(getter: Value, setter: Value, args: Value[], location?: Term | Location): SubscriptValue {
+export function subscript(getter: Value, setter: Value, args: Value[], location?: LocationSource): SubscriptValue {
 	return { kind: "subscript", getter, setter, args, location: readLocation(location) };
 }
 
 
+export function conditional(predicate: Value, consequent: Value, alternate: Value, scope: Scope, location?: LocationSource): Value {
+	return transform(predicate, scope, (predicateExpression) => expr(conditionalExpression(
+		predicateExpression,
+		read(consequent, scope),
+		read(alternate, scope),
+	), location));
+}
+
+export function unary(operator: "!" | "-" | "delete" | "void", operand: Value, scope: Scope, location?: LocationSource): Value {
+	return transform(operand, scope, (operandExpression) => expr(unaryExpression(
+		operator,
+		operandExpression,
+	), location));
+}
+
+export type BinaryOperator = "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==" | "<<" | ">>" | ">>>";
+
+export function binary(operator: BinaryOperator, left: Value, right: Value, scope: Scope, location?: LocationSource): Value {
+	return transform(left, scope, (leftExpression) => expr(binaryExpression(
+		operator,
+		leftExpression,
+		read(right, scope),
+	), location));
+}
+
+export function logical(operator: "||" | "&&", left: Value, right: Value, scope: Scope, location?: LocationSource): Value {
+	return transform(left, scope, (leftExpression) => expr(logicalExpression(
+		operator,
+		leftExpression,
+		read(right, scope),
+	), location));
+}
+
+const validIdentifier = /^[a-zA-Z$_][a-zA-Z$_0-9]*$/;
+
+export function member(object: VariableValue, property: string | number, scope: Scope, location?: LocationSource): VariableValue;
+export function member(object: Value, property: string | number | Value, scope: Scope, location?: LocationSource): Value;
+export function member(object: Value, property: string | number | Value, scope: Scope, location?: LocationSource): Value {
+	return transform(object, scope, (expression) => {
+		const idExpression = typeof property === "object" ? read(property, scope) : literal(property, location).expression;
+		const builder = typeof valueOfExpression(idExpression) !== "undefined" && object.kind === "direct" ? variable as typeof expr : expr;
+		if (idExpression.type === "StringLiteral" && validIdentifier.test(idExpression.value)) {
+			return builder(memberExpression(
+				expression,
+				identifier(idExpression.value),
+			), location);
+		}
+		return builder(memberExpression(
+			expression,
+			idExpression,
+			true,
+		), location);
+	});
+}
+
 export interface CopiedValue {
 	kind: "copied";
 	value: Value;
-	type: Type;
+	type: Value;
 	location?: Location;
 }
 
-export function copy(value: Value, type: Type): CopiedValue {
+export function copy(value: Value, type: Value): CopiedValue {
 	return {
 		kind: "copied",
 		value,
@@ -194,12 +252,22 @@ export function copy(value: Value, type: Type): CopiedValue {
 export interface TypeValue {
 	kind: "type";
 	type: Type;
-	protocol?: string;
 	location?: Location;
 }
 
-export function typeValue(type: Type, protocol?: string, location?: Term | Location): TypeValue {
-	return { kind: "type", type, protocol, location: readLocation(location) };
+export function typeValue(typeOrString: Type | string, location?: LocationSource): TypeValue {
+	return { kind: "type", type: typeof typeOrString === "string" ? parseType(typeOrString) : typeOrString, location: readLocation(location) };
+}
+
+export interface ConformanceValue {
+	kind: "conformance";
+	type: Value;
+	conformance: string;
+	location?: Location;
+}
+
+export function conformance(type: Value, name: string, scope: Scope, location?: LocationSource): ConformanceValue {
+	return { kind: "conformance", type, conformance: name, location: readLocation(location) };
 }
 
 const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
@@ -207,40 +275,46 @@ const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
 export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	switch (value.kind) {
 		case "type":
-			const reified = reifyType(value.type, scope);
-			if (typeof value.protocol !== "undefined") {
-				if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
-					throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
-				}
+			return reifyType(value.type, scope);
+		case "conformance": {
+			const reified = typeFromValue(value.type, scope);
+			const conformanceName = value.conformance;
+			if (Object.hasOwnProperty.call(reified.conformances, conformanceName)) {
+				// throw new TypeError(`${stringifyValue(value.type)} does not conform to ${value.conformance}`);
 				return {
 					fields: [],
-					functions: lookupForMap<FunctionBuilder | GetterSetterBuilder | undefined>(reified.conformances[value.protocol]),
-					conformances: {
-						[value.protocol]: reified.conformances[value.protocol],
-					},
+					functions: lookupForMap<FunctionBuilder | GetterSetterBuilder | undefined>(reified.conformances[conformanceName].functions),
+					conformances: Object.assign({
+						[conformanceName]: reified.conformances[conformanceName],
+					}, reified.conformances[conformanceName].conformances),
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.All,
 				};
+			} else {
+				return {
+					fields: [],
+					conformances: {},
+					functions: (functionName) => (innerScope) => member(member(value.type, conformanceName, innerScope), mangleName(functionName).name, innerScope),
+					innerTypes: {},
+					possibleRepresentations: PossibleRepresentation.Object,
+				};
 			}
-			return reified;
-		default:
+		}
+		default: {
 			const expression = read(value, scope);
 			return {
 				fields: [],
 				conformances: {},
-				functions: (name: string) => {
-					const result = expr(memberExpression(expression, mangleName(name)));
-					return () => result;
-				},
+				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
 				innerTypes: {},
 				possibleRepresentations: PossibleRepresentation.Object,
 			};
+		}
 	}
 }
 
 
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue;
-
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue;
 
 
 const baseProperty = identifier("base");
@@ -251,9 +325,9 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 		return annotateValue(value.contents, value.location);
 	// } else if (value.kind === "direct") {
 	// 	// TODO: Introduce real type for this case
-	// 	if (value.ref.type === "MemberExpression" && value.ref.property.type === "NumericLiteral" && value.ref.property.value === 0) {
+	// 	if (value.expression.type === "MemberExpression" && value.expression.property.type === "NumericLiteral" && value.expression.property.value === 0) {
 	// 		console.log(value);
-	// 		return annotateValue(expr(value.ref.object) as VariableValue, value.location);
+	// 		return annotateValue(expr(value.expression.object) as VariableValue, value.location);
 	// 	}
 	// } else if (value.kind === "subscript") {
 	// 	return value;
@@ -276,76 +350,116 @@ export function typeRequiresBox(type: Type, scope: Scope): boolean {
 	}
 }
 
-export function constructBox(expression: Expression | undefined, type: Type, scope: Scope) {
-	return arrayExpression(typeof expression !== "undefined" ? [expression] : []);
+export function constructBox(value: Value | undefined, type: Type, scope: Scope): Value {
+	return array(typeof value !== "undefined" ? [value] : [], scope);
 }
 
-export function contentsOfBox(target: BoxedValue, scope: Scope) {
-	if (typeRequiresBox(target.type, scope)) {
-		return memberExpression(read(target.contents, scope), literal(0), true);
+export function contentsOfBox(target: BoxedValue, scope: Scope): Value {
+	if (target.type.kind === "type") {
+		if (typeRequiresBox(target.type.type, scope)) {
+			return member(target.contents, 0, scope);
+		}
+	} else {
+		// TODO: Support runtime types
+		throw new TypeError(`Do not support runtime types in contentsOfBox!`);
 	}
-	return read(target.contents, scope);
+	return target.contents;
 }
 
-export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "=", location?: Term | Location): Value {
+export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "=", location?: LocationSource): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return set(expr(contentsOfBox(dest, scope)), source, scope, operator, location);
-		case "direct":
-			if (dest.ref.type === "ThisExpression") {
+			return set(contentsOfBox(dest, scope), source, scope, operator, location);
+		case "direct": {
+			if (dest.expression.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
 			}
-			// return expr(assignmentExpression(operator, dest.ref, read(source, scope)), location);
-			return statements([annotate(expressionStatement(assignmentExpression(operator, dest.ref, read(source, scope))), location)], location);
-		case "subscript":
+			const result = assignmentExpression(operator, dest.expression, read(source, scope));
+			return expr(result);
+			// return statements([annotate(expressionStatement(result), location)], location);
+		}
+		case "subscript": {
 			let setterArgs: Value[] = dest.args;
 			if (operator !== "=") {
 				// Call the getter, apply the operation, then apply the setter
-				let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-				const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), [], scope, location, "get");
+				const reused = dest.args.map((value) => reuse(value, scope, "subscripted"));
+				const valueFetched = call(dest.getter, reused.map(([_, after]) => after), [], scope, location, "get");
 				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
-				setterArgs = reused.map(([first]) => expr(first));
+				setterArgs = reused.map(([first]) => first);
 			}
 			return call(dest.setter, concat(setterArgs, [source]), [], scope, location, "set");
-		default:
+		}
+		case "expression": {
+			switch (dest.expression.type) {
+				case "Identifier":
+				case "MemberExpression":
+					const result = assignmentExpression(operator, dest.expression, read(source, scope));
+					return expr(result);
+					// return statements([annotate(expressionStatement(result), location)], location);
+				default:
+					break;
+			}
+		}
+		default: {
 			throw new TypeError(`Unable to set a ${dest.kind} value`);
+		}
 	}
 }
 
-export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: Term | Location): Value {
+export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: LocationSource): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return update(expr(contentsOfBox(dest, scope)), scope, updater);
+			return update(contentsOfBox(dest, scope), scope, updater);
 		case "direct":
-			switch (dest.ref.type) {
+			switch (dest.expression.type) {
 				case "ThisExpression":
 					throw new Error("Cannot update a this expression!");
 				case "MemberExpression":
-					if (dest.ref.object.type !== "Identifier" || (dest.ref.computed && typeof valueOfExpression(dest.ref.property) === "undefined")) {
-						const [firstObject, afterObject] = reuseExpression(dest.ref.object, scope, "object");
-						const [firstProperty, afterProperty] = reuseExpression(dest.ref.object, scope, "property");
-						const first = annotate(memberExpression(firstObject, firstProperty, dest.ref.computed), dest.ref.loc);
-						const after = annotate(memberExpression(afterObject, afterProperty, dest.ref.computed), dest.ref.loc);
-						return expr(assignmentExpression("=", first, read(updater(expr(after)), scope)), location);
+					if (dest.expression.object.type !== "Identifier" || (dest.expression.computed && typeof valueOfExpression(dest.expression.property) === "undefined")) {
+						const [firstObject, afterObject] = reuse(expr(dest.expression.object), scope, "object");
+						const property = dest.expression.property;
+						if (dest.expression.computed) {
+							const [firstProperty, afterProperty] = reuse(expr(property), scope, "property");
+							return set(
+								member(firstObject, firstProperty, scope),
+								updater(member(afterObject, afterProperty, scope)),
+								scope,
+								"=",
+								location,
+							);
+						}
+						if (property.type !== "Identifier") {
+							throw new TypeError(`Expected an Identifier, got a ${property.type}`);
+						}
+						return set(
+							member(firstObject, property.name, scope),
+							updater(member(afterObject, property.name, scope)),
+							scope,
+							"=",
+							location,
+						);
 					}
 				case "Identifier":
 				default:
-					return expr(assignmentExpression("=", dest.ref, read(updater(dest), scope)), location);
+					return set(dest, updater(dest), scope, "=", location);
 			}
 			break;
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
-			let reused = dest.args.map((value) => reuseExpression(read(value, scope), scope, "subscripted"));
-			const valueFetched = call(dest.getter, reused.map(([_, after]) => expr(after)), [], scope, location, "get");
+			const reused = dest.args.map((value) => reuse(value, scope, "subscripted"));
+			const valueFetched = call(dest.getter, reused.map(([_, after]) => after), [], scope, location, "get");
 			const result = updater(valueFetched);
-			return call(dest.setter, concat(reused.map(([first]) => expr(first)), [result]), [], scope, location, "set");
+			return call(dest.setter, concat(reused.map(([first]) => first), [result]), [], scope, location, "set");
 		default:
 			break;
 	}
 	throw new TypeError(`Unable to set a ${dest.kind} value!`);
 }
 
-export function array(values: Value[], scope: Scope, location?: Location | Term) {
+// TODO: Avoid using dummy types
+const dummyType = typeValue({ kind: "name", name: "Dummy" });
+
+export function array(values: Value[], scope: Scope, location?: LocationSource) {
 	let prefixStatements: Statement[] = [];
 	const elements: Expression[] = [];
 	for (const value of values.slice().reverse()) {
@@ -356,7 +470,7 @@ export function array(values: Value[], scope: Scope, location?: Location | Term)
 				elements.unshift(argument);
 			} else {
 				const temp = uniqueName(scope, "element");
-				newStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, argument, DeclarationFlags.Const));
+				newStatements.push(addVariable(scope, temp, dummyType, expr(argument), DeclarationFlags.Const));
 				elements.unshift(read(lookup(temp, scope), scope));
 			}
 			prefixStatements = concat(newStatements, prefixStatements);
@@ -364,7 +478,7 @@ export function array(values: Value[], scope: Scope, location?: Location | Term)
 			const expression = read(value, scope);
 			if (prefixStatements.length !== 0 && !isPure(expression)) {
 				const temp = uniqueName(scope, "element");
-				prefixStatements.push(addVariable(scope, temp, { kind: "name", name: "Dummy" }, expression, DeclarationFlags.Const));
+				prefixStatements.push(addVariable(scope, temp, dummyType, expr(expression), DeclarationFlags.Const));
 				elements.unshift(read(lookup(temp, scope), scope));
 			} else {
 				elements.unshift(expression);
@@ -379,7 +493,7 @@ export function array(values: Value[], scope: Scope, location?: Location | Term)
 }
 
 
-export function annotate<T extends Node>(node: T, location?: Location | Term): T {
+export function annotate<T extends Node>(node: T, location?: LocationSource): T {
 	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(node, "loc")) {
 		return Object.assign(Object.create(Object.getPrototypeOf(node)), {
 			loc: readLocation(location),
@@ -388,7 +502,7 @@ export function annotate<T extends Node>(node: T, location?: Location | Term): T
 	return node;
 }
 
-export function annotateValue<T extends Value>(value: T, location?: Location | Term): T {
+export function annotateValue<T extends Value>(value: T, location?: LocationSource): T {
 	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(value, "location")) {
 		return Object.assign(Object.create(Object.getPrototypeOf(value)), {
 			location: readLocation(location),
@@ -404,7 +518,7 @@ export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
 	switch (value.kind) {
 		case "copied": {
-			const reified = reifyType(value.type, scope);
+			const reified = typeFromValue(value.type, scope);
 			if (reified.copy) {
 				return annotate(read(reified.copy(value.value, scope), scope), value.location);
 			}
@@ -426,8 +540,8 @@ export function read(value: Value, scope: Scope): Expression {
 			let func;
 			if (value.substitutions.length) {
 				func = call(
-					expr(memberExpression(read(unbound, scope), identifier("bind"))),
-					concat([expr(literal(null))], value.substitutions),
+					member(unbound, "bind", scope),
+					concat([literal(null)], value.substitutions),
 					[], // TODO: Add types for this call expression
 					scope,
 				);
@@ -450,11 +564,11 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(value.expression, value.location);
 		}
 		case "callable": {
-			const [args, statements] = functionize(scope, value.call, value.location);
-			return annotate(functionExpression(undefined, args, annotate(blockStatement(statements), value.location)), value.location);
+			const [args, body] = functionize(scope, value.call, value.location);
+			return annotate(functionExpression(undefined, args, annotate(blockStatement(body), value.location)), value.location);
 		}
 		case "direct": {
-			return annotate(value.ref, value.location);
+			return annotate(value.expression, value.location);
 		}
 		case "statements": {
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
@@ -463,41 +577,59 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(read(call(value.getter, value.args, [], scope, value.location, "get"), scope), value.location);
 		}
 		case "boxed": {
-			return annotate(contentsOfBox(value, scope), value.location);
+			return annotate(read(contentsOfBox(value, scope), scope), value.location);
 		}
+		case "conformance":
 		case "type": {
-			const stringified = stringifyType(value.type);
-			const name: string = `:${stringified}.${typeof value.protocol !== "undefined" ? value.protocol : "Type"}`;
-			const mangled = mangleName(name);
-			const reified = reifyType(value.type, scope);
-			if (typeof value.protocol !== "undefined") {
-				const globalScope = rootScope(scope);
-				if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
-					if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
-						throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
-					}
-					globalScope.declarations[name] = {
-						flags: DeclarationFlags.Const,
-					};
-					const protocol = reified.conformances[value.protocol];
-					function returnValue() {
-						return value;
-					}
-					const witnessTable = objectExpression(Object.keys(protocol).map((key) => {
-						const result = protocol[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
-						if (result.kind === "callable") {
-							const [args, statements] = functionize(globalScope, result.call);
-							return objectMethod("method", mangleName(key), args, blockStatement(statements));
-						} else {
-							return objectProperty(mangleName(key), read(result, scope));
-						}
-					}));
-					globalScope.declarations[name] = {
-						flags: DeclarationFlags.Const,
-						declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
-					};
+			let stringified: string;
+			let suffix: string;
+			if (value.kind === "type") {
+				stringified = stringifyType(value.type);
+				suffix = "Type";
+			} else {
+				if (value.type.kind !== "type") {
+					throw new TypeError(`Expected a type, got a ${value.type.kind}`);
 				}
+				stringified = stringifyType(value.type.type);
+				suffix = value.conformance;
 			}
+			const name: string = `:${stringified}.${suffix}`;
+			const mangled = mangleName(name);
+			const reified = typeFromValue(value, scope);
+			const witnessTable = objectExpression([]);
+			const globalScope = rootScope(scope);
+			globalScope.declarations[name] = {
+				flags: DeclarationFlags.Const,
+				declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
+			};
+			// if (typeof value.protocol !== "undefined") {
+			// 	const globalScope = rootScope(scope);
+			// 	if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
+			// 		if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
+			// 			throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
+			// 		}
+			// 		globalScope.declarations[name] = {
+			// 			flags: DeclarationFlags.Const,
+			// 		};
+			// 		const protocol = reified.conformances[value.protocol];
+			// 		function returnValue() {
+			// 			return value;
+			// 		}
+			// 		const witnessTable = objectExpression(Object.keys(protocol).map((key) => {
+			// 			const result = protocol[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
+			// 			if (result.kind === "callable") {
+			// 				const [args, statements] = functionize(globalScope, result.call);
+			// 				return objectMethod("method", mangleName(key), args, blockStatement(statements));
+			// 			} else {
+			// 				return objectProperty(mangleName(key), read(result, scope));
+			// 			}
+			// 		}));
+			// 		globalScope.declarations[name] = {
+			// 			flags: DeclarationFlags.Const,
+			// 			declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
+			// 		};
+			// 	}
+			// }
 			return annotate(mangled, value.location);
 		}
 		default: {
@@ -548,8 +680,9 @@ export const undefinedLiteral = identifier("undefined");
 export const undefinedValue = expr(undefinedLiteral);
 
 export const typeType: Type = { kind: "name", name: "Type" };
+export const typeTypeValue = typeValue(typeType);
 
-export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Type[], scope: Scope, location?: Term | Location, type: "call" | "get" | "set" = "call"): Value {
+export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<Value | string>, scope: Scope, location?: LocationSource, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
 		if (i < args.length) {
 			return args[i];
@@ -563,7 +696,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Type[]
 				// Type substitutions are passed as prefix arguments
 				args = concat(target.substitutions, args);
 				const subsitutionTypes = target.substitutions.map(() => typeType);
-				argTypes = concat(subsitutionTypes, target.type.arguments.types);
+				argTypes = concat(argTypes, target.type.arguments.types.map((innerType) => typeValue(innerType)));
 				targetFunctionType = {
 					kind: "function",
 					arguments: {
@@ -585,27 +718,13 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Type[]
 				if (typeof fn === "undefined") {
 					throw new Error(`Could not find function to call for ${target.name}`);
 				}
-			} else if (target.parentType.kind === "type") {
+			} else if (target.parentType.kind === "type" || target.parentType.kind === "conformance") {
 				const parentType = target.parentType;
-				const reified = reifyType(parentType.type, scope);
-				const protocolName = parentType.protocol;
-				// TODO: Figure out proper way to determine if parentType.type already conforms
-				if (typeof protocolName === "undefined" || Object.keys(reified.conformances).length === 0) {
-					// Member functions
-					fn = reified.functions(target.name);
-					if (typeof fn === "undefined") {
-						throw new Error(`${stringifyType(parentType.type)} does not have a ${target.name} function`);
-					}
-				} else {
-					// Protocol functions
-					if (!Object.hasOwnProperty.call(reified.conformances, protocolName)) {
-						throw new TypeError(`${stringifyType(parentType.type)} does not conform to ${protocolName}`);
-					}
-					const protocol = reified.conformances[protocolName];
-					if (!Object.hasOwnProperty.call(protocol, target.name)) {
-						throw new TypeError(`${protocolName} conformance of ${stringifyType(parentType.type)} does not have a ${target.name} function`);
-					}
-					fn = protocol[target.name];
+				const reified = typeFromValue(parentType, scope);
+				// Member functions
+				fn = reified.functions(target.name);
+				if (typeof fn === "undefined") {
+					throw new Error(`${stringifyValue(parentType)} does not have a ${target.name} function`);
 				}
 			} else {
 				// Function from a vtable at runtime
@@ -640,13 +759,15 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Type[]
 	if (type !== "call") {
 		throw new Error(`Unable to call a ${type}ter on a function!`);
 	}
-	const targetExpression = read(target, scope);
-	const argExpressions: Expression[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const argType = argTypes[i];
-		argExpressions.push(argType.kind === "modified" && argType.modifier === "inout" ? read(unbox(args[i], scope), scope) : read(args[i], scope));
-	}
-	return expr(callExpression(targetExpression, argExpressions), location);
+	return transform(target, scope, (targetExpression) => {
+		const argExpressions: Expression[] = [];
+		for (let i = 0; i < args.length; i++) {
+			const argType = argTypes[i];
+			const innerType = typeof argType === "string" ? typeValue(parseType(argType)) : argType;
+			argExpressions.push(innerType.kind === "type" && innerType.type.kind === "modified" && innerType.type.modifier === "inout" ? read(unbox(args[i], scope), scope) : read(args[i], scope));
+		}
+		return expr(callExpression(targetExpression, argExpressions), location);
+	});
 }
 
 export function isPure(expression: Expression): boolean {
@@ -674,22 +795,25 @@ export function isPure(expression: Expression): boolean {
 	}
 }
 
-export function simplify(expression: Expression): Expression {
+function simplifyExpression(expression: Expression): Expression {
+	if (isLiteral(expression)) {
+		return expression;
+	}
 	const value = valueOfExpression(expression);
 	if (typeof value !== "undefined") {
-		return annotate(literal(value), expression.loc);
+		return literal(value, expression.loc).expression;
 	}
 	switch (expression.type) {
 		case "ConditionalExpression":
 			const testValue = valueOfExpression(expression.test);
 			if (typeof testValue !== "undefined") {
-				return annotate(simplify(testValue ? expression.consequent : expression.alternate), expression.loc);
+				return annotate(simplifyExpression(testValue ? expression.consequent : expression.alternate), expression.loc);
 			}
-			return annotate(conditionalExpression(simplify(expression.test), simplify(expression.consequent), simplify(expression.alternate)), expression.loc);
+			return annotate(conditionalExpression(simplifyExpression(expression.test), simplifyExpression(expression.consequent), simplifyExpression(expression.alternate)), expression.loc);
 		case "LogicalExpression":
-			const left = simplify(expression.left);
+			const left = simplifyExpression(expression.left);
 			const leftValue = valueOfExpression(left);
-			const right = simplify(expression.right);
+			const right = simplifyExpression(expression.right);
 			const rightValue = valueOfExpression(right);
 			if (expression.operator === "&&") {
 				if (typeof leftValue !== "undefined") {
@@ -726,13 +850,13 @@ export function simplify(expression: Expression): Expression {
 				if (typeof objectValue !== "undefined" && objectValue !== null && Object.hasOwnProperty.call(objectValue, expression.property.name)) {
 					const propertyValue = (objectValue as any)[expression.property.name];
 					if (typeof propertyValue === "boolean" || typeof propertyValue === "number" || typeof propertyValue === "string" || typeof propertyValue === "object") {
-						return annotate(literal(propertyValue), expression.loc);
+						return literal(propertyValue, expression.loc).expression;
 					}
 				} else {
-					return annotate(memberExpression(simplify(expression.object), expression.property), expression.loc);
+					return annotate(memberExpression(simplifyExpression(expression.object), expression.property), expression.loc);
 				}
 			} else if (expression.computed) {
-				return annotate(memberExpression(simplify(expression.object), simplify(expression.property), true), expression.loc);
+				return annotate(memberExpression(simplifyExpression(expression.object), simplifyExpression(expression.property), true), expression.loc);
 			}
 		default:
 			break;
@@ -858,42 +982,47 @@ interface LiteralArray extends ReadonlyArray<LiteralValue> {
 }
 type LiteralValue = boolean | number | string | null | LiteralArray | LiteralMap;
 
-export function literal(value: boolean): BooleanLiteral;
-export function literal(value: number): NumericLiteral;
-export function literal(value: string): StringLiteral;
-export function literal(value: null): NullLiteral;
-export function literal(value: ReadonlyArray<LiteralValue>): ArrayExpression;
-export function literal(value: LiteralMap): ObjectExpression;
-export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral | ArrayExpression | ObjectExpression;
-export function literal(value: LiteralValue): BooleanLiteral | NumericLiteral | StringLiteral | NullLiteral | ArrayExpression | ObjectExpression {
+export function literal(value: LiteralValue, location?: LocationSource): ExpressionValue | VariableValue {
 	if (typeof value === "boolean") {
-		return booleanLiteral(value);
+		return expr(booleanLiteral(value), location);
 	} else if (typeof value === "number") {
-		return numericLiteral(value);
+		return expr(numericLiteral(value), location);
 	} else if (typeof value === "string") {
-		return stringLiteral(value);
+		return expr(stringLiteral(value), location);
 	} else if (value === null) {
-		return nullLiteral();
+		return expr(nullLiteral(), location);
 	} else if (Array.isArray(value)) {
-		return arrayExpression(value.map(literal));
+		return expr(arrayExpression(value.map((element) => literal(element, location).expression)), location);
 	} else if (typeof value === "object") {
-		return objectExpression(Object.keys(value).map((key) => objectProperty(identifier(key), literal((value as LiteralMap)[key]))));
+		return expr(objectExpression(Object.keys(value).map((key) => {
+			const expression = literal((value as LiteralMap)[key], location).expression;
+			if (validIdentifier.test(key)) {
+				return objectProperty(identifier(key), expression);
+			} else {
+				// Case where key is not a valid identifier
+				return objectProperty(stringLiteral(key), expression, true);
+			}
+		})), location) as ExpressionValue;
 	} else {
 		throw new TypeError(`Expected to receive a valid literal type, instead got ${typeof value}`);
 	}
 }
 
-export function reuseExpression(expression: Expression, scope: Scope, uniqueNamePrefix: string): [Expression, Expression] {
-	const simplified = annotate(simplify(expression), expression.loc);
-	if (isPure(simplified)) {
-		return [simplified, simplified];
+export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string): [Value, Value] {
+	if (value.kind === "direct") {
+		return [value, value];
+	}
+	const expression = simplifyExpression(read(value, scope));
+	if (isPure(expression)) {
+		const result = expr(expression);
+		return [result, result];
 	} else if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
-		return [expression, expression.left];
+		return [expr(expression), expr(expression.left)];
 	} else {
 		const tempName = uniqueName(scope, uniqueNamePrefix);
 		addDeclaration(scope, tempName, (id) => variableDeclaration("let", [variableDeclarator(id)]));
-		const temp = annotate(read(lookup(tempName, scope), scope), expression.loc);
-		return [annotate(assignmentExpression("=", temp as any, simplified), expression.loc), temp];
+		const temp = annotateValue(lookup(tempName, scope), expression.loc);
+		return [set(temp, expr(expression), scope, "=", expression.loc), temp];
 	}
 }
 
@@ -928,6 +1057,54 @@ export function stringifyType(type: Type): string {
 			return stringifyType(type.type) + " where " + stringifyType(type.type) + " : " + stringifyType(type.constraint);
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
+	}
+}
+
+function stringifyNode(node: Node): string {
+	const result = transformFromAst(node, undefined, {
+		babelrc: false,
+		code: true,
+		compact: true,
+		sourceMaps: false,
+	});
+	return result.code!;
+}
+
+export function stringifyValue(value: Value): string {
+	switch (value.kind) {
+		case "copied": {
+			return `copy of ${stringifyValue(value.value)}`;
+		}
+		case "function": {
+			if (typeof value.parentType === "undefined") {
+				return `${value.name} function`;
+			}
+			return `${value.name} function in ${stringifyValue(value.parentType)}`;
+		}
+		case "tuple": {
+			return `(${value.values.map(stringifyValue).join(", ")})`;
+		}
+		case "direct":
+		case "expression": {
+			return `${stringifyNode(value.expression)} (${value.kind})`;
+		}
+		case "callable": {
+			return `anonymous ${stringifyType(value.type)} function`;
+		}
+		case "statements": {
+			return `${stringifyNode(blockStatement(value.statements))} (${value.kind})`;
+		}
+		case "type": {
+			return `${stringifyType(value.type)} (as type)`;
+		}
+		case "conformance": {
+			return `${value.conformance} conformance of ${stringifyValue(value.type)}`;
+		}
+		case "boxed":
+		case "subscript":
+		default: {
+			return value.kind;
+		}
 	}
 }
 
