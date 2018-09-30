@@ -280,9 +280,10 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 				return {
 					fields: [],
 					functions: lookupForMap<FunctionBuilder | GetterSetterBuilder | undefined>(reified.conformances[conformanceName].functions),
-					conformances: Object.assign({
+					conformances: {
 						[conformanceName]: reified.conformances[conformanceName],
-					}, reified.conformances[conformanceName].conformances),
+						...reified.conformances[conformanceName].conformances
+					},
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.All,
 				};

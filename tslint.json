@@ -2,6 +2,8 @@
 	"extends": "tslint:recommended",
 	"rules": {
 		"ban-types": [true, ["Object", "Use {} instead."], ["String"], ["Number"]],
+		"curly": true,
+		"forin": true,
 		"indent": [true, "tabs", 4],
 		"max-line-length": {
 			"options": {
@@ -16,8 +18,18 @@
 		"no-conditional-assignment": true,
 		"no-consecutive-blank-lines": false,
 		"no-console": false,
+		"no-for-in-array": true,
+		"no-implicit-dependencies": true,
+		"no-invalid-template-strings": true,
+		"no-string-throw": true,
+		"no-unsafe-finally": true,
+		"no-unused-expression": true,
+		"no-void-expression": true,
+		"radix": true,
+		"restrict-plus-operands": true,
 		"object-literal-sort-keys": false,
 		"ordered-imports": [true, {"named-imports-order":"lowercase-first"}],
+		"prefer-object-spread": true,
 		"interface-name": [true, "never-prefix"],
 		"quotemark": [true, "double", "avoid-escape"]
 	},

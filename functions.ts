@@ -40,13 +40,13 @@ export function functionize(scope: Scope, expression: (scope: Scope, arg: ArgGet
 			if (Object.hasOwnProperty.call(identifiers, i)) {
 				result = identifiers[i];
 			} else {
-				result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + i);
+				result = identifiers[i] = identifier(typeof name === "string" ? name : "$" + String(i));
 			}
 			// TODO: Determine what to do about inout parameters
 			return expr(result);
 		});
 		for (let i = 0; i < usedCount; i++) {
-			args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + i);
+			args[i] = Object.hasOwnProperty.call(identifiers, i) ? identifiers[i] : identifier("$" + String(i));
 		}
 		usedCount = -1;
 		return newValue;

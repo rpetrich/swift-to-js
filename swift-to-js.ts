@@ -1386,7 +1386,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const inherits = term.properties.inherits;
 				if (typeof inherits === "string") {
 					const inheritsReified = reifyType(inherits, scope);
-					conformances[inherits] = Object.assign(Object.create(null), inheritsReified.conformances[inherits]);
+					conformances[inherits] = { ...inheritsReified.conformances[inherits] };
 				}
 			}
 			const innerTypes: TypeMap = Object.create(null);
@@ -1609,7 +1609,9 @@ function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
 		stream.resume();
 		const input: Array<unknown> = [];
 		stream.on("data", (chunk) => input.push(chunk));
-		stream.on("end", () => resolve(input.join("")));
+		stream.on("end", () => {
+			resolve(input.join(""));
+		});
 		stream.on("error", reject);
 	});
 }
@@ -1694,7 +1696,9 @@ export async function compile(path: string): Promise<CompilerOutput> {
 }
 
 if (require.main === module) {
-	compile(argv[argv.length - 1]).then((result) => console.log(result.code)).catch((e) => {
+	compile(argv[argv.length - 1]).then((result) => {
+		console.log(result.code);
+	}).catch((e) => {
 		// console.error(e instanceof Error ? e.message : e);
 		console.error(e);
 		process.exit(1);

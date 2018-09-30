@@ -145,7 +145,7 @@ const mangledSymbols: { [symbol: string]: string } = {
 };
 
 function mangleSymbol(symbol: string) {
-	return Object.hasOwnProperty.call(mangledSymbols, symbol) ? mangledSymbols[symbol] : "$" + symbol.charCodeAt(0) + "$";
+	return Object.hasOwnProperty.call(mangledSymbols, symbol) ? mangledSymbols[symbol] : "$" + String(symbol.charCodeAt(0)) + "$";
 }
 
 export function mangleName(name: string) {
@@ -167,7 +167,7 @@ export function uniqueName(scope: Scope, prefix: string = "$temp") {
 	let i = 0;
 	let name = prefix;
 	while (hasNameInScope(scope, name)) {
-		name = prefix + i++;
+		name = prefix + String(i++);
 	}
 	return name;
 }

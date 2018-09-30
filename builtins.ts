@@ -620,7 +620,7 @@ function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: S
 		}
 		const base = conformances[key];
 		result[key] = {
-			functions: Object.assign(Object.assign(Object.create(null), reified.conformances[key].functions), base.functions),
+			functions: {...reified.conformances[key].functions, ...base.functions},
 			conformances: applyDefaultConformances(base.conformances, scope),
 		};
 	}
@@ -784,7 +784,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
 	}));
 
-	return Object.assign(Object.assign(Object.create(null), protocolTypes), {
+	return {
+		...protocolTypes,
 		Bool: BoolType,
 		Int1: BoolType,
 		UInt: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, checkedIntegers, (value, scope) => binary(">>>", value, literal(0), scope))),
@@ -1397,7 +1398,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				conformances: Object.create(null),
 			},
 		})),
-	} as TypeMap);
+	};
 }
 
 export function emptyOptional(type: Value, scope: Scope) {
@@ -1626,7 +1627,7 @@ export function newScopeWithBuiltins(): Scope {
 	return {
 		name: "global",
 		declarations: Object.create(null),
-		types: Object.assign(Object.create(null), defaultTypes(false)),
+		types: defaultTypes(false),
 		functions: Object.assign(Object.create(null), functions),
 		functionUsage: Object.create(null),
 		mapping: Object.create(null),
