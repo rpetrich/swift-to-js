@@ -4,7 +4,7 @@ import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout
 import { addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, binary, BinaryOperator, call, callable, conditional, conformance, copy, expr, ExpressionValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { ArgGetter, array, binary, BinaryOperator, call, callable, conditional, conformance, copy, expr, ExpressionValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
 
 import { arrayExpression, arrayPattern, assignmentExpression, blockStatement, breakStatement, callExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
 
@@ -84,26 +84,26 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 		if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
 			return arg(0, "value");
 		}
-		return reuse(arg(0, "value"), scope, "value", (first, after) => {
+		return reuse(arg(0, "value"), scope, "value", (value) => {
 			let check;
 			if (requiresGreaterThanCheck && requiresLessThanCheck) {
 				check = logical(
 					"||",
-					binary(">", first, range.min, scope),
-					binary("<", after, range.max, scope),
+					binary(">", value, range.min, scope),
+					binary("<", value, range.max, scope),
 					scope,
 				);
 			} else if (requiresGreaterThanCheck) {
-				check = binary(">", first, range.max, scope);
+				check = binary(">", value, range.max, scope);
 			} else if (requiresLessThanCheck) {
-				check = binary("<", first, range.min, scope);
+				check = binary("<", value, range.min, scope);
 			} else {
 				return arg(0, "value");
 			}
 			return conditional(
 				check,
 				literal(null),
-				after,
+				value,
 				scope,
 			);
 		});
@@ -230,31 +230,31 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
 					return arg(0, "value");
 				}
-				return reuse(arg(0, "value"), scope, "value", (first, after) => {
+				return reuse(arg(0, "value"), scope, "value", (value) => {
 					if (requiresGreaterThanCheck && requiresLessThanCheck) {
 						return conditional(
-							binary(">", first, range.max, scope),
+							binary(">", value, range.max, scope),
 							range.max,
 							conditional(
-								binary("<", after, range.min, scope),
+								binary("<", value, range.min, scope),
 								range.min,
-								after,
+								value,
 								scope,
 							),
 							scope,
 						);
 					} else if (requiresGreaterThanCheck) {
 						return conditional(
-							binary(">", first, range.max, scope),
+							binary(">", value, range.max, scope),
 							range.max,
-							after,
+							value,
 							scope,
 						);
 					} else {
 						return conditional(
-							binary("<", first, range.min, scope),
+							binary("<", value, range.min, scope),
 							range.min,
-							after,
+							value,
 							scope,
 						);
 					}
@@ -491,25 +491,25 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 	if (typeof constant === "number" && typeof constantMin === "number" && typeof constantMax === "number" && constant >= constantMin && constant <= constantMax) {
 		return expr(expression);
 	}
-	return reuse(expr(expression), scope, "integer", (first, after) => {
+	return reuse(expr(expression), scope, "integer", (reusableValue) => {
 		let check;
 		if (requiresGreaterThanCheck && requiresLessThanCheck) {
 			check = logical(
 				"||",
-				binary("<", first, dest.min, scope),
-				binary(">", after, dest.max, scope),
+				binary("<", reusableValue, dest.min, scope),
+				binary(">", reusableValue, dest.max, scope),
 				scope,
 			);
 		} else if (requiresGreaterThanCheck) {
-			check = binary(">", first, dest.max, scope);
+			check = binary(">", reusableValue, dest.max, scope);
 		} else {
-			check = binary("<", first, dest.min, scope);
+			check = binary("<", reusableValue, dest.min, scope);
 		}
 		const functionType: Function = { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] };
 		return conditional(
 			check,
 			call(functionValue("Swift.(swift-to-js).numericRangeFailed()", undefined, functionType), [], [], scope),
-			after,
+			reusableValue,
 			scope,
 		);
 	});
@@ -534,26 +534,26 @@ function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeA
 	if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
 		return arg(0, "value");
 	}
-	return reuse(arg(0, "value"), scope, "value", (first, after) => {
+	return reuse(arg(0, "value"), scope, "value", (value) => {
 		let check;
 		if (requiresGreaterThanCheck && requiresLessThanCheck) {
 			check = logical(
 				"||",
-				binary(">", first, dest.min, scope),
-				binary("<", after, dest.max, scope),
+				binary(">", value, dest.min, scope),
+				binary("<", value, dest.max, scope),
 				scope,
 			);
 		} else if (requiresGreaterThanCheck) {
-			check = binary(">", first, dest.max, scope);
+			check = binary(">", value, dest.max, scope);
 		} else if (requiresLessThanCheck) {
-			check = binary("<", first, dest.min, scope);
+			check = binary("<", value, dest.min, scope);
 		} else {
 			return arg(0, "value");
 		}
 		return conditional(
 			check,
 			literal(null),
-			after,
+			value,
 			scope,
 		);
 	});
@@ -749,16 +749,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
 		"init": wrapped((scope, arg) => {
 			// Optional init from string
-			return reuse(arg(0, "string"), scope, "string", (first, after) => {
+			return reuse(arg(0, "string"), scope, "string", (stringValue) => {
 				return logical("||",
 					binary("===",
-						first,
+						stringValue,
 						literal("True"),
 						scope,
 					),
 					logical("&&",
 						binary("!==",
-							after,
+							stringValue,
 							literal("False"),
 							scope,
 						),
@@ -857,16 +857,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
 			const compareEqual = isDirectlyComparable ? wrapped(binaryBuiltin("===", 0)) : wrapped((scope: Scope, arg: ArgGetter) => {
 				const equalMethod = call(functionValue("==", conformance(wrappedType, "Equatable", scope), parseFunctionType(`() -> () -> Bool`)), [wrappedType], [typeTypeValue], scope);
-				return reuse(arg(0, "lhs"), scope, "lhs", (firstLeft, afterLeft) => {
-					return reuse(arg(1, "rhs"), scope, "rhs", (firstRight, afterRight) => {
+				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
+					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
 						return conditional(
-							optionalIsNone(firstLeft, optionalType, scope),
-							optionalIsNone(firstRight, optionalType, scope),
+							optionalIsNone(lhs, optionalType, scope),
+							optionalIsNone(rhs, optionalType, scope),
 							logical("&&",
-								optionalIsSome(firstRight, optionalType, scope),
+								optionalIsSome(rhs, optionalType, scope),
 								call(equalMethod, [
-									unwrapOptional(afterLeft, optionalType, scope),
-									unwrapOptional(afterRight, optionalType, scope),
+									unwrapOptional(lhs, optionalType, scope),
+									unwrapOptional(rhs, optionalType, scope),
 								], [wrappedType, wrappedType], scope),
 								scope,
 							),
@@ -877,16 +877,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			});
 			const compareUnequal = isDirectlyComparable ? wrapped(binaryBuiltin("!==", 0)) : wrapped((scope: Scope, arg: ArgGetter) => {
 				const unequalMethod = call(functionValue("!=", conformance(wrappedType, "Equatable", scope), parseFunctionType(`() -> () -> Bool`)), [wrappedType], [typeTypeValue], scope);
-				return reuse(arg(0, "lhs"), scope, "lhs", (firstLeft, afterLeft) => {
-					return reuse(arg(1, "rhs"), scope, "rhs", (firstRight, afterRight) => {
+				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
+					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
 						return conditional(
-							optionalIsNone(firstLeft, optionalType, scope),
-							optionalIsSome(firstRight, optionalType, scope),
+							optionalIsNone(lhs, optionalType, scope),
+							optionalIsSome(rhs, optionalType, scope),
 							logical("||",
-								optionalIsNone(firstRight, optionalType, scope),
+								optionalIsNone(rhs, optionalType, scope),
 								call(unequalMethod, [
-									unwrapOptional(afterLeft, optionalType, scope),
-									unwrapOptional(afterRight, optionalType, scope),
+									unwrapOptional(lhs, optionalType, scope),
+									unwrapOptional(rhs, optionalType, scope),
 								], [wrappedType, wrappedType], scope),
 								scope,
 							),
@@ -925,11 +925,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					const copier = reified.copy;
 					if (copier) {
 						// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
-						return reuse(expr(expression), scope, "copyValue", (first, after) => {
+						return reuse(expr(expression), scope, "copyValue", (source) => {
 							return conditional(
-								optionalIsNone(first, optionalType, scope),
+								optionalIsNone(source, optionalType, scope),
 								emptyOptional(optionalType, scope),
-								wrapInOptional(copier.call(reified, after, scope), optionalType, scope),
+								wrapInOptional(copier.call(reified, source, scope), optionalType, scope),
 								scope,
 							);
 						});
@@ -961,16 +961,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const reifiedOptional = typeFromValue(optionalValueType, globalScope);
 			function arrayCompare(comparison: "equal" | "unequal") {
 				return wrapped((scope, arg) => {
-					return reuse(arg(0, "lhs"), scope, "lhs", (lhsFirst, lhsAfter) => {
-						return reuse(arg(1, "rhs"), scope, "rhs", (rhsFirst, rhsAfter) => {
+					return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
+						return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
 							const result = uniqueName(scope, comparison);
 							const i = uniqueName(scope, "i");
 							return statements([
 								addVariable(scope, result, "Bool"),
 								ifStatement(
 									read(binary("!==",
-										member(lhsFirst, "length", scope),
-										member(rhsFirst, "length", scope),
+										member(lhs, "length", scope),
+										member(rhs, "length", scope),
 										scope,
 									), scope),
 									blockStatement(ignore(set(lookup(result, scope), literal(comparison === "unequal"), scope), scope)),
@@ -981,12 +981,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 												read(logical("&&",
 													binary("<",
 														lookup(i, scope),
-														member(lhsAfter, "length", scope),
+														member(lhs, "length", scope),
 														scope,
 													),
 													binary("===",
-														member(lhsAfter, lookup(i, scope), scope),
-														member(rhsAfter, lookup(i, scope), scope),
+														member(lhs, lookup(i, scope), scope),
+														member(rhs, lookup(i, scope), scope),
 														scope,
 													),
 													scope,
@@ -1000,7 +1000,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 											lookup(result, scope),
 											binary(comparison === "unequal" ? "!==" : "===",
 												lookup(i, scope),
-												member(lhsAfter, "length", scope),
+												member(lhs, "length", scope),
 												scope,
 											),
 											scope,
@@ -1021,20 +1021,20 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					startIndexOfZero(globalScope),
 					readLengthField("endIndex", globalScope),
 					field("first", reifiedOptional, (value: Value, scope: Scope) => {
-						return reuse(value, scope, "array", (first, after) => {
+						return reuse(value, scope, "array", (reusableValue) => {
 							return conditional(
-								member(first, "length", scope),
-								wrapInOptional(member(after, 0, scope), optionalValueType, scope),
+								member(reusableValue, "length", scope),
+								wrapInOptional(member(reusableValue, 0, scope), optionalValueType, scope),
 								emptyOptional(optionalValueType, scope),
 								scope,
 							);
 						});
 					}),
 					field("last", reifiedOptional, (value: Value, scope: Scope) => {
-						return reuse(value, scope, "array", (first, after) => {
+						return reuse(value, scope, "array", (reusableValue) => {
 							return conditional(
-								member(first, "length", scope),
-								wrapInOptional(member(after, binary("-", member(after, "length", scope), literal(1), scope), scope), optionalValueType, scope),
+								member(reusableValue, "length", scope),
+								wrapInOptional(member(reusableValue, binary("-", member(reusableValue, "length", scope), literal(1), scope), scope), optionalValueType, scope),
 								emptyOptional(optionalValueType, scope),
 								scope,
 							);
@@ -1074,42 +1074,42 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [arrayValue, i], [dummyType, valueType], scope);
 					}),
 					"removeFirst()": wrapped((scope, arg) => {
-						return reuse(call(member(arg(1, "array"), "shift", scope), [], [], scope), scope, "element", (first, after) => {
+						return reuse(call(member(arg(1, "array"), "shift", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
 								binary("!==",
-									first,
+									reusableArray,
 									undefinedValue,
 									scope,
 								),
-								after,
+								reusableArray,
 								arrayBoundsFailed(scope),
 								scope,
 							);
 						});
 					}),
 					"removeLast()": wrapped((scope, arg) => {
-						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (first, after) => {
+						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
 								binary("!==",
-									first,
+									reusableArray,
 									undefinedValue,
 									scope,
 								),
-								after,
+								reusableArray,
 								arrayBoundsFailed(scope),
 								scope,
 							);
 						});
 					}),
 					"popLast()": wrapped((scope, arg) => {
-						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (first, after) => {
+						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
 								binary("!==",
-									first,
+									reusableArray,
 									undefinedValue,
 									scope,
 								),
-								wrapInOptional(after, optionalValueType, scope),
+								wrapInOptional(reusableArray, optionalValueType, scope),
 								emptyOptional(optionalValueType, scope),
 								scope,
 							);
@@ -1121,20 +1121,20 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					"reserveCapacity()": wrapped((scope, arg) => undefinedValue),
 					"index(after:)": wrapped((scope, arg) => {
 						const arrayValue = arg(1, "array");
-						return reuse(arg(2, "index"), scope, "index", (first, after) => {
+						return reuse(arg(2, "index"), scope, "index", (index) => {
 							return conditional(
-								binary("<", arrayValue, first, scope),
-								binary("+", after, literal(1), scope),
+								binary("<", arrayValue, index, scope),
+								binary("+", index, literal(1), scope),
 								arrayBoundsFailed(scope),
 								scope,
 							);
 						});
 					}),
 					"index(before:)": wrapped((scope, arg) => {
-						return reuse(arg(2, "index"), scope, "index", (first, after) => {
+						return reuse(arg(2, "index"), scope, "index", (index) => {
 							return conditional(
-								binary(">", first, literal(0), scope),
-								binary("-", after, literal(1), scope),
+								binary(">", index, literal(0), scope),
+								binary("-", index, literal(1), scope),
 								arrayBoundsFailed(scope),
 								scope,
 							);
@@ -1234,8 +1234,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					functions: lookupForMap({
 						subscript: {
 							get(scope, arg, type) {
-								return reuse(arg(2, "dict"), scope, "dict", (dictFirst, dictAfter) => {
-									return reuse(arg(3, "index"), scope, "index", (indexFirst, indexAfter) => {
+								return reuse(arg(2, "dict"), scope, "dict", (dict) => {
+									return reuse(arg(3, "index"), scope, "index", (index) => {
 										return conditional(
 											call(
 												member(
@@ -1247,11 +1247,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 													"call",
 													scope,
 												),
-												[dictFirst, indexFirst],
+												[dict, index],
 												["Any", "String"],
 												scope,
 											),
-											wrapInOptional(copy(member(dictAfter, indexAfter, scope), valueType), possibleValueType, scope),
+											wrapInOptional(copy(member(dict, index, scope), valueType), possibleValueType, scope),
 											emptyOptional(possibleValueType, scope),
 											scope,
 										);
@@ -1274,10 +1274,10 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								if (isLiteral(valueExpression) || valueExpression.type === "ArrayExpression" || valueExpression.type === "ObjectExpression") {
 									return set(member(dict, index, scope), expr(valueExpression), scope);
 								}
-								return reuse(expr(valueExpression), scope, "value", (valueFirst, valueAfter) => {
+								return reuse(expr(valueExpression), scope, "value", (reusableValue) => {
 									return conditional(
-										optionalIsSome(valueFirst, possibleValueType, scope),
-										set(member(dict, index, scope), copy(unwrapOptional(valueAfter, possibleValueType, scope), valueType), scope),
+										optionalIsSome(reusableValue, possibleValueType, scope),
+										set(member(dict, index, scope), copy(unwrapOptional(reusableValue, possibleValueType, scope), valueType), scope),
 										unary("delete", member(dict, index, scope), scope),
 										scope,
 									);
@@ -1320,11 +1320,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								startIndexOfZero(globalScope),
 								readLengthField("endIndex", globalScope),
 								field("first", typeFromValue(possibleKeyType, globalScope), (value: Value, scope: Scope) => {
-									return reuse(value, scope, "keys", (first, after) => {
-										const stringKey = member(after, 0, scope);
+									return reuse(value, scope, "keys", (keys) => {
+										const stringKey = member(keys, 0, scope);
 										const convertedKey = typeof converter !== "undefined" ? call(converter, [stringKey], ["String"], scope) : stringKey;
 										return conditional(
-											member(first, "length", scope),
+											member(keys, "length", scope),
 											wrapInOptional(convertedKey, possibleKeyType, scope),
 											emptyOptional(possibleKeyType, scope),
 											scope,
@@ -1477,26 +1477,26 @@ function arrayBoundsFailed(scope: Scope) {
 }
 
 function arrayBoundsCheck(arrayValue: Value, index: Value, scope: Scope, mode: "read" | "write") {
-	return reuse(arrayValue, scope, "array", (firstArray, remainingArray) => {
-		return reuse(index, scope, "index", (firstIndex, remainingIndex) => {
+	return reuse(arrayValue, scope, "array", (reusableArray) => {
+		return reuse(index, scope, "index", (reusableIndex) => {
 			return member(
-				firstArray,
+				reusableArray,
 				conditional(
 					logical(
 						"&&",
 						binary(mode === "write" ? ">=" : ">",
-							member(remainingArray, "length", scope),
-							firstIndex,
+							member(reusableArray, "length", scope),
+							reusableIndex,
 							scope,
 						),
 						binary(">=",
-							remainingIndex,
+							reusableIndex,
 							literal(0),
 							scope,
 						),
 						scope,
 					),
-					remainingIndex,
+					reusableIndex,
 					arrayBoundsFailed(scope),
 					scope,
 				),

@@ -414,13 +414,13 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 				case "MemberExpression":
 					const memberDest = dest.expression;
 					if (memberDest.object.type !== "Identifier" || (memberDest.computed && typeof valueOfExpression(memberDest.property) === "undefined")) {
-						return reuse(expr(dest.expression.object), scope, "object", (firstObject, afterObject) => {
+						return reuse(expr(dest.expression.object), scope, "object", (object) => {
 							const property = memberDest.property;
 							if (memberDest.computed) {
-								return reuse(expr(property), scope, "property", (firstProperty, afterProperty) => {
+								return reuse(expr(property), scope, "property", (reusableProperty) => {
 									return set(
-										member(firstObject, firstProperty, scope),
-										updater(member(afterObject, afterProperty, scope)),
+										member(object, reusableProperty, scope),
+										updater(member(object, reusableProperty, scope)),
 										scope,
 										"=",
 										location,
@@ -431,8 +431,8 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 								throw new TypeError(`Expected an Identifier, got a ${property.type}`);
 							}
 							return set(
-								member(firstObject, property.name, scope),
-								updater(member(afterObject, property.name, scope)),
+								member(object, property.name, scope),
+								updater(member(object, property.name, scope)),
 								scope,
 								"=",
 								location,
@@ -447,20 +447,18 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
 			let i = -1;
-			const firsts: Value[] = [];
-			const afters: Value[] = [];
+			const reusableArgs: Value[] = [];
 			const { args, getter, setter } = dest;
 			function iterate(): Value {
 				if (++i < args.length) {
-					return reuse(args[i], scope, "subscript", (first, after) => {
-						firsts.push(first);
-						afters.push(after);
+					return reuse(args[i], scope, "subscript", (argValue) => {
+						reusableArgs.push(argValue);
 						return iterate();
 					});
 				} else {
-					const valueFetched = call(getter, firsts, [], scope, location, "get");
+					const valueFetched = call(getter, reusableArgs, [], scope, location, "get");
 					const result = updater(valueFetched);
-					return call(setter, concat(afters, [result]), [], scope, location, "set");
+					return call(setter, concat(reusableArgs, [result]), [], scope, location, "set");
 				}
 			}
 			return iterate();
@@ -662,7 +660,7 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 }
 
 
-export function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
+function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
 	if (value.kind === "statements") {
 		const contents = value.statements;
 		if (contents.length === 0) {
@@ -1022,22 +1020,18 @@ export function literal(value: LiteralValue, location?: LocationSource): Express
 	}
 }
 
-export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, callback: (first: Value, after: Value) => Value): Value {
+export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, callback: (reusableValue: Value) => Value): Value {
 	if (value.kind === "direct") {
-		return callback(value, value);
+		return callback(value);
 	}
 	return transform(value, scope, (expression) => {
 		if (isPure(expression)) {
-			const result = expr(expression);
-			return callback(result, result);
-		}
-		if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
-			return callback(expr(expression), expr(expression.left));
+			return callback(expr(expression));
 		}
 		const tempName = uniqueName(scope, uniqueNamePrefix);
 		const head = addVariable(scope, tempName, "Any", expr(expression), DeclarationFlags.Const);
 		const temp = annotateValue(lookup(tempName, scope), expression.loc);
-		const tail = callback(temp, temp);
+		const tail = callback(temp);
 		if (tail.kind === "statements") {
 			return statements(concat([head], tail.statements));
 		} else {

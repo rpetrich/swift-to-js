@@ -163,10 +163,9 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 					if (expressionSkipsCopy(expression)) {
 						return expr(expression);
 					}
-					return reuse(expr(expression), scope, "copySource", (first, after) => {
+					return reuse(expr(expression), scope, "copySource", (source) => {
 						return expr(objectExpression(onlyStored.map((fieldDeclaration, index) => {
-							const parentValue = index === 0 ? first : after;
-							const propertyExpr = member(parentValue, mangleName(fieldDeclaration.name).name, scope);
+							const propertyExpr = member(source, mangleName(fieldDeclaration.name).name, scope);
 							const copiedValue = fieldDeclaration.type.copy ? fieldDeclaration.type.copy(propertyExpr, scope) : propertyExpr;
 							return objectProperty(mangleName(fieldDeclaration.name), read(copiedValue, scope));
 						})));
@@ -344,10 +343,9 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 							if (!reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined")) {
 								return call(member(expr(expression), "slice", scope), [], [], scope);
 							}
-							return reuse(expr(expression), innerScope, "copySource", (first, after) => {
+							return reuse(expr(expression), innerScope, "copySource", (source) => {
 								return array(reifiedTypes.map((elementType, index) => {
-									const parentValue = index === 0 ? first : after;
-									const fieldValue = member(parentValue, index, innerScope);
+									const fieldValue = member(source, index, innerScope);
 									return elementType.copy ? elementType.copy(fieldValue, innerScope) : fieldValue;
 								}), scope);
 							});
