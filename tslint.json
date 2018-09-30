@@ -10,6 +10,7 @@
 			}
 		},
 		"new-parens": true,
+		"no-any": true,
 		"no-arg": true,
 		"no-bitwise": false,
 		"no-conditional-assignment": true,

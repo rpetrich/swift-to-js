@@ -52,7 +52,7 @@ export function locationForTerm(term: Term): Location | undefined {
 type LocationSource = Location | Term;
 
 function readLocation(source?: LocationSource): Location | undefined {
-	return typeof source === "undefined" || !Object.hasOwnProperty.call(source, "properties") ? source as any as Location : locationForTerm(source as any as Term);
+	return typeof source === "undefined" || !Object.hasOwnProperty.call(source, "properties") ? source as unknown as Location : locationForTerm(source as unknown as Term);
 }
 
 
