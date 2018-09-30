@@ -1,11 +1,11 @@
 import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseType } from "./parse";
 import { lookup, mangleName, Scope } from "./scope";
-import { Function, Type } from "./types";
+import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, contentsOfBox, copy, expr, functionValue, literal, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeValue, undefinedValue, Value } from "./values";
+import { array, call, contentsOfBox, expr, functionValue, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeValue, undefinedValue, Value } from "./values";
 
-import { assignmentExpression, Expression, identifier, Identifier, isLiteral, objectExpression, objectProperty } from "babel-types";
+import { isLiteral, objectExpression, objectProperty, Expression } from "babel-types";
 
 export enum PossibleRepresentation {
 	None,

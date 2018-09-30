@@ -1,12 +1,12 @@
-import { abstractMethod, FunctionBuilder, noinline, returnFunctionType, returnType, wrapped } from "./functions";
+import { abstractMethod, noinline, returnFunctionType, returnType, wrapped } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { expressionSkipsCopy, field, Field, FunctionMap, getField, inheritLayout, PossibleRepresentation, primitive, protocol, ProtocolConformance, ProtocolConformanceMap, ReifiedType, reifyType, struct, TypeMap } from "./reified";
-import { addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
+import { expressionSkipsCopy, field, inheritLayout, primitive, protocol, reifyType, Field, FunctionMap, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { ArgGetter, array, binary, BinaryOperator, call, callable, conditional, conformance, copy, expr, ExpressionValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, Value, valueOfExpression, variable } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, valueOfExpression, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
-import { arrayExpression, arrayPattern, assignmentExpression, blockStatement, breakStatement, callExpression, Expression, expressionStatement, forStatement, functionExpression, identifier, Identifier, ifStatement, isLiteral, newExpression, NullLiteral, returnStatement, Statement, thisExpression, ThisExpression, throwStatement, updateExpression, variableDeclaration, variableDeclarator, VariableDeclarator, whileStatement } from "babel-types";
+import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "babel-types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -39,8 +39,6 @@ function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", typeArgument
 	}
 	return (scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, operator + "=" as any);
 }
-
-const assignmentBuiltin = wrapped((scope: Scope, arg: ArgGetter) => set(arg(0, "target"), arg(1, "value"), scope));
 
 const readLengthField = (name: string, globalScope: Scope) => field("count", reifyType("Int", globalScope), (value, scope) => {
 	return member(value, "length", scope);

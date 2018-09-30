@@ -1,16 +1,15 @@
 import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
-import { Declaration } from "./declaration";
 import { FunctionBuilder, functionize, insertFunction, noinline, returnType, statementsInValue, wrapped } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
 import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, primitive, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
+import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, Scope, uniqueName } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, ArgGetter, array, binary, boxed, call, callable, conditional, conformance, copy, expr, ExpressionValue, FunctionValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, TupleValue, typeFromValue, typeValue, unary, unbox, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable, VariableValue } from "./values";
+import { annotate, annotateValue, ArgGetter, array, binary, boxed, call, callable, conditional, conformance, copy, expr, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, catchClause, classBody, classDeclaration, classMethod, ClassMethod, classProperty, ClassProperty, conditionalExpression, exportNamedDeclaration, exportSpecifier, Expression, expressionStatement, functionDeclaration, functionExpression, identifier, Identifier, IfStatement, ifStatement, isBooleanLiteral, isIdentifier, isStringLiteral, logicalExpression, LVal, MemberExpression, newExpression, Node, numericLiteral, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, stringLiteral, switchCase, SwitchCase, switchStatement, thisExpression, ThisExpression, throwStatement, tryStatement, unaryExpression, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, ClassMethod, ClassProperty, exportNamedDeclaration, Expression, expressionStatement, identifier, Identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, thisExpression, ThisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";

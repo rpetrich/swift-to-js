@@ -1,11 +1,11 @@
 import { transformFromAst } from "babel-core";
-import { arrayExpression, ArrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, BooleanLiteral, callExpression, conditionalExpression, Expression, expressionStatement, ExpressionStatement, functionExpression, Identifier, identifier, isLiteral, logicalExpression, memberExpression, MemberExpression, Node, nullLiteral, NullLiteral, numericLiteral, NumericLiteral, objectExpression, ObjectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, Statement, stringLiteral, StringLiteral, thisExpression, ThisExpression, unaryExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, Statement, ThisExpression } from "babel-types";
 
 import { Term } from "./ast";
-import { FunctionBuilder, functionize, GetterSetterBuilder, insertFunction } from "./functions";
+import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { FunctionMap, PossibleRepresentation, ReifiedType, reifyType } from "./reified";
-import { addDeclaration, addVariable, DeclarationFlags, emitScope, fullPathOfScope, lookup, mangleName, newScope, rootScope, Scope, uniqueName } from "./scope";
+import { reifyType, PossibleRepresentation, ReifiedType } from "./reified";
+import { addVariable, lookup, mangleName, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 

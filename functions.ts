@@ -1,10 +1,10 @@
 import { Term } from "./ast";
-import { ReifiedType, reifyType } from "./reified";
-import { addDeclaration, addVariable, DeclarationFlags, lookup, mangleName, newScope, rootScope, Scope } from "./scope";
+import { ReifiedType } from "./reified";
+import { addDeclaration, lookup, newScope, rootScope, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
-import { annotate, ArgGetter, call, callable, expr, Location, read, stringifyType, typeFromValue, typeValue, Value } from "./values";
+import { call, callable, expr, read, stringifyType, typeFromValue, typeValue, ArgGetter, Location, Value } from "./values";
 
-import { blockStatement, Expression, functionDeclaration, functionExpression, identifier, Identifier, returnStatement, Statement, thisExpression } from "babel-types";
+import { blockStatement, functionDeclaration, identifier, returnStatement, Identifier, Statement } from "babel-types";
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, type: Function, name: string) => Value;
 

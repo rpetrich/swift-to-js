@@ -16,6 +16,7 @@
 		"no-consecutive-blank-lines": false,
 		"no-console": false,
 		"object-literal-sort-keys": false,
+		"ordered-imports": [true, {"named-imports-order":"lowercase-first"}],
 		"interface-name": [true, "never-prefix"],
 		"quotemark": [true, "double", "avoid-escape"]
 	},

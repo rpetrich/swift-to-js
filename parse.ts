@@ -1,6 +1,6 @@
 import { parse as ast } from "./ast";
 import { parse as declaration } from "./declaration";
-import { Function, parse as type } from "./types";
+import { parse as type, Function } from "./types";
 
 export const parseDeclaration = parse(declaration, "declaration");
 export const parseType = parse(type, "type");

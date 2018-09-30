@@ -1,11 +1,9 @@
-import { arrayExpression, BooleanLiteral, Declaration, exportNamedDeclaration, Expression, identifier, Identifier, memberExpression, NullLiteral, NumericLiteral, returnStatement, Statement, StringLiteral, ThisExpression, variableDeclaration, variableDeclarator } from "babel-types";
+import { exportNamedDeclaration, identifier, returnStatement, variableDeclaration, variableDeclarator, Declaration, Identifier, Statement } from "babel-types";
 import { functions as builtinFunctions } from "./builtins";
-import { FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseType } from "./parse";
-import { ReifiedType, TypeMap } from "./reified";
-import { Type } from "./types";
+import { TypeMap } from "./reified";
 import { concat } from "./utils";
-import { boxed, BoxedValue, ConformanceValue, constructBox, expr, ExpressionValue, literal, read, statements, stringifyType, SubscriptValue, typeRequiresBox, typeValue, TypeValue, Value, VariableValue } from "./values";
+import { boxed, constructBox, expr, read, statements, typeRequiresBox, typeValue, BoxedValue, ConformanceValue, ExpressionValue, SubscriptValue, TypeValue, Value, VariableValue } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
