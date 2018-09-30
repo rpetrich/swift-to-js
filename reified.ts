@@ -163,21 +163,23 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 					if (expressionSkipsCopy(expression)) {
 						return expr(expression);
 					}
-					const [first, after] = reuse(expr(expression), scope, "copySource");
-					return expr(objectExpression(onlyStored.map((fieldDeclaration, index) => {
-						const parentValue = index === 0 ? first : after;
-						const propertyExpr = member(parentValue, mangleName(fieldDeclaration.name).name, scope);
-						const copiedValue = fieldDeclaration.type.copy ? fieldDeclaration.type.copy(propertyExpr, scope) : propertyExpr;
-						return objectProperty(mangleName(fieldDeclaration.name), read(copiedValue, scope));
-					})));
+					return reuse(expr(expression), scope, "copySource", (first, after) => {
+						return expr(objectExpression(onlyStored.map((fieldDeclaration, index) => {
+							const parentValue = index === 0 ? first : after;
+							const propertyExpr = member(parentValue, mangleName(fieldDeclaration.name).name, scope);
+							const copiedValue = fieldDeclaration.type.copy ? fieldDeclaration.type.copy(propertyExpr, scope) : propertyExpr;
+							return objectProperty(mangleName(fieldDeclaration.name), read(copiedValue, scope));
+						})));
+					});
 				},
 				// store(target, value, scope) {
-				// 	let usedFirst = false;
-				// 	const [first, after] = reuse(value, scope);
-				// 	return onlyStored.reduce((existing, fieldLayout) => {
-				// 		const identifier = usedFirst ? after : (usedFirst = true, first);
-				// 		return existing.concat(storeValue(mangleName(fieldLayout.name), getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope));
-				// 	}, [] as Expression[]);
+				//  	let usedFirst = false;
+				//  	return reuse(value, scope, (first, after) => {
+				// 		return onlyStored.reduce((existing, fieldLayout) => {
+				// 			const identifier = usedFirst ? after : (usedFirst = true, first);
+				// 			return existing.concat(storeValue(mangleName(fieldLayout.name), getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope));
+				// 		}, [] as Expression[]);
+				// 	});
 				// },
 				innerTypes,
 			};
@@ -342,12 +344,13 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 							if (!reifiedTypes.some((elementType) => typeof elementType.copy !== "undefined")) {
 								return call(member(expr(expression), "slice", scope), [], [], scope);
 							}
-							const [first, after] = reuse(expr(expression), innerScope, "copySource");
-							return array(reifiedTypes.map((elementType, index) => {
-								const parentValue = index === 0 ? first : after;
-								const fieldValue = member(parentValue, index, innerScope);
-								return elementType.copy ? elementType.copy(fieldValue, innerScope) : fieldValue;
-							}), scope);
+							return reuse(expr(expression), innerScope, "copySource", (first, after) => {
+								return array(reifiedTypes.map((elementType, index) => {
+									const parentValue = index === 0 ? first : after;
+									const fieldValue = member(parentValue, index, innerScope);
+									return elementType.copy ? elementType.copy(fieldValue, innerScope) : fieldValue;
+								}), scope);
+							});
 						},
 						innerTypes: noInnerTypes,
 					};

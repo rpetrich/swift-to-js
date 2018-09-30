@@ -287,12 +287,15 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 		case "pattern_optional_some": {
 			expectLength(term.children, 1);
 			const type = getTypeValue(term);
-			const [first, second] = reuse(value, scope, "optional");
-			const assign = translatePattern(term.children[0], unwrapOptional(first, type, scope), scope, declarationFlags);
+			let next: PatternOutput | undefined;
+			const test = reuse(value, scope, "optional", (first, after) => {
+				next = translatePattern(term.children[0], unwrapOptional(after, type, scope), scope, declarationFlags);
+				return annotateValue(optionalIsSome(first, type, scope), term);
+			});
 			return {
 				prefix: emptyStatements,
-				test: annotateValue(optionalIsSome(second, type, scope), term),
-				next: assign,
+				test,
+				next,
 			};
 		}
 		case "case_label_item": {
@@ -362,11 +365,22 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
-			const [first, second] = reuse(value, scope, "tuple");
-			return term.children.reduce((existing, child, i) => {
-				const childPattern = translatePattern(child, member(i ? second : first, i, scope, term), scope, declarationFlags);
-				return mergePatterns(existing, childPattern, scope, term);
-			}, emptyPattern);
+			let prefix: Statement[] = emptyPattern.prefix;
+			let next: PatternOutput | undefined;
+			const test = reuse(value, scope, "tuple", (first, after) => {
+				return term.children.reduce((partialTest, child, i) => {
+					const childPattern = translatePattern(child, member(i ? after : first, i, scope, term), scope, declarationFlags);
+					const merged = mergePatterns({ prefix, test: partialTest, next }, childPattern, scope, term);
+					prefix = merged.prefix;
+					next = merged.next;
+					return merged.test;
+				}, emptyPattern.test);
+			});
+			return {
+				prefix,
+				test,
+				next,
+			};
 		}
 		case "pattern_enum_element": {
 			const type = getTypeValue(term);
@@ -381,56 +395,50 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyValue(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
 			}
 			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
-			const [first, after] = reuse(value, scope, "enum");
-			const discriminantValue = isDirectRepresentation ? first : member(first, 0, scope, term);
-			const test = binary("===", discriminantValue, literal(index), scope, term);
-			expectLength(term.children, 0, 1);
-			if (term.children.length === 0) {
-				return {
-					prefix: emptyStatements,
-					test,
-				};
-			}
-			const child = term.children[0];
-			let patternValue: Value;
-			switch (cases[index].fieldTypes.length) {
-				case 0:
-					throw new Error(`Tried to use a pattern on an enum case that has no fields`);
-				case 1:
-					// Index 1 to account for the discriminant
-					patternValue = member(after, 1, scope, term);
-					// Special-case pattern matching using pattern_paren on a enum case with one field
-					if (child.name === "pattern_paren") {
-						return {
-							prefix: emptyStatements,
-							test,
-							next: translatePattern(child.children[0], patternValue, scope, declarationFlags),
-						};
-					}
-					break;
-				default:
-					// Special-case pattern matching using pattern_tuple on a enum case with more than one field
-					if (child.name === "pattern_tuple") {
-						const next = child.children.reduce((existing, tupleChild, i) => {
-							// Offset by 1 to account for the discriminant
-							const childPattern = translatePattern(tupleChild, member(after, i + 1, scope, term), scope, declarationFlags);
-							return mergePatterns(existing, childPattern, scope, term);
-						}, emptyPattern);
-						return {
-							prefix: emptyStatements,
-							test,
-							next,
-						};
-					}
-					// Remove the discriminant
-					patternValue = call(member(after, "slice", scope, term), [literal(1)], ["Int"], scope, term);
-					break;
-			}
-			// General case pattern matching on an enum
+			let next: PatternOutput | undefined;
+			const test = reuse(value, scope, "enum", (first, after) => {
+				const discriminantValue = isDirectRepresentation ? first : member(first, 0, scope, term);
+				const result = binary("===", discriminantValue, literal(index), scope, term);
+				expectLength(term.children, 0, 1);
+				if (term.children.length === 0) {
+					return result;
+				}
+				const child = term.children[0];
+				let patternValue: Value;
+				switch (cases[index].fieldTypes.length) {
+					case 0:
+						throw new Error(`Tried to use a pattern on an enum case that has no fields`);
+					case 1:
+						// Index 1 to account for the discriminant
+						patternValue = member(after, 1, scope, term);
+						// Special-case pattern matching using pattern_paren on a enum case with one field
+						if (child.name === "pattern_paren") {
+							next = translatePattern(child.children[0], patternValue, scope, declarationFlags);
+							return result;
+						}
+						break;
+					default:
+						// Special-case pattern matching using pattern_tuple on a enum case with more than one field
+						if (child.name === "pattern_tuple") {
+							next = child.children.reduce((existing, tupleChild, i) => {
+								// Offset by 1 to account for the discriminant
+								const childPattern = translatePattern(tupleChild, member(after, i + 1, scope, term), scope, declarationFlags);
+								return mergePatterns(existing, childPattern, scope, term);
+							}, emptyPattern);
+							return result;
+						}
+						// Remove the discriminant
+						patternValue = call(member(after, "slice", scope, term), [literal(1)], ["Int"], scope, term);
+						break;
+				}
+				// General case pattern matching on an enum
+				next = translatePattern(child, patternValue, scope, declarationFlags);
+				return result;
+			});
 			return {
 				prefix: emptyStatements,
 				test,
-				next: translatePattern(child, patternValue, scope, declarationFlags),
+				next,
 			};
 		}
 		case "pattern_any": {
@@ -758,17 +766,18 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "force_value_expr": {
 			expectLength(term.children, 1);
-			const value = translateTermToValue(term.children[0], scope, bindingContext);
-			const [first, after] = reuse(value, scope, "optional");
-			// TODO: Optimize some cases where we can prove it to be a .some
 			const type = getTypeValue(term.children[0]);
-			return conditional(
-				optionalIsSome(first, type, scope),
-				unwrapOptional(after, type, scope),
-				call(forceUnwrapFailed, [], [], scope),
-				scope,
-				term,
-			);
+			const value = translateTermToValue(term.children[0], scope, bindingContext);
+			return reuse(value, scope, "optional", (first, after) => {
+				// TODO: Optimize some cases where we can prove it to be a .some
+				return conditional(
+					optionalIsSome(first, type, scope),
+					unwrapOptional(after, type, scope),
+					call(forceUnwrapFailed, [], [], scope),
+					scope,
+					term,
+				);
+			});
 		}
 		case "try_expr":
 		case "force_try_expr": {
@@ -811,9 +820,10 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				if (typeof testValue !== "undefined") {
 					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
 				}
-				const [first, after] = reuse(value, scope, "optional");
-				testValue = optionalIsSome(first, innerOptionalType, scope);
-				return unwrapOptional(after, innerOptionalType, scope);
+				return reuse(value, scope, "optional", (first, after) => {
+					testValue = optionalIsSome(first, innerOptionalType, scope);
+					return unwrapOptional(after, innerOptionalType, scope);
+				});
 			});
 			if (typeof testValue === "undefined") {
 				throw new Error(`Expected a binding expression to bind to this optional evaluation`);
@@ -1225,33 +1235,34 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 				if (requiresCopyHelper) {
 					// Emit checks for cases that have field that require copying
-					const [first, after] = reuse(expr(expression), scope, "copySource");
 					let usedFirst = false;
-					return cases.reduce(
-						(previous, enumCase, i) => {
-							if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
-								const test = binary("===",
-									member(usedFirst ? after : first, 0, scope),
-									literal(i),
-									scope,
-								);
-								usedFirst = true;
-								const copyCase = array(concat([literal(i)], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
-									// if (fieldType === baseReifiedType) {
-										// TODO: Avoid resetting this each time
-										// methods["$copy"] = noinline((innermostScope, arg) => copyHelper(arg(0), innermostScope));
-									// }
-									const fieldValue = member(after, fieldIndex + 1, scope);
-									return fieldType.copy ? fieldType.copy(fieldValue, scope) : fieldValue;
-								})), scope);
-								return conditional(test, copyCase, previous, scope);
-							} else {
-								return previous;
-							}
-						},
-						// Fallback to slicing the array for remaining simple cases
-						call(member(after, "slice", scope), [], [], scope),
-					);
+					return reuse(expr(expression), scope, "copySource", (first, after) => {
+						return cases.reduce(
+							(previous, enumCase, i) => {
+								if (enumCase.fieldTypes.some((fieldType) => !!fieldType.copy)) {
+									const test = binary("===",
+										member(usedFirst ? after : first, 0, scope),
+										literal(i),
+										scope,
+									);
+									usedFirst = true;
+									const copyCase = array(concat([literal(i)], enumCase.fieldTypes.map((fieldType, fieldIndex) => {
+										// if (fieldType === baseReifiedType) {
+											// TODO: Avoid resetting this each time
+											// methods["$copy"] = noinline((innermostScope, arg) => copyHelper(arg(0), innermostScope));
+										// }
+										const fieldValue = member(after, fieldIndex + 1, scope);
+										return fieldType.copy ? fieldType.copy(fieldValue, scope) : fieldValue;
+									})), scope);
+									return conditional(test, copyCase, previous, scope);
+								} else {
+									return previous;
+								}
+							},
+							// Fallback to slicing the array for remaining simple cases
+							call(member(after, "slice", scope), [], [], scope),
+						);
+					});
 				} else {
 					return call(member(expr(expression), "slice", scope), [], [], innerScope);
 				}

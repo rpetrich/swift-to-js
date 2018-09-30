@@ -23,6 +23,6 @@ export function allKeys(dict) {
   return Object.keys(dict);
 }
 export function firstKey(dict) {
-  let keys;
-  return (keys = Object.keys(dict)).length ? keys[0] : null;
+  const keys = Object.keys(dict);
+  return keys.length ? keys[0] : null;
 }

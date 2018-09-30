@@ -379,15 +379,12 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 			// return statements([annotate(expressionStatement(result), location)], location);
 		}
 		case "subscript": {
-			let setterArgs: Value[] = dest.args;
 			if (operator !== "=") {
-				// Call the getter, apply the operation, then apply the setter
-				const reused = dest.args.map((value) => reuse(value, scope, "subscripted"));
-				const valueFetched = call(dest.getter, reused.map(([_, after]) => after), [], scope, location, "get");
-				source = expr(binaryExpression(operator.substr(0, operator.length - 1) as any, read(valueFetched, scope), read(source, scope)));
-				setterArgs = reused.map(([first]) => first);
+				return update(dest, scope, (value) => {
+					return binary(operator.substr(0, operator.length - 1) as any, value, source, scope);
+				}, location);
 			}
-			return call(dest.setter, concat(setterArgs, [source]), [], scope, location, "set");
+			return call(dest.setter, concat(dest.args, [source]), [], scope, location, "set");
 		}
 		case "expression": {
 			switch (dest.expression.type) {
@@ -415,29 +412,32 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 				case "ThisExpression":
 					throw new Error("Cannot update a this expression!");
 				case "MemberExpression":
-					if (dest.expression.object.type !== "Identifier" || (dest.expression.computed && typeof valueOfExpression(dest.expression.property) === "undefined")) {
-						const [firstObject, afterObject] = reuse(expr(dest.expression.object), scope, "object");
-						const property = dest.expression.property;
-						if (dest.expression.computed) {
-							const [firstProperty, afterProperty] = reuse(expr(property), scope, "property");
+					const memberDest = dest.expression;
+					if (memberDest.object.type !== "Identifier" || (memberDest.computed && typeof valueOfExpression(memberDest.property) === "undefined")) {
+						return reuse(expr(dest.expression.object), scope, "object", (firstObject, afterObject) => {
+							const property = memberDest.property;
+							if (memberDest.computed) {
+								return reuse(expr(property), scope, "property", (firstProperty, afterProperty) => {
+									return set(
+										member(firstObject, firstProperty, scope),
+										updater(member(afterObject, afterProperty, scope)),
+										scope,
+										"=",
+										location,
+									);
+								});
+							}
+							if (property.type !== "Identifier") {
+								throw new TypeError(`Expected an Identifier, got a ${property.type}`);
+							}
 							return set(
-								member(firstObject, firstProperty, scope),
-								updater(member(afterObject, afterProperty, scope)),
+								member(firstObject, property.name, scope),
+								updater(member(afterObject, property.name, scope)),
 								scope,
 								"=",
 								location,
 							);
-						}
-						if (property.type !== "Identifier") {
-							throw new TypeError(`Expected an Identifier, got a ${property.type}`);
-						}
-						return set(
-							member(firstObject, property.name, scope),
-							updater(member(afterObject, property.name, scope)),
-							scope,
-							"=",
-							location,
-						);
+						});
 					}
 				case "Identifier":
 				default:
@@ -446,10 +446,24 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 			break;
 		case "subscript":
 			// Call the getter, apply the operation, then apply the setter
-			const reused = dest.args.map((value) => reuse(value, scope, "subscripted"));
-			const valueFetched = call(dest.getter, reused.map(([_, after]) => after), [], scope, location, "get");
-			const result = updater(valueFetched);
-			return call(dest.setter, concat(reused.map(([first]) => first), [result]), [], scope, location, "set");
+			let i = -1;
+			const firsts: Value[] = [];
+			const afters: Value[] = [];
+			const { args, getter, setter } = dest;
+			function iterate(): Value {
+				if (++i < args.length) {
+					return reuse(args[i], scope, "subscript", (first, after) => {
+						firsts.push(first);
+						afters.push(after);
+						return iterate();
+					});
+				} else {
+					const valueFetched = call(getter, firsts, [], scope, location, "get");
+					const result = updater(valueFetched);
+					return call(setter, concat(afters, [result]), [], scope, location, "set");
+				}
+			}
+			return iterate();
 		default:
 			break;
 	}
@@ -659,7 +673,7 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 		let tail: Value;
 		if (lastStatement.type === "ReturnStatement") {
 			head = contents.slice(0, contents.length - 1);
-			tail = callback(lastStatement.argument);
+			tail = callback(simplifyExpression(lastStatement.argument));
 		} else {
 			head = contents;
 			tail = callback(undefinedLiteral);
@@ -669,11 +683,11 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 		} else {
 			return statements(concat(
 				head,
-				[returnStatement(read(tail, scope))],
+				[returnStatement(simplifyExpression(read(tail, scope)))],
 			));
 		}
 	}
-	return callback(read(value, scope));
+	return callback(simplifyExpression(read(value, scope)));
 }
 
 export const undefinedLiteral = identifier("undefined");
@@ -1008,22 +1022,28 @@ export function literal(value: LiteralValue, location?: LocationSource): Express
 	}
 }
 
-export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string): [Value, Value] {
+export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, callback: (first: Value, after: Value) => Value): Value {
 	if (value.kind === "direct") {
-		return [value, value];
+		return callback(value, value);
 	}
-	const expression = simplifyExpression(read(value, scope));
-	if (isPure(expression)) {
-		const result = expr(expression);
-		return [result, result];
-	} else if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
-		return [expr(expression), expr(expression.left)];
-	} else {
+	return transform(value, scope, (expression) => {
+		if (isPure(expression)) {
+			const result = expr(expression);
+			return callback(result, result);
+		}
+		if (expression.type === "AssignmentExpression" && expression.operator === "=" && expression.left.type === "Identifier") {
+			return callback(expr(expression), expr(expression.left));
+		}
 		const tempName = uniqueName(scope, uniqueNamePrefix);
-		addDeclaration(scope, tempName, (id) => variableDeclaration("let", [variableDeclarator(id)]));
+		const head = addVariable(scope, tempName, "Any", expr(expression), DeclarationFlags.Const);
 		const temp = annotateValue(lookup(tempName, scope), expression.loc);
-		return [set(temp, expr(expression), scope, "=", expression.loc), temp];
-	}
+		const tail = callback(temp, temp);
+		if (tail.kind === "statements") {
+			return statements(concat([head], tail.statements));
+		} else {
+			return statements([head, returnStatement(read(tail, scope))]);
+		}
+	});
 }
 
 export function stringifyType(type: Type): string {
