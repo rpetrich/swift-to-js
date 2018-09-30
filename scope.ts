@@ -12,7 +12,7 @@ export enum DeclarationFlags {
 	Boxed = 1 << 2,
 }
 
-type MappedValue = BoxedValue | ExpressionValue | SubscriptValue | VariableValue | TypeValue | ConformanceValue;
+export type MappedNameValue = BoxedValue | ExpressionValue | SubscriptValue | VariableValue | TypeValue | ConformanceValue;
 
 export interface Scope {
 	name: string;
@@ -20,7 +20,7 @@ export interface Scope {
 	types: TypeMap;
 	functions: typeof builtinFunctions;
 	functionUsage: { [name: string]: true };
-	mapping: { [name: string]: MappedValue };
+	mapping: { [name: string]: MappedNameValue };
 	parent: Scope | undefined;
 }
 
@@ -152,7 +152,7 @@ export function mangleName(name: string) {
 	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
 }
 
-export function lookup(name: string, scope: Scope): MappedValue {
+export function lookup(name: string, scope: Scope): MappedNameValue {
 	let targetScope: Scope | undefined = scope;
 	do {
 		if (Object.hasOwnProperty.call(targetScope.mapping, name)) {

@@ -4,7 +4,7 @@ import { expressionSkipsCopy, field, inheritLayout, primitive, protocol, reifyTy
 import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, valueOfExpression, variable, ArgGetter, BinaryOperator, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
 import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "babel-types";
 
@@ -33,11 +33,11 @@ function binaryBuiltin(operator: BinaryOperator, typeArgumentCount: number, valu
 	};
 }
 
-function updateBuiltin(operator: "+" | "-" | "*" | "/" | "|" | "&", typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
+function updateBuiltin(operator: keyof typeof updateOperatorForBinaryOperator, typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
 	if (typeof valueChecker !== "undefined") {
 		return (scope: Scope, arg: ArgGetter) => update(arg(typeArgumentCount, "target"), scope, (value) => valueChecker(binary(operator, value, arg(typeArgumentCount + 1, "value"), scope), scope));
 	}
-	return (scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, operator + "=" as any);
+	return (scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, updateOperatorForBinaryOperator[operator]);
 }
 
 const readLengthField = (name: string, globalScope: Scope) => field("count", reifyType("Int", globalScope), (value, scope) => {
@@ -301,7 +301,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				functions: {
 					init: wrapped((scope, arg) => {
 						const input = read(arg(0, "description"), scope);
-						const value = valueOfExpression(input);
+						const value = expressionLiteralValue(input);
 						if (typeof value === "string") {
 							const convertedValue = parseInt(value, 10);
 							return literal(isNaN(convertedValue) ? null : convertedValue);
@@ -402,7 +402,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 				functions: {
 					init: wrapped((scope, arg) => {
 						const input = read(arg(0, "description"), scope);
-						const value = valueOfExpression(input);
+						const value = expressionLiteralValue(input);
 						if (typeof value === "string") {
 							const convertedValue = Number(value);
 							return literal(isNaN(convertedValue) ? null : convertedValue);
@@ -465,14 +465,14 @@ function rangeForNumericType(type: ReifiedType, scope: Scope): NumericRange {
 }
 
 function possiblyGreaterThan(left: NumericRange, right: NumericRange, scope: Scope): boolean {
-	const leftMax = valueOfExpression(read(left.max, scope));
-	const rightMax = valueOfExpression(read(right.max, scope));
+	const leftMax = expressionLiteralValue(read(left.max, scope));
+	const rightMax = expressionLiteralValue(read(right.max, scope));
 	return typeof leftMax !== "number" || typeof rightMax !== "number" || leftMax > rightMax;
 }
 
 function possiblyLessThan(left: NumericRange, right: NumericRange, scope: Scope): boolean {
-	const leftMin = valueOfExpression(read(left.min, scope));
-	const rightMin = valueOfExpression(read(right.min, scope));
+	const leftMin = expressionLiteralValue(read(left.min, scope));
+	const rightMin = expressionLiteralValue(read(right.min, scope));
 	return typeof leftMin !== "number" || typeof rightMin !== "number" || leftMin < rightMin;
 }
 
@@ -483,9 +483,9 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 		return value;
 	}
 	const expression = read(value, scope);
-	const constant = valueOfExpression(expression);
-	const constantMin = valueOfExpression(read(dest.min, scope));
-	const constantMax = valueOfExpression(read(dest.max, scope));
+	const constant = expressionLiteralValue(expression);
+	const constantMin = expressionLiteralValue(read(dest.min, scope));
+	const constantMax = expressionLiteralValue(read(dest.max, scope));
 	if (typeof constant === "number" && typeof constantMin === "number" && typeof constantMax === "number" && constant >= constantMin && constant <= constantMax) {
 		return expr(expression);
 	}

@@ -1,5 +1,5 @@
 import { transformFromAst } from "babel-core";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, Statement, ThisExpression } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, Statement, ThisExpression } from "babel-types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -218,7 +218,7 @@ export function member(object: Value, property: string | number | Value, scope: 
 export function member(object: Value, property: string | number | Value, scope: Scope, location?: LocationSource): Value {
 	return transform(object, scope, (expression) => {
 		const idExpression = typeof property === "object" ? read(property, scope) : literal(property, location).expression;
-		const builder = typeof valueOfExpression(idExpression) !== "undefined" && object.kind === "direct" ? variable as typeof expr : expr;
+		const builder = typeof expressionLiteralValue(idExpression) !== "undefined" && object.kind === "direct" ? variable as typeof expr : expr;
 		if (idExpression.type === "StringLiteral" && validIdentifier.test(idExpression.value)) {
 			return builder(memberExpression(
 				expression,
@@ -366,7 +366,29 @@ export function contentsOfBox(target: BoxedValue, scope: Scope): Value {
 	return target.contents;
 }
 
-export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=" = "=", location?: LocationSource): Value {
+export type UpdateOperator = "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=";
+
+type Mapped<T extends string | number, U> = { [K in T]: U };
+
+export const binaryOperatorForUpdateOperator: Mapped<Exclude<UpdateOperator, "=">, BinaryOperator> = {
+	"+=": "+",
+	"-=": "-",
+	"*=": "*",
+	"/=": "/",
+	"|=": "|",
+	"&=": "&",
+};
+
+export const updateOperatorForBinaryOperator: Mapped<"+" | "-" | "*" | "/" | "|" | "&", UpdateOperator> = {
+	"+": "+=",
+	"-": "-=",
+	"*": "*=",
+	"/": "/=",
+	"|": "|=",
+	"&": "&=",
+};
+
+export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOperator = "=", location?: LocationSource): Value {
 	switch (dest.kind) {
 		case "boxed":
 			return set(contentsOfBox(dest, scope), source, scope, operator, location);
@@ -381,7 +403,7 @@ export function set(dest: Value, source: Value, scope: Scope, operator: "=" | "+
 		case "subscript": {
 			if (operator !== "=") {
 				return update(dest, scope, (value) => {
-					return binary(operator.substr(0, operator.length - 1) as any, value, source, scope);
+					return binary(binaryOperatorForUpdateOperator[operator], value, source, scope);
 				}, location);
 			}
 			return call(dest.setter, concat(dest.args, [source]), [], scope, location, "set");
@@ -413,7 +435,7 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 					throw new Error("Cannot update a this expression!");
 				case "MemberExpression":
 					const memberDest = dest.expression;
-					if (memberDest.object.type !== "Identifier" || (memberDest.computed && typeof valueOfExpression(memberDest.property) === "undefined")) {
+					if (memberDest.object.type !== "Identifier" || (memberDest.computed && typeof expressionLiteralValue(memberDest.property) === "undefined")) {
 						return reuse(expr(dest.expression.object), scope, "object", (object) => {
 							const property = memberDest.property;
 							if (memberDest.computed) {
@@ -789,10 +811,11 @@ export function isPure(expression: Expression): boolean {
 		case "BooleanLiteral":
 		case "NumericLiteral":
 		case "NullLiteral":
+		case "RegExpLiteral":
 		case "ThisExpression":
 			return true;
 		case "MemberExpression":
-			return isPure(expression.property) && (!expression.computed || isPure(expression.property));
+			return isPure(expression.object) && expression.object.type !== "Identifier" && expression.object.type !== "MemberExpression" && expression.object.type !== "ThisExpression" && (!expression.computed || isPure(expression.property));
 		case "ArrayExpression":
 			for (const element of expression.elements) {
 				if (element !== null) {
@@ -802,31 +825,54 @@ export function isPure(expression: Expression): boolean {
 				}
 			}
 			return true;
+		case "ObjectExpression":
+			for (const prop of expression.properties) {
+				if (prop.type !== "ObjectProperty" || !isPure(prop.value) || (prop.computed && !isPure(prop.key))) {
+					return false;
+				}
+			}
+			return true;
 		default:
 			return false;
 	}
 }
 
 function simplifyExpression(expression: Expression): Expression {
-	if (isLiteral(expression)) {
-		return expression;
-	}
-	const value = valueOfExpression(expression);
-	if (typeof value !== "undefined") {
-		return literal(value, expression.loc).expression;
-	}
 	switch (expression.type) {
-		case "ConditionalExpression":
-			const testValue = valueOfExpression(expression.test);
+		case "ArrayExpression": {
+			return annotate(arrayExpression(expression.elements.map((element) => {
+				if (element !== null && isExpression(element)) {
+					return simplifyExpression(element);
+				} else {
+					return element;
+				}
+			})), expression.loc);
+		}
+		case "ObjectExpression": {
+			return annotate(objectExpression(expression.properties.map((prop) => {
+				if (prop.type === "ObjectProperty") {
+					if (prop.computed) {
+						return annotate(objectProperty(simplifyExpression(prop.key), simplifyExpression(prop.value), true), prop.loc);
+					} else {
+						return annotate(objectProperty(prop.key, simplifyExpression(prop.value)), prop.loc);
+					}
+				} else {
+					return prop;
+				}
+			})), expression.loc);
+		}
+		case "ConditionalExpression": {
+			const testValue = expressionLiteralValue(expression.test);
 			if (typeof testValue !== "undefined") {
 				return annotate(simplifyExpression(testValue ? expression.consequent : expression.alternate), expression.loc);
 			}
 			return annotate(conditionalExpression(simplifyExpression(expression.test), simplifyExpression(expression.consequent), simplifyExpression(expression.alternate)), expression.loc);
-		case "LogicalExpression":
+		}
+		case "LogicalExpression": {
 			const left = simplifyExpression(expression.left);
-			const leftValue = valueOfExpression(left);
+			const leftValue = expressionLiteralValue(left);
 			const right = simplifyExpression(expression.right);
-			const rightValue = valueOfExpression(right);
+			const rightValue = expressionLiteralValue(right);
 			if (expression.operator === "&&") {
 				if (typeof leftValue !== "undefined") {
 					return annotate(leftValue ? right : left, expression.loc);
@@ -853,14 +899,30 @@ function simplifyExpression(expression: Expression): Expression {
 				}
 			}
 			return annotate(logicalExpression(expression.operator, left, right), expression.loc);
-		case "BinaryExpression": {
-			return annotate(binaryExpression(expression.operator, expression.left, expression.right), expression.loc);
 		}
-		case "MemberExpression":
+		case "BinaryExpression": {
+			const value = expressionLiteralValue(expression);
+			if (typeof value !== "undefined") {
+				return literal(value, expression.loc).expression;
+			}
+			return annotate(binaryExpression(expression.operator, simplifyExpression(expression.left), simplifyExpression(expression.right)), expression.loc);
+		}
+		case "UnaryExpression": {
+			const value = expressionLiteralValue(expression);
+			if (typeof value !== "undefined") {
+				return literal(value, expression.loc).expression;
+			}
+			return annotate(unaryExpression(expression.operator, simplifyExpression(expression.argument)), expression.loc);
+		}
+		case "MemberExpression": {
+			const value = expressionLiteralValue(expression);
+			if (typeof value !== "undefined") {
+				return literal(value, expression.loc).expression;
+			}
 			if (!expression.computed && expression.property.type === "Identifier") {
-				const objectValue = valueOfExpression(expression.object);
-				if (typeof objectValue !== "undefined" && objectValue !== null && Object.hasOwnProperty.call(objectValue, expression.property.name)) {
-					const propertyValue = (objectValue as any)[expression.property.name];
+				const objectValue = expressionLiteralValue(expression.object);
+				if (typeof objectValue === "object" && !Array.isArray(objectValue) && objectValue !== null && Object.hasOwnProperty.call(objectValue, expression.property.name)) {
+					const propertyValue = (objectValue as LiteralMap)[expression.property.name];
 					if (typeof propertyValue === "boolean" || typeof propertyValue === "number" || typeof propertyValue === "string" || typeof propertyValue === "object") {
 						return literal(propertyValue, expression.loc).expression;
 					}
@@ -870,13 +932,35 @@ function simplifyExpression(expression: Expression): Expression {
 			} else if (expression.computed) {
 				return annotate(memberExpression(simplifyExpression(expression.object), simplifyExpression(expression.property), true), expression.loc);
 			}
-		default:
 			break;
+		}
+		case "SequenceExpression": {
+			const oldExpressions = expression.expressions;
+			if (oldExpressions.length === 0) {
+				return annotate(undefinedLiteral, expression.loc);
+			}
+			const newExpressions: Expression[] = [];
+			for (let i = 0; i < oldExpressions.length - 1; i++) {
+				const simplified = simplifyExpression(oldExpressions[i]);
+				if (!isPure(simplified)) {
+					newExpressions.push(simplified);
+				}
+			}
+			if (newExpressions.length === 0) {
+				return simplifyExpression(oldExpressions[oldExpressions.length - 1]);
+			} else {
+				newExpressions.push(simplifyExpression(oldExpressions[oldExpressions.length - 1]));
+				return annotate(sequenceExpression(newExpressions), expression.loc);
+			}
+		}
+		default: {
+			break;
+		}
 	}
 	return expression;
 }
 
-export function valueOfExpression(expression: Expression): undefined | boolean | number | string | null {
+export function expressionLiteralValue(expression: Expression): LiteralValue | undefined {
 	switch (expression.type) {
 		case "BooleanLiteral":
 		case "NumericLiteral":
@@ -885,7 +969,7 @@ export function valueOfExpression(expression: Expression): undefined | boolean |
 		case "NullLiteral":
 			return null;
 		case "UnaryExpression": {
-			const value = valueOfExpression(expression.argument);
+			const value = expressionLiteralValue(expression.argument);
 			if (typeof value !== "undefined") {
 				switch (expression.operator) {
 					case "!":
@@ -908,9 +992,9 @@ export function valueOfExpression(expression: Expression): undefined | boolean |
 		}
 		case "LogicalExpression":
 		case "BinaryExpression": {
-			const left = valueOfExpression(expression.left);
+			const left = expressionLiteralValue(expression.left);
 			if (typeof left !== "undefined") {
-				const right = valueOfExpression(expression.right);
+				const right = expressionLiteralValue(expression.right);
 				if (typeof right !== "undefined") {
 					switch (expression.operator) {
 						case "&&":
@@ -967,19 +1051,60 @@ export function valueOfExpression(expression: Expression): undefined | boolean |
 			break;
 		}
 		case "ConditionalExpression": {
-			const test = valueOfExpression(expression.test);
+			const test = expressionLiteralValue(expression.test);
 			if (typeof test !== "undefined") {
-				return valueOfExpression(test ? expression.consequent : expression.alternate);
+				return expressionLiteralValue(test ? expression.consequent : expression.alternate);
 			}
 			break;
 		}
 		case "SequenceExpression": {
 			for (const ignoredExpression of expression.expressions.slice(expression.expressions.length - 1)) {
-				if (typeof valueOfExpression(ignoredExpression) === "undefined") {
+				if (typeof expressionLiteralValue(ignoredExpression) === "undefined") {
 					return undefined;
 				}
 			}
-			return valueOfExpression(expression.expressions[expression.expressions.length - 1]);
+			return expressionLiteralValue(expression.expressions[expression.expressions.length - 1]);
+		}
+		case "ArrayExpression": {
+			const result: LiteralValue[] = [];
+			for (const element of expression.elements) {
+				if (element === null || element.type === "SpreadElement") {
+					return undefined;
+				}
+				const elementValue = expressionLiteralValue(element);
+				if (typeof elementValue === "undefined") {
+					return undefined;
+				}
+				result.push(elementValue);
+			}
+			return result;
+		}
+		case "ObjectExpression": {
+			const result: { [name: string]: LiteralValue } = Object.create(null);
+			for (const prop of expression.properties) {
+				if (prop.type !== "ObjectProperty") {
+					return undefined;
+				}
+				const value = expressionLiteralValue(prop.value);
+				if (typeof value === "undefined") {
+					return undefined;
+				}
+				let key: string;
+				if (prop.computed) {
+					const keyValue = expressionLiteralValue(prop.key);
+					if (typeof keyValue !== "string") {
+						return undefined;
+					}
+					key = keyValue;
+				} else {
+					if (prop.key.type !== "Identifier") {
+						return undefined;
+					}
+					key = prop.key.name;
+				}
+				result[key] = value;
+			}
+			return result;
 		}
 		default:
 			break;

@@ -1,15 +1,15 @@
 import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
-import { FunctionBuilder, functionize, insertFunction, noinline, returnType, statementsInValue, wrapped } from "./functions";
+import { functionize, insertFunction, noinline, returnType, statementsInValue, wrapped, FunctionBuilder } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, EnumCase, expressionSkipsCopy, field, Field, FunctionMap, getField, newClass, PossibleRepresentation, primitive, ProtocolConformanceMap, ReifiedType, reifyType, store, struct, TypeMap } from "./reified";
-import { addVariable, DeclarationFlags, emitScope, lookup, mangleName, newScope, Scope, uniqueName } from "./scope";
+import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass, primitive, reifyType, store, struct, EnumCase, Field, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, ArgGetter, array, binary, boxed, call, callable, conditional, conformance, copy, expr, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, Value, valueOfExpression, variable } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, ClassMethod, ClassProperty, exportNamedDeclaration, Expression, expressionStatement, identifier, Identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, ObjectProperty, program, Program, returnStatement, ReturnStatement, sequenceExpression, Statement, thisExpression, ThisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement } from "babel-types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, exportNamedDeclaration, expressionStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -51,7 +51,7 @@ function checkTermName(term: Term, expectedName: string, errorPrefix?: string) {
 	}
 }
 
-function isString(value: any): value is string {
+function isString(value: unknown): value is string {
 	return typeof value === "string";
 }
 
@@ -891,7 +891,7 @@ function applyParameterMappings(typeParameterCount: number, parameterTerms: Term
 				childScope.mapping[parameterName] = expr(expression);
 				return body;
 			}
-			const literalValue = valueOfExpression(expression);
+			const literalValue = expressionLiteralValue(expression);
 			if (typeof literalValue === "boolean" || typeof literalValue === "number" || typeof literalValue === "string" || literalValue === null) {
 				childScope.mapping[parameterName] = literal(literalValue);
 				return body;
@@ -940,7 +940,7 @@ function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): Ty
 	return result;
 }
 
-function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][], constructedTypeName: string | undefined, scope: Scope, functions: FunctionMap, selfIdentifier?: Identifier | ThisExpression): (scope: Scope, arg: ArgGetter) => Value {
+function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][], constructedTypeName: string | undefined, scope: Scope, functions: FunctionMap, selfValue?: MappedNameValue): (scope: Scope, arg: ArgGetter) => Value {
 	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, isInitial: boolean): (scope: Scope, arg: ArgGetter) => Value {
 		return (targetScope: Scope, arg: ArgGetter) => newScope(isInitial ? name : "inner", targetScope, (childScope) => {
 			// Apply generic function mapping for outermost function
@@ -951,8 +951,8 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 				const typeMap: TypeMap = term.args.length >= 2 ? typeMappingForGenericArguments(parseType("Base" + term.args[1]), arg) : Object.create(null);
 				typeArgumentCount = Object.keys(typeMap).length;
 				// childScope = newScope(name, targetScope, typeMap);
-				if (typeof selfIdentifier !== "undefined") {
-					childScope.mapping.self = expr(selfIdentifier);
+				if (typeof selfValue !== "undefined") {
+					childScope.mapping.self = selfValue;
 				}
 			}
 			// Apply parameters
@@ -1143,7 +1143,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					for (const child of remainingChildren) {
 						const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope), scope, term);
 						mergedPrefix = concat(mergedPrefix, prefix);
-						if (valueOfExpression(mergedTest) === false) {
+						if (expressionLiteralValue(mergedTest) === false) {
 							mergedTest = test;
 						} else if (!isTrueExpression(mergedTest)) {
 							mergedTest = logicalExpression("||", mergedTest, test);
@@ -1505,7 +1505,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							const childDeclaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							const type = getTypeValue(childDeclaration);
 							if (flagsForDeclarationTerm(child) & DeclarationFlags.Export) {
-								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, thisExpression());
+								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(thisExpression()));
 								const [args, body] = functionize(scope, (innerScope) => fn(innerScope, () => expr(thisExpression())));
 								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(body)));
 								// Default implementation will call getter/setter
@@ -1518,11 +1518,12 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 								layout.push(field(child.args[0], typeFromValue(childType, scope), (value: Value, innerScope: Scope) => {
 									const selfExpression = read(value, innerScope);
 									if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
-										return translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, selfExpression)(scope, noArguments);
+										return translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(selfExpression))(scope, noArguments);
 									} else {
 										const self = uniqueName(innerScope, "self");
 										const head = addVariable(innerScope, self, childType, expr(selfExpression), DeclarationFlags.Const);
-										const func = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, read(lookup(self, scope), scope) as any);
+										const selfValue = lookup(self, scope);
+										const func = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, selfValue);
 										const result = func(scope, noArguments);
 										if (result.kind === "statements") {
 											return statements(concat([head], result.statements), result.location);
@@ -1604,7 +1605,7 @@ function readAsString(stream: NodeJS.ReadableStream): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		stream.setEncoding("utf8");
 		stream.resume();
-		const input: any[] = [];
+		const input: Array<unknown> = [];
 		stream.on("data", (chunk) => input.push(chunk));
 		stream.on("end", () => resolve(input.join("")));
 		stream.on("error", reject);

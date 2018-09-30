@@ -5,7 +5,7 @@ export function attempt$shouldThrow$(shouldThrow) {
 }
 export function recover$shouldThrow$(shouldThrow) {
   try {
-    return 1;
+    return attempt$shouldThrow$(shouldThrow), 1;
   } catch (error) {
     return 0;
   }
