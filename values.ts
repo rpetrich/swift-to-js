@@ -86,10 +86,6 @@ export function statements(body: Statement[], location?: LocationSource): Statem
 			if (body.length === 1) {
 				return expr(last, lastStatement.loc || location);
 			}
-			const exceptLast = body.slice(0, body.length - 1);
-			if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
-				return expr(sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [last])), lastStatement.loc || location);
-			}
 		}
 	}
 	return {
@@ -605,6 +601,19 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(value.expression, value.location);
 		}
 		case "statements": {
+			const body = value.statements;
+			if (body.length > 0) {
+				// Avoid generating an IIFE for statements list
+				const lastStatement = body[body.length - 1];
+				if (lastStatement.type === "ReturnStatement") {
+					const exceptLast = body.slice(0, body.length - 1);
+					if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
+						return sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [lastStatement.argument]));
+					}
+				} else if (body.every((statement) => statement.type === "ExpressionStatement")) {
+					return sequenceExpression(concat(body.map((statement) => (statement as ExpressionStatement).expression), [undefinedLiteral]));
+				}
+			}
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 		}
 		case "subscript": {
@@ -673,12 +682,90 @@ export function read(value: Value, scope: Scope): Expression {
 }
 
 export function ignore(value: Value, scope: Scope): Statement[] {
-	switch (value.kind) {
+	const transformed = transform(value, scope, expr);
+	outer:
+	switch (transformed.kind) {
 		case "statements":
-			return value.statements;
+			return transformed.statements;
+		case "expression":
+			switch (transformed.expression.type) {
+				case "Identifier":
+					if (transformed.expression.name === "undefined") {
+						return [];
+					}
+					break;
+				case "SequenceExpression": {
+					let body: Statement[] = [];
+					for (const ignoredExpression of transformed.expression.expressions) {
+						if (!isPure(ignoredExpression)) {
+							body = concat(body, ignore(expr(ignoredExpression), scope));
+						}
+					}
+					return body;
+				}
+				case "BinaryExpression": {
+					let body: Statement[] = [];
+					if (!isPure(transformed.expression.left)) {
+						body = concat(body, ignore(expr(transformed.expression.left), scope));
+					}
+					if (!isPure(transformed.expression.right)) {
+						body = concat(body, ignore(expr(transformed.expression.right), scope));
+					}
+					return body;
+				}
+				case "UnaryExpression": {
+					switch (transformed.expression.operator) {
+						case "!":
+						case "+":
+						case "-":
+						case "typeof":
+							if (isPure(transformed.expression.argument)) {
+								return [];
+							} else {
+								return ignore(expr(transformed.expression.argument), scope);
+							}
+							break;
+						default:
+							break;
+					}
+					break;
+				}
+				case "ArrayExpression": {
+					let body: Statement[] = [];
+					for (const ignoredExpression of transformed.expression.elements) {
+						if (ignoredExpression === null || ignoredExpression.type != null) {
+							break outer;
+						}
+						body = concat(body, ignore(expr(ignoredExpression), scope));
+					}
+					return body;
+				}
+				case "ObjectExpression": {
+					let body: Statement[] = [];
+					for (const prop of transformed.expression.properties) {
+						if (prop.type !== "ObjectProperty") {
+							break outer;
+						}
+						if (prop.computed && !isPure(prop.key)) {
+							body = concat(body, ignore(expr(prop.key), scope));
+						}
+						if (!isPure(prop.value)) {
+							body = concat(body, ignore(expr(prop.value), scope));
+						}
+					}
+					return body;
+				}
+				default:
+					if (isLiteral(transformed.expression)) {
+						return [];
+					}
+					break;
+			}
+			break;
 		default:
-			return [expressionStatement(read(value, scope))];
+			break;
 	}
+	return [expressionStatement(read(value, scope))];
 }
 
 
@@ -698,7 +785,9 @@ function transform(value: Value, scope: Scope, callback: (expression: Expression
 			head = contents;
 			tail = callback(undefinedLiteral);
 		}
-		if (tail.kind === "statements") {
+		if (tail.kind === "expression" && tail.expression.type === "Identifier" && tail.expression.name === "undefined") {
+			return statements(head);
+		} else if (tail.kind === "statements") {
 			return statements(concat(head, tail.statements));
 		} else {
 			return statements(concat(

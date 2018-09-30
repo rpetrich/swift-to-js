@@ -9,7 +9,7 @@ import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, exportNamedDeclaration, expressionStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, exportNamedDeclaration, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -334,17 +334,19 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 			} else {
 				const pattern = convertToPattern(copy(value, type));
 				const hasMapping = Object.hasOwnProperty.call(scope.mapping, name);
-				let result: Statement;
+				let result: Statement[];
 				if (hasMapping) {
-					result = expressionStatement(annotate(read(set(lookup(name, scope), pattern.test, scope), scope), term));
+					result = ignore(set(lookup(name, scope), pattern.test, scope, "=", term), scope);
 				} else {
-					result = addVariable(scope, name, type, pattern.test, declarationFlags);
+					const namedDeclaration = addVariable(scope, name, type, pattern.test, declarationFlags);
 					if (declarationFlags & DeclarationFlags.Export) {
-						result = exportNamedDeclaration(result, []);
+						result = [annotate(exportNamedDeclaration(namedDeclaration, []), term)];
+					} else {
+						result = [namedDeclaration];
 					}
 				}
 				return {
-					prefix: concat(pattern.prefix, [annotate(result, term)]),
+					prefix: concat(pattern.prefix, result),
 					test: trueValue,
 				};
 			}
@@ -1442,7 +1444,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				if (isPure(expression)) {
 					return pattern.prefix;
 				} else {
-					return pattern.prefix.concat([expressionStatement(expression)]);
+					return concat(pattern.prefix, ignore(expr(expression), scope));
 				}
 			}
 			if (term.children.length === 1) {
@@ -1576,11 +1578,11 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				if (test.type === "ConditionalExpression") {
 					result = concat(result, [ifStatement(
 						test.test,
-						blockStatement(isPure(test.consequent) ? [] : [expressionStatement(test.consequent)]),
-						isPure(test.alternate) ? undefined : blockStatement([expressionStatement(test.alternate)]),
+						blockStatement(isPure(test.consequent) ? [] : ignore(expr(test.consequent), scope)),
+						isPure(test.alternate) ? undefined : blockStatement(ignore(expr(test.alternate), scope)),
 					)]);
 				} else {
-					result = concat(result, [expressionStatement(test)]);
+					result = concat(result, ignore(expr(test), scope));
 				}
 			}
 			return concat(result, suffix);

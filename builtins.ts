@@ -989,9 +989,9 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 													),
 													scope,
 												), scope),
-												blockStatement([
-													expressionStatement(updateExpression("++", read(lookup(i, scope), scope))),
-												]),
+												blockStatement(
+													ignore(expr(updateExpression("++", read(lookup(i, scope), scope))), scope),
+												),
 											),
 										],
 										ignore(set(
@@ -1360,17 +1360,14 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					const callback = innerArg(0, "callback");
 					return statements(concat(
 						[addVariable(innerScope, mapped, dummyType, literal([]), DeclarationFlags.Const)],
-						closedRangeIterate(range, innerScope, (i) => blockStatement([
-							expressionStatement(read(
-								call(
-									member(lookup(mapped, scope), "push", scope),
-									[call(callback, [i], [dummyType], scope)],
-									[dummyType],
-									scope,
-								),
+						closedRangeIterate(range, innerScope, (i) => blockStatement(
+							ignore(call(
+								member(lookup(mapped, scope), "push", scope),
+								[call(callback, [i], [dummyType], scope)],
+								[dummyType],
 								scope,
-							)),
-						])),
+							), scope),
+						)),
 						[returnStatement(read(lookup(mapped, scope), scope))],
 					));
 				}, returnType(type));
@@ -1524,23 +1521,27 @@ export const functions: FunctionMap = {
 					),
 					scope,
 				), scope),
-				expressionStatement(read(arrayBoundsFailed(scope), scope)),
+				blockStatement(
+					ignore(arrayBoundsFailed(scope), scope),
+				),
+				blockStatement(
+					ignore(call(
+						// TODO: Remove use of splice, since it's slow
+						member(arg(0, "array"), "splice", scope),
+						[
+							arg(2, "i"),
+							literal(0),
+							arg(1, "newElement"),
+						],
+						[
+							"Int",
+							"Int",
+							"Any",
+						],
+						scope,
+					), scope),
+				),
 			),
-			// TODO: Remove use of splice, since it's slow
-			expressionStatement(read(call(
-				member(arg(0, "array"), "splice", scope),
-				[
-					arg(2, "i"),
-					literal(0),
-					arg(1, "newElement"),
-				],
-				[
-					"Int",
-					"Int",
-					"Any",
-				],
-				scope,
-			), scope)),
 		]);
 	}),
 	"Swift.(swift-to-js).arrayRemoveAt()": noinline((scope, arg) => {
@@ -1559,7 +1560,9 @@ export const functions: FunctionMap = {
 					),
 					scope,
 				), scope),
-				expressionStatement(read(arrayBoundsFailed(scope), scope)),
+				blockStatement(
+					ignore(arrayBoundsFailed(scope), scope),
+				),
 			),
 			// TODO: Remove use of splice, since it's slow
 			returnStatement(
