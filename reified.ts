@@ -372,6 +372,6 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 	}
 }
 
-function alwaysUndefined() {
+function alwaysUndefined(): undefined {
 	return undefined;
 }

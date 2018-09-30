@@ -174,7 +174,7 @@ function requiresGetter(term: Term): boolean {
 	return getProperty(term, "readImpl", isString) !== "stored";
 }
 
-function returnUndef() {
+function returnUndef(): undefined {
 	return undefined;
 }
 
@@ -187,7 +187,7 @@ interface PatternOutput {
 const trueValue = literal(true);
 
 function isTrueExpression(expression: Expression) {
-	return expression.type === "BooleanLiteral" && expression.value === true;
+	return expression.type === "BooleanLiteral" && expression.value;
 }
 
 const emptyPattern: PatternOutput = {

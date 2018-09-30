@@ -282,7 +282,7 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 					functions: lookupForMap<FunctionBuilder | GetterSetterBuilder | undefined>(reified.conformances[conformanceName].functions),
 					conformances: {
 						[conformanceName]: reified.conformances[conformanceName],
-						...reified.conformances[conformanceName].conformances
+						...reified.conformances[conformanceName].conformances,
 					},
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.All,
