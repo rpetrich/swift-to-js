@@ -944,68 +944,78 @@ function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): Ty
 
 function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][], constructedTypeName: string | undefined, scope: Scope, functions: FunctionMap, selfValue?: MappedNameValue): (scope: Scope, arg: ArgGetter) => Value {
 	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, isInitial: boolean): (scope: Scope, arg: ArgGetter) => Value {
-		return (targetScope: Scope, arg: ArgGetter) => newScope(isInitial ? name : "inner", targetScope, (childScope) => {
+		return (targetScope: Scope, arg: ArgGetter) => {
 			// Apply generic function mapping for outermost function
-			let typeArgumentCount: number;
-			if (!isInitial) {
-				typeArgumentCount = 0;
-			} else {
-				const typeMap: TypeMap = term.args.length >= 2 ? typeMappingForGenericArguments(parseType("Base" + term.args[1]), arg) : Object.create(null);
-				typeArgumentCount = Object.keys(typeMap).length;
-				// childScope = newScope(name, targetScope, typeMap);
+			let typeMap: TypeMap | undefined;
+			if (isInitial && term.args.length >= 2) {
+				typeMap = typeMappingForGenericArguments(parseType("Base" + term.args[1]), arg);
+			}
+			return newScope(isInitial ? name : "inner", targetScope, (childScope) => {
 				if (typeof selfValue !== "undefined") {
 					childScope.mapping.self = selfValue;
 				}
-			}
-			// Apply parameters
-			const parameterList = parameterLists[parameterListIndex];
-			const parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
-			if (parameterListIndex !== parameterLists.length - 1) {
-				// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
-				return callable(constructCallable(parameterStatements, parameterListIndex + 1, returnType(functionType), false), functionType);
-			}
-			// Emit the innermost function
-			const brace = findTermWithName(term.children, "brace_stmt");
-			if (brace) {
-				const body = termWithName(term.children, "brace_stmt").children.slice();
-				if (typeof constructedTypeName === "string") {
-					const typeOfResult = returnType(returnType(getType(term)));
-					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
-					childScope.mapping.self = expr(identifier(selfMapping));
-					const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, (fieldName) => {
-						if (body.length && body[0].name === "assign_expr") {
-							const children = body[0].children;
-							expectLength(children, 2);
-							if (children[0].name === "member_ref_expr") {
-								if (parseDeclaration(getProperty(children[0], "decl", isString)).member === fieldName) {
-									body.shift();
-									return read(translateTermToValue(children[1], childScope), childScope);
+				let typeArgumentCount: number = 0;
+				if (typeof typeMap !== "undefined") {
+					const typeArgumentKeys = Object.keys(typeMap);
+					typeArgumentCount = typeArgumentKeys.length;
+					for (let i = 0; i < typeArgumentCount; i++) {
+						const argValue = arg(i, typeArgumentKeys[i]);
+						if (argValue.kind !== "direct") {
+							throw new TypeError(`Expected a direct value, got a ${argValue.kind}`);
+						}
+						childScope.mapping[typeArgumentKeys[i]] = argValue;
+					}
+				}
+				// Apply parameters
+				const parameterList = parameterLists[parameterListIndex];
+				const parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
+				if (parameterListIndex !== parameterLists.length - 1) {
+					// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
+					return callable(constructCallable(parameterStatements, parameterListIndex + 1, returnType(functionType), false), functionType);
+				}
+				// Emit the innermost function
+				const brace = findTermWithName(term.children, "brace_stmt");
+				if (brace) {
+					const body = termWithName(term.children, "brace_stmt").children.slice();
+					if (typeof constructedTypeName === "string") {
+						const typeOfResult = returnType(returnType(getType(term)));
+						const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
+						childScope.mapping.self = expr(identifier(selfMapping));
+						const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, (fieldName) => {
+							if (body.length && body[0].name === "assign_expr") {
+								const children = body[0].children;
+								expectLength(children, 2);
+								if (children[0].name === "member_ref_expr") {
+									if (parseDeclaration(getProperty(children[0], "decl", isString)).member === fieldName) {
+										body.shift();
+										return read(translateTermToValue(children[1], childScope), childScope);
+									}
 								}
 							}
+							return undefined;
+						});
+						if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
+							const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
+							return statements(concat(parameterStatements, defaultStatements), brace);
 						}
-						return undefined;
-					});
-					if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
-						const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
-						return statements(concat(parameterStatements, defaultStatements), brace);
+						const declarations: Statement[] = [addVariable(childScope, selfMapping, typeValue(typeOfResult), defaultInstantiation)];
+						const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
+						return statements(concat(concat(parameterStatements, declarations), constructorBody), brace);
 					}
-					const declarations: Statement[] = [addVariable(childScope, selfMapping, typeValue(typeOfResult), defaultInstantiation)];
-					const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
-					return statements(concat(concat(parameterStatements, declarations), constructorBody), brace);
-				}
-				return statements(concat(parameterStatements, translateAllStatements(body, childScope, functions)), brace);
-			} else {
-				if (typeof constructedTypeName === "string") {
-					const typeOfResult = returnType(returnType(getType(term)));
-					const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
-					childScope.mapping.self = expr(identifier(selfMapping));
-					const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, () => undefined);
-					return statements(concat(parameterStatements, [annotate(returnStatement(read(defaultInstantiation, scope)), term)]), term);
+					return statements(concat(parameterStatements, translateAllStatements(body, childScope, functions)), brace);
 				} else {
-					return statements(parameterStatements, term);
+					if (typeof constructedTypeName === "string") {
+						const typeOfResult = returnType(returnType(getType(term)));
+						const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
+						childScope.mapping.self = expr(identifier(selfMapping));
+						const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, () => undefined);
+						return statements(concat(parameterStatements, [annotate(returnStatement(read(defaultInstantiation, scope)), term)]), term);
+					} else {
+						return statements(parameterStatements, term);
+					}
 				}
-			}
-		});
+			}, typeMap);
+		};
 	}
 
 	return constructCallable(emptyStatements, 0, getType(term), true);

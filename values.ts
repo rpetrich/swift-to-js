@@ -5,7 +5,7 @@ import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { reifyType, PossibleRepresentation, ReifiedType } from "./reified";
-import { addVariable, lookup, mangleName, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
+import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -628,6 +628,13 @@ export function read(value: Value, scope: Scope): Expression {
 			let stringified: string;
 			let suffix: string;
 			if (value.kind === "type") {
+				if (value.type.kind === "name") {
+					// TODO: Support specializing types at runtime
+					const result = mappedValueForName(value.type.name, scope);
+					if (typeof result !== "undefined") {
+						return read(result, scope);
+					}
+				}
 				stringified = stringifyType(value.type);
 				suffix = "Type";
 			} else {

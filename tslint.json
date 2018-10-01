@@ -40,7 +40,6 @@
 		"ordered-imports": [true, {"named-imports-order":"lowercase-first"}],
 		"prefer-object-spread": true,
 		"prefer-const": true,
-		"return-undefined": true,
 		"semicolon": true,
 		"space-before-function-paren": [true, { "named": "never", "anonymous": "never", "method": "never", "constructor": "never", "asyncArrow": "always" }],
 		"trailing-comma": [true, { "multiline": "always", "singleline": "never" }],

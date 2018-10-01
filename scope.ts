@@ -152,7 +152,7 @@ export function mangleName(name: string) {
 	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
 }
 
-export function lookup(name: string, scope: Scope): MappedNameValue {
+export function mappedValueForName(name: string, scope: Scope): MappedNameValue | undefined {
 	let targetScope: Scope | undefined = scope;
 	do {
 		if (Object.hasOwnProperty.call(targetScope.mapping, name)) {
@@ -160,6 +160,14 @@ export function lookup(name: string, scope: Scope): MappedNameValue {
 		}
 		targetScope = targetScope.parent;
 	} while (targetScope);
+	return undefined;
+}
+
+export function lookup(name: string, scope: Scope): MappedNameValue {
+	const result = mappedValueForName(name, scope);
+	if (typeof result !== "undefined") {
+		return result;
+	}
 	return expr(mangleName(name));
 }
 
