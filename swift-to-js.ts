@@ -626,6 +626,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 0);
 			return literal(getProperty(term, "value", isString) === "true", term);
 		}
+		case "float_literal_expr":
 		case "integer_literal_expr": {
 			expectLength(term.children, 0);
 			return literal(+getProperty(term, "value", isString), term);
