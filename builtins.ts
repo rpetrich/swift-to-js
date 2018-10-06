@@ -355,6 +355,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 	const reifiedType: ReifiedType = {
 		fields,
 		functions: lookupForMap({
+			"init": wrapped(returnOnlyArgument),
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument),
 			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope)),

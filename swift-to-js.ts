@@ -9,7 +9,7 @@ import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -634,6 +634,24 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "string_literal_expr": {
 			expectLength(term.children, 0);
 			return literal(getProperty(term, "value", isString), term);
+		}
+		case "interpolated_string_literal_expr": {
+			const elements: TemplateElement[] = [];
+			const expressions: Expression[] = [];
+			for (const child of term.children) {
+				switch (child.name) {
+					case "string_literal_expr":
+						const value = getProperty(child, "value", isString);
+						elements.push(templateElement({ cooked: value, raw: value }));
+						break;
+					case "semantic_expr":
+						break;
+					default:
+						expressions.push(read(translateTermToValue(child, scope, bindingContext), scope));
+						break;
+				}
+			}
+			return expr(templateLiteral(elements, expressions));
 		}
 		case "array_expr": {
 			const type = getType(term);
