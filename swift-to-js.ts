@@ -6,7 +6,7 @@ import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass,
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "babel-types";
@@ -633,6 +633,38 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "string_literal_expr": {
 			expectLength(term.children, 0);
 			return literal(getProperty(term, "value", isString), term);
+		}
+		case "magic_identifier_literal_expr": {
+			const location = locationForTerm(term);
+			if (typeof location === "undefined") {
+				throw new TypeError(`Expected location information for a magic identifier`);
+			}
+			const kind = getProperty(term, "kind", isString);
+			let value: string | number = "unknown";
+			switch (kind) {
+				case "#file":
+					const range = term.properties.range;
+					value = "unknown";
+					if (typeof range === "object" && !Array.isArray(range) && Object.hasOwnProperty.call(range, "from") && Object.hasOwnProperty.call(range, "to")) {
+						const match = range.from.match(/^(.*):\d+:\d+$/);
+						if (match !== null) {
+							value = match[1];
+						}
+					}
+					break;
+				case "#function":
+					value = scope.name;
+					break;
+				case "#line":
+					value = location.start.line;
+					break;
+				case "#column":
+					value = location.start.column;
+					break;
+				default:
+					throw new TypeError(`Expected a valid kind of magic, got ${kind}`);
+			}
+			return literal(value, term);
 		}
 		case "interpolated_string_literal_expr": {
 			const elements: TemplateElement[] = [];
