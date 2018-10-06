@@ -25,7 +25,10 @@ WhitespaceAndAttributeOrArgument
   = _ value:AttributeOrArgument { return value; }
 
 Argument
-  = argument:(DoubleQuotedString / SingleQuotedString / TypeArgumentString) { return argument; }
+  = argument:(DoubleQuotedString / SingleQuotedString / TypeArgumentString / AddressLiteral) { return argument; }
+
+AddressLiteral
+  = '0x' [0-9a-f]+ { return text() }
 
 Attribute
   = key:Identifier value:AttributeValue? { return { key: key, value: value === null ? true : value } }

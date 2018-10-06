@@ -846,6 +846,16 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const wrappedValue = translateTermToValue(expressionTerm, scope);
 			return bindingContext(wrappedValue, getTypeValue(expressionTerm));
 		}
+		case "make_temporarily_escapable_expr": {
+			expectLength(term.children, 3);
+			const closure = translateTermToValue(term.children[1], scope, bindingContext);
+			const callTerm = term.children[2];
+			if (callTerm.name !== "call_expr") {
+				throw new TypeError(`Expected a call expression as the child of a temporarily escapable expression, got a ${callTerm.name}`);
+			}
+			const receiver = translateTermToValue(callTerm.children[0], scope, bindingContext);
+			return call(receiver, [closure], ["Any"], scope);
+		}
 		default: {
 			console.error(term);
 			return variable(identifier("unknown_term_type$" + term.name));
