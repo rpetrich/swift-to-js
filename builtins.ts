@@ -1594,7 +1594,21 @@ export const functions: FunctionMap = {
 	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
 		return call(expr(identifier("Sequence$reduce")), [arg(0)], [dummyType], scope);
 	}, returnType(type)),
-	"??": returnTodo,
+	"??": (scope, arg, type) => {
+		const typeArg = arg(0, "type");
+		if (typeArg.kind !== "type") {
+			throw new TypeError(`Expected a type, got a ${typeArg.kind}`);
+		}
+		const optionalTypeValue = typeValue({ kind: "optional", type: typeArg.type });
+		return reuse(arg(1, "lhs"), scope, "lhs", (lhs) => {
+			return conditional(
+				optionalIsSome(lhs, optionalTypeValue, scope),
+				unwrapOptional(lhs, optionalTypeValue, scope),
+				call(arg(2, "rhs"), [], [], scope),
+				scope,
+			);
+		});
+	},
 	"~=": (scope, arg) => binary("===", arg(1, "pattern"), arg(2, "value"), scope),
 	"print(_:separator:terminator:)": (scope, arg, type) => call(member(expr(identifier("console")), "log", scope), [arg(0, "items")], [dummyType], scope),
 	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
