@@ -1223,6 +1223,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				return [tryStatement(blockStatement(body), catchClause(catchClauseExpression, blockStatement(catchBodyStatements)))];
 			}, translateInNewScope(bodyTerm, scope, functions, "body"));
 		}
+		case "do_stmt": {
+			return translateAllStatements(term.children, scope, functions, nextTerm);
+		}
 		case "defer_stmt": {
 			expectLength(term.children, 2);
 			const firstChild = term.children[0];
