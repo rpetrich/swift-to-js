@@ -989,9 +989,10 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 					const body = termWithName(term.children, "brace_stmt").children.slice();
 					if (typeof constructedTypeName === "string") {
 						const typeOfResult = returnType(returnType(getType(term)));
+						const nonOptionalResult = typeOfResult.kind === "optional" ? typeOfResult.type : typeOfResult;
 						const selfMapping = uniqueName(childScope, camelCase(constructedTypeName));
 						childScope.mapping.self = expr(identifier(selfMapping));
-						const defaultInstantiation = defaultInstantiateType(typeValue(typeOfResult), scope, (fieldName) => {
+						const defaultInstantiation = defaultInstantiateType(typeValue(nonOptionalResult), scope, (fieldName) => {
 							if (body.length && body[0].name === "assign_expr") {
 								const children = body[0].children;
 								expectLength(children, 2);
@@ -1007,6 +1008,14 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 						if (body.length === 1 && body[0].name === "return_stmt" && body[0].properties.implicit) {
 							const defaultStatements = defaultInstantiation.kind === "statements" ? defaultInstantiation.statements : [annotate(returnStatement(read(defaultInstantiation, scope)), brace)];
 							return statements(concat(parameterStatements, defaultStatements), brace);
+						}
+						if (defaultInstantiation.kind === "statements" && defaultInstantiation.statements.length !== 0) {
+							const finalStatement = defaultInstantiation.statements[defaultInstantiation.statements.length - 1];
+							if (finalStatement.type === "ReturnStatement" && finalStatement.argument !== null && typeof finalStatement.argument !== "undefined" && finalStatement.argument.type === "Identifier") {
+								childScope.mapping.self = expr(finalStatement.argument);
+								const optimizedConstructorBody: Statement[] = translateAllStatements(body, childScope, functions);
+								return statements(concat(concat(parameterStatements, defaultInstantiation.statements.slice(0, defaultInstantiation.statements.length - 1)), optimizedConstructorBody), brace);
+							}
 						}
 						const declarations: Statement[] = [addVariable(childScope, selfMapping, typeValue(typeOfResult), defaultInstantiation)];
 						const constructorBody: Statement[] = translateAllStatements(body, childScope, functions);
@@ -1100,6 +1109,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			} else {
 				return [annotate(returnStatement(), term)];
 			}
+		}
+		case "fail_stmt": {
+			return [annotate(returnStatement(read(literal(null), scope)), term)];
 		}
 		case "top_level_code_decl": {
 			return translateAllStatements(term.children, scope, functions, nextTerm);
@@ -1512,9 +1524,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
 			scope.types[className] = () => newClass(layout, methods, conformances, innerTypes, (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
 				const self = uniqueName(innerScope, camelCase(className));
-				const selfValue = lookup(self, scope);
 				const newExpr = newExpression(classIdentifier, []);
 				let bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, expr(newExpr), DeclarationFlags.Const)];
+				const selfValue = lookup(self, scope);
 				for (const fieldDeclaration of layout) {
 					if (fieldDeclaration.stored) {
 						const fieldExpression = consume(fieldDeclaration.name);
