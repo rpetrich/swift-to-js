@@ -511,7 +511,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			for (const fieldDeclaration of typeFromValue(type, scope).fields) {
 				if (fieldDeclaration.name === memberName) {
-					return getField(translateTermToValue(term.children[0], scope, bindingContext), fieldDeclaration, scope);
+					return annotateValue(getField(translateTermToValue(term.children[0], scope, bindingContext), fieldDeclaration, scope), term);
 				}
 			}
 			throw new TypeError(`Could not find ${memberName} in ${stringifyValue(type)}`);
@@ -524,12 +524,13 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(tupleType)}`);
 			}
 			if (tupleType.types.length === 1) {
-				return translateTermToValue(child, scope, bindingContext);
+				return annotateValue(translateTermToValue(child, scope, bindingContext), term);
 			}
 			return member(
 				translateTermToValue(child, scope, bindingContext),
 				literal(+getProperty(term, "field", isString)),
 				scope,
+				term,
 			);
 		}
 		case "pattern_typed": {
@@ -539,7 +540,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "declref_expr": {
 			expectLength(term.children, 0);
 			const type = getTypeValue(term);
-			return extractReference(term, scope);
+			return annotateValue(extractReference(term, scope), term);
 		}
 		case "subscript_expr": {
 			expectLength(term.children, 2);
@@ -573,7 +574,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				location: type.location,
 			};
 			const setter = extractReference(term, scope, setterType);
-			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)));
+			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term);
 		}
 		case "prefix_unary_expr":
 		case "call_expr":
@@ -588,7 +589,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
 			const argTypes = type.kind === "tuple" ? type.types.map((innerType) => typeValue(innerType)) : [typeValue(type)];
 			if (argsValue.kind === "tuple") {
-				return call(targetValue, argsValue.values, argTypes, scope);
+				return call(targetValue, argsValue.values, argTypes, scope, term);
 			} else {
 				let updatedArgs: Value = argsValue;
 				if (targetValue.kind === "function" && targetValue.substitutions.length !== 0) {
@@ -606,21 +607,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 					[undefinedValue, updatedArgs],
 					argTypes,
 					scope,
+					term,
 				);
 			}
 		}
 		case "tuple_expr": {
 			if (term.children.length === 1) {
-				return translateTermToValue(term.children[0], scope, bindingContext);
+				return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 			}
-			return {
-				kind: "tuple",
-				values: term.children.map((child) => translateTermToValue(child, scope, bindingContext)),
-			};
+			return tuple(term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term);
 		}
 		case "type_expr": {
 			expectLength(term.children, 0);
-			return getTypeValue(term);
+			return annotateValue(getTypeValue(term), term);
 		}
 		case "boolean_literal_expr": {
 			expectLength(term.children, 0);
@@ -651,14 +650,14 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						break;
 				}
 			}
-			return expr(templateLiteral(elements, expressions));
+			return expr(templateLiteral(elements, expressions), term);
 		}
 		case "array_expr": {
 			const type = getType(term);
 			if (type.kind !== "array") {
 				throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
 			}
-			return array(term.children.filter(noSemanticExpressions).map((child) => translateTermToValue(child, scope, bindingContext)), scope);
+			return array(term.children.filter(noSemanticExpressions).map((child) => translateTermToValue(child, scope, bindingContext)), scope, term);
 		}
 		case "dictionary_expr": {
 			const type = getType(term);
@@ -680,7 +679,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "paren_expr": {
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "if_expr": {
 			expectLength(term.children, 3);
@@ -694,31 +693,31 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "inject_into_optional": {
 			expectLength(term.children, 1);
-			return wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term), scope);
+			return annotateValue(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term), scope), term);
 		}
 		case "function_conversion_expr": {
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "load_expr": {
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "assign_expr": {
 			expectLength(term.children, 2);
 			const type = getTypeValue(term.children[0]);
 			const dest = translateTermToValue(term.children[0], scope, bindingContext);
 			const source = translateTermToValue(term.children[1], scope, bindingContext);
-			return set(dest, source, scope);
+			return set(dest, source, scope, "=", term);
 		}
 		case "inout_expr": {
 			expectLength(term.children, 1);
 			// return boxed(translateTermToValue(term.children[0], scope, bindingContext));
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "pattern": {
 			expectLength(term.children, 2);
-			return valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope, bindingContext), scope), scope, term);
+			return annotateValue(valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope, bindingContext), scope), scope, term), term);
 		}
 		case "closure_expr":
 		case "autoclosure_expr": {
@@ -734,7 +733,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						return result;
 					}
 				});
-			}, getType(term));
+			}, getType(term), term);
 		}
 		case "tuple_shuffle_expr": {
 			const elements = getProperty(term, "elements", Array.isArray);
@@ -782,7 +781,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						}
 					}
 				}
-			}));
+			}), term);
 		}
 		case "force_value_expr": {
 			expectLength(term.children, 1);
@@ -803,7 +802,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "force_try_expr": {
 			expectLength(term.children, 1);
 			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
@@ -825,12 +824,12 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
 			expectLength(term.children, 1, 2);
-			return translateTermToValue(term.children[term.children.length - 1], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[term.children.length - 1], scope, bindingContext), term);
 		}
 		case "normal_conformance": {
 			// TODO: Wrap with runtime type information
 			expectLength(term.children, 1);
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
 		}
 		case "optional_evaluation_expr": {
 			expectLength(term.children, 1);
@@ -863,7 +862,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
 			const wrappedValue = translateTermToValue(expressionTerm, scope);
-			return bindingContext(wrappedValue, getTypeValue(expressionTerm));
+			return annotateValue(bindingContext(wrappedValue, getTypeValue(expressionTerm)), term);
 		}
 		case "make_temporarily_escapable_expr": {
 			expectLength(term.children, 3);
@@ -873,11 +872,11 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				throw new TypeError(`Expected a call expression as the child of a temporarily escapable expression, got a ${callTerm.name}`);
 			}
 			const receiver = translateTermToValue(callTerm.children[0], scope, bindingContext);
-			return call(receiver, [closure], ["Any"], scope);
+			return call(receiver, [closure], ["Any"], scope, term);
 		}
 		default: {
 			console.error(term);
-			return variable(identifier("unknown_term_type$" + term.name));
+			return variable(identifier("unknown_term_type$" + term.name), term);
 		}
 	}
 }
@@ -1175,13 +1174,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")))];
+			return [annotate(whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
 		}
 		case "repeat_while_stmt": {
 			expectLength(term.children, 2);
 			const bodyTerm = term.children[0];
 			const testTerm = term.children[1];
-			return [doWhileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")))];
+			return [annotate(doWhileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
 		}
 		case "for_each_stmt": {
 			expectLength(term.children, 6);
@@ -1196,18 +1195,18 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				throw new TypeError(`Only array types are supported in for each iterations, got a ${stringifyType(targetType)}`);
 			}
 			const bodyTerm = term.children[5];
-			return [forOfStatement(
+			return [annotate(forOfStatement(
 				addVariable(scope, patternTerm.args[0], typeValue(getType(patternTerm)), undefined, DeclarationFlags.Const),
 				read(translateTermToValue(targetTerm, scope), scope),
 				blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")),
-			)];
+			), term)];
 		}
 		case "switch_stmt": {
 			if (term.children.length < 1) {
 				throw new Error(`Expected at least one term, got ${term.children.length}`);
 			}
 			const discriminantTerm = term.children[0];
-			const declaration = variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope), scope))]);
+			const declaration = annotate(variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope), scope))]), term);
 			const cases = term.children.slice(1).reduceRight((previous: Statement | undefined, childTerm: Term): Statement => {
 				checkTermName(childTerm, "case_stmt", "as child of a switch statement");
 				if (childTerm.children.length < 1) {
@@ -1246,16 +1245,16 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "throw_stmt": {
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
-			return [throwStatement(read(translateTermToValue(expressionTerm, scope), scope))];
+			return [annotate(throwStatement(read(translateTermToValue(expressionTerm, scope), scope)), term)];
 		}
 		case "guard_stmt": {
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [ifStatement(
+			return [annotate(ifStatement(
 				read(unary("!", translateTermToValue(testTerm, scope), scope), scope),
 				blockStatement(translateInNewScope(bodyTerm, scope, functions, "alternate")),
-			)];
+			), term)];
 		}
 		case "do_catch_stmt": {
 			if (term.children.length < 2) {
