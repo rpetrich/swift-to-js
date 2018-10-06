@@ -666,6 +666,9 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			return literal(value, term);
 		}
+		case "object_literal": {
+			throw new TypeError(`Playground literals are not supported`);
+		}
 		case "interpolated_string_literal_expr": {
 			const elements: TemplateElement[] = [];
 			const expressions: Expression[] = [];
