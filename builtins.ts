@@ -17,6 +17,10 @@ function returnTodo(scope: Scope, arg: ArgGetter, type: Type, name: string): Val
 	return call(expr(mangleName("todo_missing_builtin$" + name)), [], [], scope);
 }
 
+function unavailableFunction(scope: Scope, arg: ArgGetter, type: Type, name: string): Value {
+	throw new Error(`${name} is not available`);
+}
+
 function returnLength(scope: Scope, arg: ArgGetter): Value {
 	const arg0 = arg(0);
 	return arg0.kind === "direct" ? variable(read(arg0, scope)) : expr(read(arg0, scope));
@@ -1621,6 +1625,29 @@ export const functions: FunctionMap = {
 			read(arg(2, "line"), scope),
 		])),
 	]),
+	"isKnownUniquelyReferenced": () => literal(false),
+	"withExtendedLifetime": (scope, arg) => call(arg(3, "body"), [
+		arg(2, "preserve"),
+	], ["Any"], scope),
+	"withUnsafePointer": unavailableFunction,
+	"withUnsafeMutablePointer": unavailableFunction,
+	"withUnsafeBytes": unavailableFunction,
+	"withUnsafeMutableBytes": unavailableFunction,
+	"unsafeDowncast(to:)": unavailableFunction,
+	"unsafeBitCast(to:)": unavailableFunction,
+	"withVaList": unavailableFunction,
+	"getVaList": unavailableFunction,
+	"swap": (scope, arg) => {
+		const type = arg(0, "type");
+		const a = arg(1, "a");
+		const b = arg(2, "b");
+		const temp = uniqueName(scope, "temp");
+		return statements([
+			addVariable(scope, temp, type, a, DeclarationFlags.Const),
+			expressionStatement(read(set(a, b, scope), scope)),
+			expressionStatement(read(set(b, lookup(temp, scope), scope), scope)),
+		]);
+	},
 };
 
 export function newScopeWithBuiltins(): Scope {
