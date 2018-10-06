@@ -198,14 +198,16 @@ const emptyPattern: PatternOutput = {
 function mergeDeclarationStatements(body: Statement[]) {
 	let result = body;
 	let i = body.length - 1;
-	while (i--) {
-		const current = body[i];
-		const previous = body[i + 1];
-		if (current.type === "VariableDeclaration" && previous.type === "VariableDeclaration" && current.kind === previous.kind) {
-			if (result === body) {
-				result = body.slice();
+	if (i >= 0) {
+		while (i--) {
+			const current = body[i];
+			const previous = body[i + 1];
+			if (current.type === "VariableDeclaration" && previous.type === "VariableDeclaration" && current.kind === previous.kind) {
+				if (result === body) {
+					result = body.slice();
+				}
+				result.splice(i, 2, variableDeclaration(current.kind, concat(current.declarations, previous.declarations)));
 			}
-			result.splice(i, 2, variableDeclaration(current.kind, concat(current.declarations, previous.declarations)));
 		}
 	}
 	return result;
@@ -741,9 +743,16 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "assign_expr": {
 			expectLength(term.children, 2);
 			const type = getTypeValue(term.children[0]);
-			const dest = translateTermToValue(term.children[0], scope, bindingContext);
+			const destTerm = term.children[0];
+			if (destTerm.name === "discard_assignment_expr") {
+				return translateTermToValue(term.children[1], scope, bindingContext);
+			}
+			const dest = translateTermToValue(destTerm, scope, bindingContext);
 			const source = translateTermToValue(term.children[1], scope, bindingContext);
 			return set(dest, source, scope, "=", term);
+		}
+		case "discard_assignment_expr": {
+			return annotateValue(undefinedValue, term);
 		}
 		case "inout_expr": {
 			expectLength(term.children, 1);
