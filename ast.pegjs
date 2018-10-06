@@ -42,7 +42,21 @@ String "string"
   = BareString / DoubleQuotedString / SingleQuotedString
 
 EscapeSequence "escape sequence"
-  = "\\" sequence:['"tn] { return sequence == "t" ? "\t" : sequence == "n" ? "\n" : sequence; }
+  = StandardEscapeSequence / UnicodeEscapeSequence
+StandardEscapeSequence
+  = "\\" sequence:['"trn\\0] {
+  return {
+    "'": "'",
+    '"': '"',
+    "t": "\t",
+    "r": "\r",
+    "n": "\n",
+    "\\": "\\",
+    "0": "\0",
+  }[sequence];
+}
+UnicodeEscapeSequence
+  = '\\u{' digits:[0-9A-F]+ '}' { return String.fromCodePoint(parseInt(digits.join(""), 16)); }
 
 DoubleQuotedString "doublequote string"
   = '"' content:(EscapeSequence / [^"])* '"' { return content.join(""); }
