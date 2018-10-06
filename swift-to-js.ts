@@ -9,7 +9,7 @@ import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, ThisExpression } from "babel-types";
 import { spawn } from "child_process";
 import { readdirSync } from "fs";
 import { argv } from "process";
@@ -1151,6 +1151,25 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const bodyTerm = term.children[0];
 			const testTerm = term.children[1];
 			return [doWhileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")))];
+		}
+		case "for_each_stmt": {
+			expectLength(term.children, 6);
+			const patternTerm = term.children[0];
+			if (patternTerm.name !== "pattern_named") {
+				throw new TypeError(`Only named patterns are supported in for each iteration, got a ${patternTerm.name}`);
+			}
+			expectLength(patternTerm.args, 1);
+			const targetTerm = term.children[2];
+			const targetType = getType(targetTerm);
+			if (targetType.kind !== "array") {
+				throw new TypeError(`Only array types are supported in for each iterations, got a ${stringifyType(targetType)}`);
+			}
+			const bodyTerm = term.children[5];
+			return [forOfStatement(
+				addVariable(scope, patternTerm.args[0], typeValue(getType(patternTerm)), undefined, DeclarationFlags.Const),
+				read(translateTermToValue(targetTerm, scope), scope),
+				blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")),
+			)];
 		}
 		case "switch_stmt": {
 			if (term.children.length < 1) {
