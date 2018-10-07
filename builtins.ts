@@ -4,7 +4,7 @@ import { expressionSkipsCopy, field, inheritLayout, primitive, protocol, reifyTy
 import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isNestedOptional, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
 import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "babel-types";
 
@@ -856,8 +856,6 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// TODO: Support runtime types
 				throw new TypeError(`Runtime types are not supported as T in T?`);
 			}
-			const optionalType = typeValue({ kind: "optional", type: wrappedType.type });
-			const wrappedIsOptional = isNestedOptional(optionalType.type);
 			// Assume values that can be represented as boolean, number or string can be value-wise compared
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
 			const compareEqual = isDirectlyComparable ? wrapped(binaryBuiltin("===", 0)) : wrapped((scope: Scope, arg: ArgGetter) => {
@@ -865,13 +863,13 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
 					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
 						return conditional(
-							optionalIsNone(lhs, optionalType, scope),
-							optionalIsNone(rhs, optionalType, scope),
+							optionalIsNone(lhs, wrappedType, scope),
+							optionalIsNone(rhs, wrappedType, scope),
 							logical("&&",
-								optionalIsSome(rhs, optionalType, scope),
+								optionalIsSome(rhs, wrappedType, scope),
 								call(equalMethod, [
-									unwrapOptional(lhs, optionalType, scope),
-									unwrapOptional(rhs, optionalType, scope),
+									unwrapOptional(lhs, wrappedType, scope),
+									unwrapOptional(rhs, wrappedType, scope),
 								], [wrappedType, wrappedType], scope),
 								scope,
 							),
@@ -885,13 +883,13 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
 					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
 						return conditional(
-							optionalIsNone(lhs, optionalType, scope),
-							optionalIsSome(rhs, optionalType, scope),
+							optionalIsNone(lhs, wrappedType, scope),
+							optionalIsSome(rhs, wrappedType, scope),
 							logical("||",
-								optionalIsNone(rhs, optionalType, scope),
+								optionalIsNone(rhs, wrappedType, scope),
 								call(unequalMethod, [
-									unwrapOptional(lhs, optionalType, scope),
-									unwrapOptional(rhs, optionalType, scope),
+									unwrapOptional(lhs, wrappedType, scope),
+									unwrapOptional(rhs, wrappedType, scope),
 								], [wrappedType, wrappedType], scope),
 								scope,
 							),
@@ -903,8 +901,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			return {
 				fields: [],
 				functions: lookupForMap({
-					"none": (scope) => emptyOptional(optionalType, scope),
-					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), optionalType, scope)),
+					"none": (scope) => emptyOptional(wrappedType, scope),
+					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), wrappedType, scope)),
 					"==": compareEqual,
 					"!=": compareUnequal,
 					"flatMap": returnTodo,
@@ -918,11 +916,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						conformances: Object.create(null),
 					},
 				}, globalScope),
-				possibleRepresentations: PossibleRepresentation.Array,
+				possibleRepresentations: PossibleRepresentation.All, // TODO: Make possible representations computed at runtime
 				defaultValue(scope) {
-					return emptyOptional(optionalType, scope);
+					return emptyOptional(wrappedType, scope);
 				},
-				copy: reified.copy || wrappedIsOptional ? (value, scope) => {
+				copy: /*reified.copy || wrappedIsOptional*/ true ? (value, scope) => {
 					const expression = read(value, scope);
 					if (expressionSkipsCopy(expression)) {
 						return expr(expression);
@@ -932,18 +930,19 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						// Nested optionals require special support since they're stored as [] for .none, [null] for .some(.none) and [v] for .some(.some(v))
 						return reuse(expr(expression), scope, "copyValue", (source) => {
 							return conditional(
-								optionalIsNone(source, optionalType, scope),
-								emptyOptional(optionalType, scope),
-								wrapInOptional(copier.call(reified, source, scope), optionalType, scope),
+								optionalIsNone(source, wrappedType, scope),
+								emptyOptional(wrappedType, scope),
+								wrapInOptional(copier.call(reified, source, scope), wrappedType, scope),
 								scope,
 							);
 						});
-					} else if (wrappedIsOptional) {
-						// Nested Optionals of simple value are sliced
-						return call(member(expr(expression), "slice", scope), [], [], scope);
 					} else {
-						// Optionals of simple value are passed through
-						return value;
+						return optionalOperation(
+							wrappedType,
+							value,
+							call(member(expr(expression), "slice", scope), [], [], scope),
+							scope,
+						);
 					}
 				} : undefined,
 				innerTypes: {},
@@ -1219,10 +1218,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// TODO: Support runtime types
 				throw new TypeError(`Runtime types are not supported as V in [K: V]`);
 			}
-			const possibleKeyType = typeValue({ kind: "optional", type: keyType.type });
 			const keysType = typeValue({ kind: "array", type: keyType.type });
-			const possibleValueType = typeValue({ kind: "optional", type: valueType.type });
-			const valueIsOptional = isNestedOptional(possibleValueType.type);
+			const possibleKeyType = typeValue({ kind: "optional", type: keyType.type });
 			const reifiedKeyType = typeFromValue(keyType, globalScope);
 			const reifiedValueType = typeFromValue(valueType, globalScope);
 			function objectDictionaryImplementation(converter?: Value): ReifiedType {
@@ -1256,8 +1253,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 												["Any", "String"],
 												scope,
 											),
-											wrapInOptional(copy(member(dict, index, scope), valueType), possibleValueType, scope),
-											emptyOptional(possibleValueType, scope),
+											wrapInOptional(copy(member(dict, index, scope), valueType), valueType, scope),
+											emptyOptional(valueType, scope),
 											scope,
 										);
 									});
@@ -1267,13 +1264,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								const dict = arg(2, "dict");
 								const index = arg(3, "index");
 								const valueExpression = read(arg(4, "value"), scope);
-								if (valueIsOptional) {
-									if (valueExpression.type === "ArrayExpression" && valueExpression.elements.length === 0) {
-										return unary("delete", member(dict, index, scope), scope);
-									}
-								} else {
-									if (valueExpression.type === "NullLiteral") {
-										return unary("delete", member(dict, index, scope), scope);
+								const valueIsOptional = hasRepresentation(valueType, PossibleRepresentation.Null, scope);
+								if (valueIsOptional.kind === "expression" && valueIsOptional.expression.type === "BooleanLiteral") {
+									if (valueIsOptional.expression.value) {
+										if (valueExpression.type === "ArrayExpression" && valueExpression.elements.length === 0) {
+											return unary("delete", member(dict, index, scope), scope);
+										}
+									} else {
+										if (valueExpression.type === "NullLiteral") {
+											return unary("delete", member(dict, index, scope), scope);
+										}
 									}
 								}
 								if (isLiteral(valueExpression) || valueExpression.type === "ArrayExpression" || valueExpression.type === "ObjectExpression") {
@@ -1281,8 +1281,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								}
 								return reuse(expr(valueExpression), scope, "value", (reusableValue) => {
 									return conditional(
-										optionalIsSome(reusableValue, possibleValueType, scope),
-										set(member(dict, index, scope), copy(unwrapOptional(reusableValue, possibleValueType, scope), valueType), scope),
+										optionalIsSome(reusableValue, valueType, scope),
+										set(member(dict, index, scope), copy(unwrapOptional(reusableValue, valueType, scope), valueType), scope),
 										unary("delete", member(dict, index, scope), scope),
 										scope,
 									);
@@ -1330,8 +1330,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 										const convertedKey = typeof converter !== "undefined" ? call(converter, [stringKey], ["String"], scope) : stringKey;
 										return conditional(
 											member(keys, "length", scope),
-											wrapInOptional(convertedKey, possibleKeyType, scope),
-											emptyOptional(possibleKeyType, scope),
+											wrapInOptional(convertedKey, keyType, scope),
+											emptyOptional(keyType, scope),
 											scope,
 										);
 									});
@@ -1407,71 +1407,75 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	};
 }
 
+function optionalOperation(innerType: Value, normalOperation: Value, nestedOperation: Value, scope: Scope) {
+	// Should be peephole optimized when types are fully known, and deferred until runtime if not
+	return conditional(
+		hasRepresentation(innerType, PossibleRepresentation.Null, scope),
+		nestedOperation,
+		normalOperation,
+		scope,
+	);
+}
+
 export function emptyOptional(type: Value, scope: Scope) {
-	if (type.kind === "type") {
-		return literal(isNestedOptional(type.type) ? [] : null);
-	}
-	// TODO: Support this properly
-	return literal(null);
+	return optionalOperation(
+		type,
+		literal(null),
+		literal([]),
+		scope,
+	);
 }
 
 export function wrapInOptional(value: Value, type: Value, scope: Scope): Value {
-	if (type.kind === "type") {
-		return isNestedOptional(type.type) ? array([value], scope) : value;
-	}
-	// TODO: Support this properly
-	return value;
+	return optionalOperation(
+		type,
+		value,
+		array([value], scope),
+		scope,
+	);
 }
 
 export function unwrapOptional(value: Value, type: Value, scope: Scope): Value {
-	if (type.kind === "type") {
-		if (isNestedOptional(type.type)) {
-			return member(value, 0, scope);
-		}
-		return value;
-	}
-	// TODO: Support this properly
-	return value;
+	return optionalOperation(
+		type,
+		value,
+		member(value, 0, scope),
+		scope,
+	);
 }
 
 export function optionalIsNone(value: Value, type: Value, scope: Scope): Value {
-	if (type.kind === "type") {
-		if (isNestedOptional(type.type)) {
-			return binary("===",
-				member(value, "length", scope),
-				literal(0),
-				scope,
-			);
-		} else {
-			return binary("===",
-				value,
-				literal(null),
-				scope,
-			);
-		}
-	}
-	// TODO: Support this properly
-	return literal(true);
+	return optionalOperation(
+		type,
+		binary("===",
+			value,
+			literal(null),
+			scope,
+		),
+		binary("===",
+			member(value, "length", scope),
+			literal(0),
+			scope,
+		),
+		scope,
+	);
 }
 
 export function optionalIsSome(value: Value, type: Value, scope: Scope): Value {
-	if (type.kind === "type") {
-		if (isNestedOptional(type.type)) {
-			return binary("!==",
-				member(value, "length", scope),
-				literal(0),
-				scope,
-			);
-		} else {
-			return binary("!==",
-				value,
-				literal(null),
-				scope,
-			);
-		}
-	}
-	// TODO: Support this properly
-	return literal(false);
+	return optionalOperation(
+		type,
+		binary("!==",
+			value,
+			literal(null),
+			scope,
+		),
+		binary("!==",
+			member(value, "length", scope),
+			literal(0),
+			scope,
+		),
+		scope,
+	);
 }
 
 function arrayBoundsFailed(scope: Scope) {
@@ -1600,11 +1604,10 @@ export const functions: FunctionMap = {
 		if (typeArg.kind !== "type") {
 			throw new TypeError(`Expected a type, got a ${typeArg.kind}`);
 		}
-		const optionalTypeValue = typeValue({ kind: "optional", type: typeArg.type });
 		return reuse(arg(1, "lhs"), scope, "lhs", (lhs) => {
 			return conditional(
-				optionalIsSome(lhs, optionalTypeValue, scope),
-				unwrapOptional(lhs, optionalTypeValue, scope),
+				optionalIsSome(lhs, typeArg, scope),
+				unwrapOptional(lhs, typeArg, scope),
 				call(arg(2, "rhs"), [], [], scope),
 				scope,
 			);

@@ -287,7 +287,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 	switch (term.name) {
 		case "pattern_optional_some": {
 			expectLength(term.children, 1);
-			const type = getTypeValue(term);
+			const type = getTypeValue(term.children[0]);
 			let next: PatternOutput | undefined;
 			const test = reuse(value, scope, "optional", (reusableValue) => {
 				next = translatePattern(term.children[0], unwrapOptional(reusableValue, type, scope), scope, declarationFlags);
@@ -730,7 +730,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "inject_into_optional": {
 			expectLength(term.children, 1);
-			return annotateValue(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term), scope), term);
+			return annotateValue(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term.children[0]), scope), term);
 		}
 		case "function_conversion_expr": {
 			expectLength(term.children, 1);
@@ -829,7 +829,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "force_value_expr": {
 			expectLength(term.children, 1);
-			const type = getTypeValue(term.children[0]);
+			const type = getTypeValue(term);
 			const value = translateTermToValue(term.children[0], scope, bindingContext);
 			return reuse(value, scope, "optional", (reusableValue) => {
 				// TODO: Optimize some cases where we can prove it to be a .some
@@ -850,7 +850,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
-			const type = getTypeValue(term);
+			const type = getTypeValue(term.children[0]);
 			const temp = uniqueName(scope, ":try");
 			return statements([
 				addVariable(scope, temp, type),
@@ -877,15 +877,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "optional_evaluation_expr": {
 			expectLength(term.children, 1);
-			const optionalType = getTypeValue(term);
+			const type = getType(term);
+			if (type.kind !== "optional") {
+				throw new TypeError(`Expected an optional type, got a ${type.kind}`);
+			}
+			const innerType = typeValue(type.type);
 			let testValue: Value | undefined;
-			const someCase = translateTermToValue(term.children[0], scope, (value: Value, innerOptionalType: Value) => {
+			const someCase = translateTermToValue(term.children[0], scope, (value: Value) => {
 				if (typeof testValue !== "undefined") {
 					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
 				}
 				return reuse(value, scope, "optional", (reusableValue) => {
-					testValue = optionalIsSome(reusableValue, innerOptionalType, scope);
-					return unwrapOptional(reusableValue, innerOptionalType, scope);
+					testValue = optionalIsSome(reusableValue, innerType, scope);
+					return unwrapOptional(reusableValue, innerType, scope);
 				});
 			});
 			if (typeof testValue === "undefined") {
@@ -893,8 +897,8 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			return conditional(
 				testValue,
-				someCase,
-				emptyOptional(optionalType, scope),
+				wrapInOptional(someCase, innerType, scope),
+				emptyOptional(innerType, scope),
 				scope,
 				term,
 			);

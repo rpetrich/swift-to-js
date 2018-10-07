@@ -175,11 +175,18 @@ export function subscript(getter: Value, setter: Value, args: Value[], location?
 
 
 export function conditional(predicate: Value, consequent: Value, alternate: Value, scope: Scope, location?: LocationSource): Value {
-	return transform(predicate, scope, (predicateExpression) => expr(conditionalExpression(
-		predicateExpression,
-		read(consequent, scope),
-		read(alternate, scope),
-	), location));
+	return transform(predicate, scope, (predicateExpression) => {
+		const predicateValue = expressionLiteralValue(predicateExpression);
+		if (typeof predicateValue !== "undefined") {
+			return predicateValue ? consequent : alternate;
+		} else {
+			return expr(conditionalExpression(
+				predicateExpression,
+				read(consequent, scope),
+				read(alternate, scope),
+			), location);
+		}
+	});
 }
 
 export function unary(operator: "!" | "-" | "delete" | "void", operand: Value, scope: Scope, location?: LocationSource): Value {
@@ -544,6 +551,17 @@ export function annotateValue<T extends Value>(value: T, location?: LocationSour
 
 const voidToVoid = parseFunctionType(`() -> () -> ()`); // TODO: Replace with proper type extracted from the context
 
+function isExpressionStatement(statement: Statement): boolean {
+	return statement.type === "ExpressionStatement";
+}
+
+function expressionFromStatement(statement: Statement): Expression {
+	if (statement.type === "ExpressionStatement") {
+		return statement.expression;
+	}
+	throw new TypeError(`Expected expression statment, got a ${statement.type}`);
+}
+
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
@@ -608,11 +626,11 @@ export function read(value: Value, scope: Scope): Expression {
 				const lastStatement = body[body.length - 1];
 				if (lastStatement.type === "ReturnStatement") {
 					const exceptLast = body.slice(0, body.length - 1);
-					if (exceptLast.every((statement) => statement.type === "ExpressionStatement")) {
-						return sequenceExpression(concat(exceptLast.map((statement) => (statement as ExpressionStatement).expression), [lastStatement.argument]));
+					if (exceptLast.every(isExpressionStatement)) {
+						return sequenceExpression(concat(exceptLast.map(expressionFromStatement), [lastStatement.argument]));
 					}
-				} else if (body.every((statement) => statement.type === "ExpressionStatement")) {
-					return sequenceExpression(concat(body.map((statement) => (statement as ExpressionStatement).expression), [undefinedLiteral]));
+				} else if (body.every(isExpressionStatement)) {
+					return sequenceExpression(concat(body.map(expressionFromStatement), [undefinedLiteral]));
 				}
 			}
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
@@ -1344,9 +1362,22 @@ export function stringifyValue(value: Value): string {
 	}
 }
 
-export function isNestedOptional(type: Type): boolean {
-	if (type.kind !== "optional") {
-		throw new Error(`Expected an optional, instead got a ${type.kind}!`);
+function representationsForTypeValue(type: Value, scope: Scope): Value {
+	if (type.kind === "type") {
+		return literal(typeFromValue(type, scope).possibleRepresentations);
+	} else {
+		return member(type, "$rep", scope);
 	}
-	return type.type.kind === "optional";
+}
+
+export function hasRepresentation(type: Value, representation: PossibleRepresentation | Value, scope: Scope): Value {
+	return binary("!==",
+		binary("&",
+			representationsForTypeValue(type, scope),
+			typeof representation === "object" ? representation : literal(representation),
+			scope,
+		),
+		literal(0),
+		scope,
+	);
 }
