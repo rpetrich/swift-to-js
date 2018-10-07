@@ -201,7 +201,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"max"() {
 				return literal(max);
 			},
-			"init": wrapped((scope, arg, type) => {
+			"init(_:)": wrapped((scope, arg, type) => {
 				expectLength(type.arguments.types, 1);
 				const sourceType = typeFromValue(conformance(typeValue(type.arguments.types[0]), integerTypeName, scope), scope);
 				return integerRangeCheck(
@@ -303,7 +303,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			},
 			LosslessStringConvertible: {
 				functions: {
-					init: wrapped((scope, arg) => {
+					"init(_:)": wrapped((scope, arg) => {
 						const input = read(arg(0, "description"), scope);
 						const value = expressionLiteralValue(input);
 						if (typeof value === "string") {
@@ -355,7 +355,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 	const reifiedType: ReifiedType = {
 		fields,
 		functions: lookupForMap({
-			"init": wrapped(returnOnlyArgument),
+			"init(_:)": wrapped(returnOnlyArgument),
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument),
 			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument),
 			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope)),
@@ -406,7 +406,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 			},
 			LosslessStringConvertible: {
 				functions: {
-					init: wrapped((scope, arg) => {
+					"init(_:)": wrapped((scope, arg) => {
 						const input = read(arg(0, "description"), scope);
 						const value = expressionLiteralValue(input);
 						if (typeof value === "string") {
@@ -740,7 +740,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	addProtocol("CustomStringConvertible");
 	addProtocol("LosslessStringConvertible", {
 		functions: {
-			init: abstractMethod,
+			"init(_:)": abstractMethod,
 		},
 		conformances: Object.create(null),
 	});
@@ -751,7 +751,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		}),
 	], {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument),
-		"init": wrapped((scope, arg) => {
+		"init(_:)": wrapped((scope, arg) => {
 			// Optional init from string
 			return reuse(arg(0, "string"), scope, "string", (stringValue) => {
 				return logical("||",
@@ -827,7 +827,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				field("utf16", UTF16View, (value) => value),
 				field("utf8", UTF8View, (value, scope) => call(member(expr(newExpression(identifier("TextEncoder"), [read(literal("utf-8"), scope)])), "encode", scope), [value], [typeValue("String")], scope)),
 			], {
-				"init": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope)),
+				"init(_:)": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope)),
 				"+": wrapped(binaryBuiltin("+", 0)),
 				"lowercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toLowerCase", scope), [], [], scope), parseType("(String) -> String")),
 				"uppercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toUpperCase", scope), [], [], scope), parseType("(String) -> String")),
@@ -1048,9 +1048,9 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				],
 				functions: lookupForMap({
 					// TODO: Fill in proper init
-					"init": wrapped((scope, arg) => call(member(expr(identifier("Array")), "from", scope), [arg(0, "iterable")], [dummyType], scope)),
+					"init(_:)": wrapped((scope, arg) => call(member(expr(identifier("Array")), "from", scope), [arg(0, "iterable")], [dummyType], scope)),
 					"count": returnLength,
-					"subscript": {
+					"subscript(_:)": {
 						get(scope, arg) {
 							return arrayBoundsCheck(arg(1, "array"), arg(2, "index"), scope, "read");
 						},
@@ -1237,7 +1237,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						}),
 					],
 					functions: lookupForMap({
-						subscript: {
+						"subscript(_:)": {
 							get(scope, arg, type) {
 								return reuse(arg(2, "dict"), scope, "dict", (dict) => {
 									return reuse(arg(3, "index"), scope, "index", (index) => {
