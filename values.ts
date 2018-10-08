@@ -646,7 +646,6 @@ export function read(value: Value, scope: Scope): Expression {
 		}
 		case "conformance":
 		case "type": {
-			let conformance: ProtocolConformance | undefined;
 			const type = value.kind === "conformance" ? value.type : value;
 			if (type.kind !== "type") {
 				throw new TypeError(`Expected a type, got a ${type.kind}`);
@@ -675,8 +674,8 @@ export function read(value: Value, scope: Scope): Expression {
 					const properties = Object.keys(current.functions).map((key) => {
 						const result = current!.functions[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
 						if (result.kind === "callable") {
-							const [args, statements] = functionize(globalScope, result.call);
-							return objectMethod("method", mangleName(key), args, blockStatement(statements));
+							const [args, methodBody] = functionize(globalScope, result.call);
+							return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
 						} else {
 							return objectProperty(mangleName(key), read(result, scope));
 						}
