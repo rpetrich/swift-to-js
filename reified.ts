@@ -5,7 +5,7 @@ import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
 import { array, call, contentsOfBox, expr, functionValue, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeValue, undefinedValue, Value } from "./values";
 
-import { isLiteral, objectExpression, objectProperty, Expression } from "babel-types";
+import { isLiteral, objectExpression, objectProperty, Expression } from "@babel/types";
 
 export enum PossibleRepresentation {
 	None,

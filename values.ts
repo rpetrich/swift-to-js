@@ -1,5 +1,5 @@
-import { transformFromAst } from "babel-core";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, SpreadProperty, Statement, ThisExpression } from "babel-types";
+import generate from "@babel/generator";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -11,6 +11,7 @@ import { concat, expectLength, lookupForMap } from "./utils";
 
 export type ArgGetter = (index: number, desiredName?: string) => Value;
 
+const isExpression = isExpression_ as (node: Node) => node is Expression;
 
 export interface Position {
 	line: number;
@@ -49,10 +50,13 @@ export function locationForTerm(term: Term): Location | undefined {
 	return undefined;
 }
 
-type LocationSource = Location | Term;
+type LocationSource = Location | Term | null;
 
 function readLocation(source?: LocationSource): Location | undefined {
-	return typeof source === "undefined" || !Object.hasOwnProperty.call(source, "properties") ? source as unknown as Location : locationForTerm(source as unknown as Term);
+	if (typeof source === "undefined" || source === null) {
+		return undefined;
+	}
+	return !Object.hasOwnProperty.call(source, "properties") ? source as unknown as Location : locationForTerm(source as unknown as Term);
 }
 
 
@@ -507,7 +511,9 @@ export function array(values: Value[], scope: Scope, location?: LocationSource) 
 		if (value.kind === "statements" && value.statements[value.statements.length - 1].type === "ReturnStatement") {
 			const argument = (value.statements[value.statements.length - 1] as ReturnType<typeof returnStatement>).argument;
 			const newStatements = value.statements.slice(0, value.statements.length - 1);
-			if (argument.type === "Identifier") {
+			if (argument === null) {
+				elements.unshift(identifier("undefined"));
+			} else if (argument.type === "Identifier") {
 				elements.unshift(argument);
 			} else {
 				const temp = uniqueName(scope, "element");
@@ -630,7 +636,7 @@ export function read(value: Value, scope: Scope): Expression {
 				if (lastStatement.type === "ReturnStatement") {
 					const exceptLast = body.slice(0, body.length - 1);
 					if (exceptLast.every(isExpressionStatement)) {
-						return sequenceExpression(concat(exceptLast.map(expressionFromStatement), [lastStatement.argument]));
+						return sequenceExpression(concat(exceptLast.map(expressionFromStatement), [lastStatement.argument === null ? identifier("undefined") : lastStatement.argument]));
 					}
 				} else if (body.every(isExpressionStatement)) {
 					return sequenceExpression(concat(body.map(expressionFromStatement), [undefinedLiteral]));
@@ -700,87 +706,95 @@ export function read(value: Value, scope: Scope): Expression {
 	}
 }
 
+function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
+	outer:
+	switch (expression.type) {
+		case "Identifier":
+			if (expression.name === "undefined") {
+				return [];
+			}
+			break;
+		case "SequenceExpression": {
+			let body: Statement[] = [];
+			for (const ignoredExpression of expression.expressions) {
+				if (!isPure(ignoredExpression)) {
+					body = concat(body, ignore(expr(ignoredExpression), scope));
+				}
+			}
+			return body;
+		}
+		case "BinaryExpression": {
+			let body: Statement[] = [];
+			if (!isPure(expression.left)) {
+				body = concat(body, ignore(expr(expression.left), scope));
+			}
+			if (!isPure(expression.right)) {
+				body = concat(body, ignore(expr(expression.right), scope));
+			}
+			return body;
+		}
+		case "UnaryExpression": {
+			switch (expression.operator) {
+				case "!":
+				case "+":
+				case "-":
+				case "typeof":
+					if (isPure(expression.argument)) {
+						return [];
+					} else {
+						return ignore(expr(expression.argument), scope);
+					}
+					break;
+				default:
+					break;
+			}
+			break;
+		}
+		case "ArrayExpression": {
+			let body: Statement[] = [];
+			for (const ignoredExpression of expression.elements) {
+				if (ignoredExpression === null || ignoredExpression.type != null) {
+					break outer;
+				}
+				body = concat(body, ignore(expr(ignoredExpression), scope));
+			}
+			return body;
+		}
+		case "ObjectExpression": {
+			let body: Statement[] = [];
+			for (const prop of expression.properties) {
+				if (prop.type !== "ObjectProperty") {
+					break outer;
+				}
+				if (prop.computed && !isPure(prop.key)) {
+					body = concat(body, ignore(expr(prop.key), scope));
+				}
+				if (!isPure(prop.value)) {
+					if (isExpression(prop.value)) {
+						body = concat(body, ignore(expr(prop.value), scope));
+					} else {
+						break outer;
+					}
+				}
+			}
+			return body;
+		}
+		default:
+			if (isLiteral(expression)) {
+				return [];
+			}
+			break;
+	}
+	return [expressionStatement(expression)];
+}
+
 export function ignore(value: Value, scope: Scope): Statement[] {
 	const transformed = transform(value, scope, expr);
-	outer:
 	switch (transformed.kind) {
 		case "statements":
 			return transformed.statements;
 		case "expression":
-			switch (transformed.expression.type) {
-				case "Identifier":
-					if (transformed.expression.name === "undefined") {
-						return [];
-					}
-					break;
-				case "SequenceExpression": {
-					let body: Statement[] = [];
-					for (const ignoredExpression of transformed.expression.expressions) {
-						if (!isPure(ignoredExpression)) {
-							body = concat(body, ignore(expr(ignoredExpression), scope));
-						}
-					}
-					return body;
-				}
-				case "BinaryExpression": {
-					let body: Statement[] = [];
-					if (!isPure(transformed.expression.left)) {
-						body = concat(body, ignore(expr(transformed.expression.left), scope));
-					}
-					if (!isPure(transformed.expression.right)) {
-						body = concat(body, ignore(expr(transformed.expression.right), scope));
-					}
-					return body;
-				}
-				case "UnaryExpression": {
-					switch (transformed.expression.operator) {
-						case "!":
-						case "+":
-						case "-":
-						case "typeof":
-							if (isPure(transformed.expression.argument)) {
-								return [];
-							} else {
-								return ignore(expr(transformed.expression.argument), scope);
-							}
-							break;
-						default:
-							break;
-					}
-					break;
-				}
-				case "ArrayExpression": {
-					let body: Statement[] = [];
-					for (const ignoredExpression of transformed.expression.elements) {
-						if (ignoredExpression === null || ignoredExpression.type != null) {
-							break outer;
-						}
-						body = concat(body, ignore(expr(ignoredExpression), scope));
-					}
-					return body;
-				}
-				case "ObjectExpression": {
-					let body: Statement[] = [];
-					for (const prop of transformed.expression.properties) {
-						if (prop.type !== "ObjectProperty") {
-							break outer;
-						}
-						if (prop.computed && !isPure(prop.key)) {
-							body = concat(body, ignore(expr(prop.key), scope));
-						}
-						if (!isPure(prop.value)) {
-							body = concat(body, ignore(expr(prop.value), scope));
-						}
-					}
-					return body;
-				}
-				default:
-					if (isLiteral(transformed.expression)) {
-						return [];
-					}
-					break;
-			}
-			break;
+			return ignoreExpression(transformed.expression, scope);
 		default:
 			break;
 	}
@@ -799,7 +813,7 @@ function transform(value: Value, scope: Scope, callback: (expression: Expression
 		let tail: Value;
 		if (lastStatement.type === "ReturnStatement") {
 			head = contents.slice(0, contents.length - 1);
-			tail = callback(simplifyExpression(lastStatement.argument));
+			tail = callback(lastStatement.argument === null ? identifier("undefined") : simplifyExpression(lastStatement.argument));
 		} else {
 			head = contents;
 			tail = callback(undefinedLiteral);
@@ -915,7 +929,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 	});
 }
 
-export function isPure(expression: Expression): boolean {
+export function isPure(expression: Expression | PatternLike | SpreadElement): boolean {
 	switch (expression.type) {
 		case "Identifier":
 		case "StringLiteral":
@@ -948,7 +962,10 @@ export function isPure(expression: Expression): boolean {
 	}
 }
 
-function simplifyExpression(expression: Expression): Expression {
+function simplifyExpression(expression: Expression): Expression;
+function simplifyExpression(expression: Expression | PatternLike): Expression | PatternLike;
+function simplifyExpression(expression: Expression | PatternLike | SpreadElement): Expression | PatternLike | SpreadElement;
+function simplifyExpression(expression: Expression | PatternLike | SpreadElement): Expression | PatternLike | SpreadElement {
 	switch (expression.type) {
 		case "ArrayExpression": {
 			return annotate(arrayExpression(expression.elements.map((element) => {
@@ -1071,7 +1088,7 @@ function simplifyExpression(expression: Expression): Expression {
 	return expression;
 }
 
-export function expressionLiteralValue(expression: Expression): LiteralValue | undefined {
+export function expressionLiteralValue(expression: Expression | Node): LiteralValue | undefined {
 	switch (expression.type) {
 		case "BooleanLiteral":
 		case "NumericLiteral":
@@ -1311,13 +1328,10 @@ export function stringifyType(type: Type): string {
 }
 
 function stringifyNode(node: Node): string {
-	const result = transformFromAst(node, undefined, {
-		babelrc: false,
-		code: true,
+	const result = generate(node, {
 		compact: true,
-		sourceMaps: false,
 	});
-	return result.code!;
+	return result.code;
 }
 
 export function stringifyValue(value: Value): string {
