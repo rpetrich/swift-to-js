@@ -135,7 +135,11 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length && function () {
+          const lhs = lhs[i];
+          const rhs = rhs[i];
+          return lhs.x === rhs.x && lhs.y === rhs.y;
+        }()) {
           i++;
         }
 
@@ -153,7 +157,11 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length && function () {
+          const lhs = lhs[i];
+          const rhs = rhs[i];
+          return lhs.x === rhs.x && lhs.y === rhs.y;
+        }()) {
           i++;
         }
 
@@ -171,7 +179,11 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length && function () {
+          const lhs = lhs[i];
+          const rhs = rhs[i];
+          return lhs.x === rhs.x && lhs.y === rhs.y;
+        }()) {
           i++;
         }
 

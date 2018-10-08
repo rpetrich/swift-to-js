@@ -993,9 +993,21 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 														member(lhs, "length", scope),
 														scope,
 													),
-													binary("===",
-														member(lhs, lookup(i, scope), scope),
-														member(rhs, lookup(i, scope), scope),
+													call(
+														call(
+															functionValue("==", conformance(valueType, "Equatable", scope), parseFunctionType(`() -> () -> Bool`)),
+															[valueType],
+															[typeTypeValue],
+															scope,
+														),
+														[
+															member(lhs, lookup(i, scope), scope),
+															member(rhs, lookup(i, scope), scope),
+														],
+														[
+															valueType,
+															valueType,
+														],
 														scope,
 													),
 													scope,
