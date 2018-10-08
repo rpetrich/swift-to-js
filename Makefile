@@ -7,13 +7,16 @@ test: all
 	npm run test
 	npm run lint
 
+coverage: all
+	npm run test:coverage
+
 .PHONY: all clean test
 
 
 dist/:
 	mkdir -p dist/
 
-dist/swift-to-js.js: dist/ *.ts
+dist/swift-to-js.js: dist/ package.json *.ts
 	npm run build:ts
 
 dist/ast.js: dist/ ast.pegjs
