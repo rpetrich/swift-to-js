@@ -44,13 +44,9 @@ export function addVariable(scope: Scope, name: string, typeOrTypeString: string
 	const mangled = mangleName(name);
 	scope.mapping[name] = isBoxed ? boxed(expr(mangled), type) : expr(mangled);
 	scope.declarations[name] = { flags, declaration: undefined };
-	if (type.kind !== "type") {
-		// TODO: Support runtime types
-		throw new TypeError(`Do not support runtime types in addVariable!`);
-	}
-	const requiresBox = isBoxed && typeRequiresBox(type.type, scope);
+	const requiresBox = isBoxed && typeRequiresBox(type, scope);
 	if (requiresBox) {
-		init = constructBox(init, type.type, scope);
+		init = constructBox(init, type, scope);
 	}
 	const initExpression = typeof init !== "undefined" ? read(init, scope) : undefined;
 	return variableDeclaration(

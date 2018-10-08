@@ -348,26 +348,18 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 
 const unboxedRepresentations = PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array;
 
-export function typeRequiresBox(type: Type, scope: Scope): boolean {
-	switch (type.kind) {
-		case "array":
-		case "dictionary":
-			return false;
-		case "modified":
-			return typeRequiresBox(type.type, scope);
-		default:
-			const possibleRepresentations = reifyType(type, scope).possibleRepresentations;
-			return (possibleRepresentations & unboxedRepresentations) !== possibleRepresentations;
-	}
+export function typeRequiresBox(type: Value, scope: Scope): boolean {
+	const possibleRepresentations = typeFromValue(type, scope).possibleRepresentations;
+	return (possibleRepresentations & unboxedRepresentations) !== possibleRepresentations;
 }
 
-export function constructBox(value: Value | undefined, type: Type, scope: Scope): Value {
+export function constructBox(value: Value | undefined, type: Value, scope: Scope): Value {
 	return array(typeof value !== "undefined" ? [value] : [], scope);
 }
 
 export function contentsOfBox(target: BoxedValue, scope: Scope): Value {
 	if (target.type.kind === "type") {
-		if (typeRequiresBox(target.type.type, scope)) {
+		if (typeRequiresBox(typeValue(target.type.type), scope)) {
 			return member(target.contents, 0, scope);
 		}
 	} else {
