@@ -5,7 +5,7 @@ This is an experimental JavaScript backend for the standard Swift compiler. It's
 Installation
 ------------
 #### Install Swift
-Choose and install a compatible Swift development snapshot from [swift.org/downloads](https://swift.org/downloads). [2018-10-03](https://swift.org/builds/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2018-10-03-a/swift-DEVELOPMENT-SNAPSHOT-2018-10-03-a-osx.pkg)'s snapshot build is known to be compatible. For macOS, a recent version of Xcode is required.
+Choose and install a compatible Swift development snapshot from [swift.org/download/](https://swift.org/download/). [2018-10-03](https://swift.org/builds/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2018-10-03-a/swift-DEVELOPMENT-SNAPSHOT-2018-10-03-a-osx.pkg)'s snapshot build is known to be compatible. For macOS, a recent version of Xcode is required.
 
 #### Install Node & NPM
 You know what to do...
