@@ -77,39 +77,41 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	const widerLow: NumericRange = checked ? { min: literal(min - 1), max: literal(max) } : range;
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
 	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
-	const initExactly = wrapped((scope, arg, type) => {
-		expectLength(type.arguments.types, 1);
-		const fromIntConformance = conformance(typeValue(type.arguments.types[0]), integerTypeName, scope);
-		const source = rangeForNumericType(typeFromValue(fromIntConformance, scope), scope);
-		const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
-		const requiresLessThanCheck = possiblyLessThan(source, range, scope);
-		if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
-			return arg(0, "value");
-		}
-		return reuse(arg(0, "value"), scope, "value", (value) => {
-			let check;
-			if (requiresGreaterThanCheck && requiresLessThanCheck) {
-				check = logical(
-					"||",
-					binary(">", value, range.min, scope),
-					binary("<", value, range.max, scope),
-					scope,
-				);
-			} else if (requiresGreaterThanCheck) {
-				check = binary(">", value, range.max, scope);
-			} else if (requiresLessThanCheck) {
-				check = binary("<", value, range.min, scope);
-			} else {
+	function initExactly(outerScope: Scope, outerArg: ArgGetter, type: Type): Value {
+		const sourceTypeArg = outerArg(1, "T");
+		return callable((scope: Scope, arg: ArgGetter) => {
+			const sourceIntConformance = conformance(sourceTypeArg, integerTypeName, scope);
+			const source = rangeForNumericType(typeFromValue(sourceIntConformance, scope), scope);
+			const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
+			const requiresLessThanCheck = possiblyLessThan(source, range, scope);
+			if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
 				return arg(0, "value");
 			}
-			return conditional(
-				check,
-				literal(null),
-				value,
-				scope,
-			);
-		});
-	});
+			return reuse(arg(0, "value"), scope, "value", (value) => {
+				let check;
+				if (requiresGreaterThanCheck && requiresLessThanCheck) {
+					check = logical(
+						"||",
+						binary(">", value, range.min, scope),
+						binary("<", value, range.max, scope),
+						scope,
+					);
+				} else if (requiresGreaterThanCheck) {
+					check = binary(">", value, range.max, scope);
+				} else if (requiresLessThanCheck) {
+					check = binary("<", value, range.min, scope);
+				} else {
+					return arg(0, "value");
+				}
+				return conditional(
+					check,
+					literal(null),
+					value,
+					scope,
+				);
+			});
+		}, returnFunctionType(type));
+	}
 	const customStringConvertibleConformance: ProtocolConformance = {
 		functions: {
 		},
@@ -201,16 +203,18 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"max"() {
 				return literal(max);
 			},
-			"init(_:)": wrapped((scope, arg, type) => {
-				expectLength(type.arguments.types, 1);
-				const sourceType = typeFromValue(conformance(typeValue(type.arguments.types[0]), integerTypeName, scope), scope);
-				return integerRangeCheck(
-					scope,
-					arg(0, "value"),
-					rangeForNumericType(sourceType, scope),
-					range,
-				);
-			}),
+			"init(_:)": (outerScope, outerArg, type) => {
+				const sourceTypeArg = outerArg(1, "T");
+				return callable((scope, arg) => {
+					const sourceType = typeFromValue(conformance(sourceTypeArg, integerTypeName, scope), scope);
+					return integerRangeCheck(
+						scope,
+						arg(0, "value"),
+						rangeForNumericType(sourceType, scope),
+						range,
+					);
+				}, returnType(type));
+			},
 			"init(exactly:)": initExactly,
 			"&-": wrapped(binaryBuiltin("-", 0, wrap)),
 		},
@@ -602,17 +606,18 @@ function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => 
 	}
 }
 
-function adaptedMethod(otherMethodName: string, adapter: (otherValue: Value, scope: Scope, arg: ArgGetter, type: Function) => Value) {
+function adaptedMethod(otherMethodName: string, conformanceName: string | undefined, adapter: (otherValue: Value, scope: Scope, arg: ArgGetter, type: Function) => Value) {
 	return (scope: Scope, arg: ArgGetter, type: Function) => {
 		const typeArg = arg(0, "T");
-		const otherMethod = call(functionValue(otherMethodName, typeArg, type), [typeArg], [typeTypeValue], scope);
+		const conformedType = typeof conformanceName !== "undefined" ? conformance(typeArg, conformanceName, scope) : typeArg;
+		const otherMethod = call(functionValue(otherMethodName, conformedType, type), [typeArg], [typeTypeValue], scope);
 		const functionType = returnFunctionType(type);
 		return callable((innerScope, innerArg) => adapter(otherMethod, innerScope, innerArg, functionType), functionType);
 	};
 }
 
-function updateMethod(otherMethodName: string) {
-	return adaptedMethod(otherMethodName, (targetMethod, scope, arg, type) => {
+function updateMethod(otherMethodName: string, conformanceName: string | undefined) {
+	return adaptedMethod(otherMethodName, conformanceName, (targetMethod, scope, arg, type) => {
 		return set(arg(0, "lhs"), call(targetMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope);
 	});
 }
@@ -650,17 +655,17 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	addProtocol("Equatable", {
 		functions: {
 			"==": abstractMethod,
-			"!=": adaptedMethod("==", (equalsMethod, scope, arg, type) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
-			"~=": adaptedMethod("==", (equalsMethod, scope, arg, type) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope)),
+			"!=": adaptedMethod("==", "Equatable", (equalsMethod, scope, arg, type) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
+			"~=": adaptedMethod("==", "Equatable", (equalsMethod, scope, arg, type) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope)),
 		},
 		conformances: Object.create(null),
 	});
 	addProtocol("Comparable", {
 		functions: {
 			"<": abstractMethod,
-			">": adaptedMethod("<", (lessThanMethod, scope, arg, type) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope)),
-			"<=": adaptedMethod("<", (lessThanMethod, scope, arg, type) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
-			">=": adaptedMethod("<", (lessThanMethod, scope, arg, type) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
+			">": adaptedMethod("<", "Comparable", (lessThanMethod, scope, arg, type) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope)),
+			"<=": adaptedMethod("<", "Comparable", (lessThanMethod, scope, arg, type) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
+			">=": adaptedMethod("<", "Comparable", (lessThanMethod, scope, arg, type) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope)),
 		},
 		conformances: Object.create(null),
 	});
@@ -668,18 +673,18 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		functions: {
 			"init(exactly:)": abstractMethod,
 			"+": abstractMethod,
-			"+=": updateMethod("+"),
+			"+=": updateMethod("+", "Numeric"),
 			"-": abstractMethod,
-			"-=": updateMethod("-"),
+			"-=": updateMethod("-", "Numeric"),
 			"*": abstractMethod,
-			"*=": updateMethod("*"),
+			"*=": updateMethod("*", "Numeric"),
 		},
 		conformances: Object.create(null),
 	});
 	addProtocol("SignedNumeric", {
 		functions: {
 			"-": abstractMethod, // TODO: Implement - in terms of negate
-			"negate": adaptedMethod("-", (negateMethod, scope, arg, type) => {
+			"negate": adaptedMethod("-", "SignedNumeric", (negateMethod, scope, arg, type) => {
 				return set(arg(0, "lhs"), call(negateMethod, [arg(1, "rhs")], type.arguments.types.map((innerType) => typeValue(innerType)), scope), scope);
 			}),
 		},

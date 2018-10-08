@@ -1,10 +1,10 @@
 import { transformFromAst } from "babel-core";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, Statement, ThisExpression } from "babel-types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, SpreadProperty, Statement, ThisExpression } from "babel-types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { reifyType, PossibleRepresentation, ReifiedType } from "./reified";
+import { reifyType, PossibleRepresentation, ProtocolConformance, ReifiedType } from "./reified";
 import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
@@ -270,6 +270,9 @@ export interface ConformanceValue {
 }
 
 export function conformance(type: Value, name: string, scope: Scope, location?: LocationSource): ConformanceValue {
+	while (type.kind === "conformance") {
+		type = type.type;
+	}
 	return { kind: "conformance", type, conformance: name, location: readLocation(location) };
 }
 
@@ -643,62 +646,53 @@ export function read(value: Value, scope: Scope): Expression {
 		}
 		case "conformance":
 		case "type": {
-			let stringified: string;
-			let suffix: string;
-			if (value.kind === "type") {
-				if (value.type.kind === "name") {
-					// TODO: Support specializing types at runtime
-					const result = mappedValueForName(value.type.name, scope);
-					if (typeof result !== "undefined") {
-						return read(result, scope);
-					}
-				}
-				stringified = stringifyType(value.type);
-				suffix = "Type";
-			} else {
-				if (value.type.kind !== "type") {
-					throw new TypeError(`Expected a type, got a ${value.type.kind}`);
-				}
-				stringified = stringifyType(value.type.type);
-				suffix = value.conformance;
+			let conformance: ProtocolConformance | undefined;
+			const type = value.kind === "conformance" ? value.type : value;
+			if (type.kind !== "type") {
+				throw new TypeError(`Expected a type, got a ${type.kind}`);
 			}
-			const name: string = `:${stringified}.${suffix}`;
+			if (type.type.kind === "name") {
+				// TODO: Support specializing types at runtime
+				const result = mappedValueForName(type.type.name, scope);
+				if (typeof result !== "undefined") {
+					return read(result, scope);
+				}
+			}
+			const stringified = stringifyType(type.type);
+			const name: string = `:${stringified}.Type`;
 			const mangled = mangleName(name);
 			const reified = typeFromValue(value, scope);
-			const witnessTable = objectExpression([]);
 			const globalScope = rootScope(scope);
-			globalScope.declarations[name] = {
-				flags: DeclarationFlags.Const,
-				declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
-			};
-			// if (typeof value.protocol !== "undefined") {
-			// 	const globalScope = rootScope(scope);
-			// 	if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
-			// 		if (!Object.hasOwnProperty.call(reified.conformances, value.protocol)) {
-			// 			throw new TypeError(`${stringifyType(value.type)} does not conform to ${value.protocol}`);
-			// 		}
-			// 		globalScope.declarations[name] = {
-			// 			flags: DeclarationFlags.Const,
-			// 		};
-			// 		const protocol = reified.conformances[value.protocol];
-			// 		function returnValue() {
-			// 			return value;
-			// 		}
-			// 		const witnessTable = objectExpression(Object.keys(protocol).map((key) => {
-			// 			const result = protocol[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
-			// 			if (result.kind === "callable") {
-			// 				const [args, statements] = functionize(globalScope, result.call);
-			// 				return objectMethod("method", mangleName(key), args, blockStatement(statements));
-			// 			} else {
-			// 				return objectProperty(mangleName(key), read(result, scope));
-			// 			}
-			// 		}));
-			// 		globalScope.declarations[name] = {
-			// 			flags: DeclarationFlags.Const,
-			// 			declaration: variableDeclaration("const", [variableDeclarator(mangled, witnessTable)]),
-			// 		};
-			// 	}
-			// }
+			if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
+				globalScope.declarations[name] = {
+					flags: DeclarationFlags.Const,
+					declaration: variableDeclaration("const", [variableDeclarator(mangled, objectExpression([]))]),
+				};
+				function witnessTableForConformance(current: ProtocolConformance) {
+					function returnValue() {
+						return value;
+					}
+					const properties = Object.keys(current.functions).map((key) => {
+						const result = current!.functions[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
+						if (result.kind === "callable") {
+							const [args, statements] = functionize(globalScope, result.call);
+							return objectMethod("method", mangleName(key), args, blockStatement(statements));
+						} else {
+							return objectProperty(mangleName(key), read(result, scope));
+						}
+					});
+					for (const key of Object.keys(current.conformances)) {
+						properties.push(objectProperty(mangleName(key), witnessTableForConformance(current.conformances[key])));
+					}
+					return objectExpression(properties);
+				}
+				globalScope.declarations[name] = {
+					flags: DeclarationFlags.Const,
+					declaration: variableDeclaration("const", [variableDeclarator(mangled, objectExpression(Object.keys(reified.conformances).map((key) => {
+						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
+					})))]),
+				};
+			}
 			return annotate(mangled, value.location);
 		}
 		default: {
@@ -907,6 +901,9 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 	}
 	if (type !== "call") {
 		throw new Error(`Unable to call a ${type}ter on a function!`);
+	}
+	if (argTypes.length !== args.length) {
+		throw new RangeError(`Expected the number argument types to be the same as the number of arguments`);
 	}
 	return transform(target, scope, (targetExpression) => {
 		const argExpressions: Expression[] = [];

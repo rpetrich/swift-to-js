@@ -1,115 +1,123 @@
 export function equal$lhs$rhs$(T, lhs, rhs) {
-  return T.$equals$(lhs, rhs);
+  return T.Equatable.$equals$(lhs, rhs);
 }
-const $Int$Equatable = {
-  $equals$(lhs, rhs) {
-    return lhs === rhs;
-  },
+const $Int$Type = {
+  Equatable: {
+    $equals$(lhs, rhs) {
+      return lhs === rhs;
+    },
 
-  $notequals$(lhs, rhs) {
-    return lhs !== rhs;
-  },
+    $notequals$(lhs, rhs) {
+      return lhs !== rhs;
+    },
 
-  $match$(lhs, rhs) {
-    return lhs === rhs;
+    $match$(lhs, rhs) {
+      return lhs === rhs;
+    }
+
   }
-
 };
 export function integerEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($Int$Equatable, lhs, rhs);
+  return equal$lhs$rhs$($Int$Type, lhs, rhs);
 }
-const $Double$question$$Equatable = {
-  $equals$(lhs, rhs) {
-    return lhs === rhs;
-  },
+const $Double$question$$Type = {
+  Equatable: {
+    $equals$(lhs, rhs) {
+      return lhs === rhs;
+    },
 
-  $notequals$(lhs, rhs) {
-    return lhs !== rhs;
-  },
+    $notequals$(lhs, rhs) {
+      return lhs !== rhs;
+    },
 
-  $match$(lhs, rhs) {
-    return lhs === rhs;
+    $match$(lhs, rhs) {
+      return lhs === rhs;
+    }
+
   }
-
 };
 export function optionalDoubleEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($Double$question$$Equatable, lhs, rhs);
+  return equal$lhs$rhs$($Double$question$$Type, lhs, rhs);
 }
-const $$open$String$close$$Equatable = {
-  $equals$(lhs, rhs) {
-    let equal;
+const $$open$String$close$$Type = {
+  Equatable: {
+    $equals$(lhs, rhs) {
+      let equal;
 
-    if (lhs.length !== rhs.length) {
-      equal = false;
-    } else {
-      let i = 0;
+      if (lhs.length !== rhs.length) {
+        equal = false;
+      } else {
+        let i = 0;
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
+
+        equal = i === lhs.length;
       }
 
-      equal = i === lhs.length;
-    }
+      return equal;
+    },
 
-    return equal;
-  },
+    $notequals$(lhs, rhs) {
+      let unequal;
 
-  $notequals$(lhs, rhs) {
-    let unequal;
+      if (lhs.length !== rhs.length) {
+        unequal = true;
+      } else {
+        let i = 0;
 
-    if (lhs.length !== rhs.length) {
-      unequal = true;
-    } else {
-      let i = 0;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        unequal = i !== lhs.length;
       }
 
-      unequal = i !== lhs.length;
-    }
+      return unequal;
+    },
 
-    return unequal;
-  },
+    $match$(lhs, rhs) {
+      let equal;
 
-  $match$(lhs, rhs) {
-    let equal;
+      if (lhs.length !== rhs.length) {
+        equal = false;
+      } else {
+        let i = 0;
 
-    if (lhs.length !== rhs.length) {
-      equal = false;
-    } else {
-      let i = 0;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        equal = i === lhs.length;
       }
 
-      equal = i === lhs.length;
+      return equal;
     }
 
-    return equal;
   }
-
 };
 export function stringArrayEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($$open$String$close$$Equatable, lhs, rhs);
+  return equal$lhs$rhs$($$open$String$close$$Type, lhs, rhs);
 }
-const $Point$Equatable = {
-  $equals$(lhs, rhs) {
-    return lhs.x === rhs.x && lhs.y === rhs.y;
-  },
+const $Point$Type = {
+  Equatable: {
+    $equals$(lhs, rhs) {
+      return lhs.x === rhs.x && lhs.y === rhs.y;
+    },
 
-  $notequals$(lhs, rhs) {
-    return !(lhs.x === rhs.x && lhs.y === rhs.y);
-  },
+    $notequals$(lhs, rhs) {
+      return !(lhs.x === rhs.x && lhs.y === rhs.y);
+    },
 
-  $match$(lhs, rhs) {
-    return lhs.x === rhs.x && lhs.y === rhs.y;
+    $match$(lhs, rhs) {
+      return lhs.x === rhs.x && lhs.y === rhs.y;
+    }
+
   }
-
 };
 export function pointEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($Point$Equatable, lhs, rhs);
+  return equal$lhs$rhs$($Point$Type, lhs, rhs);
 }
 export function pointEqualDirect$lhs$rhs$(lhs, rhs) {
   return lhs.x === rhs.x && lhs.y === rhs.y;
@@ -117,62 +125,64 @@ export function pointEqualDirect$lhs$rhs$(lhs, rhs) {
 export function pointNotEqualDirect$lhs$rhs$(lhs, rhs) {
   return !(lhs.x === rhs.x && lhs.y === rhs.y);
 }
-const $$open$Point$close$$Equatable = {
-  $equals$(lhs, rhs) {
-    let equal;
+const $$open$Point$close$$Type = {
+  Equatable: {
+    $equals$(lhs, rhs) {
+      let equal;
 
-    if (lhs.length !== rhs.length) {
-      equal = false;
-    } else {
-      let i = 0;
+      if (lhs.length !== rhs.length) {
+        equal = false;
+      } else {
+        let i = 0;
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
+
+        equal = i === lhs.length;
       }
 
-      equal = i === lhs.length;
-    }
+      return equal;
+    },
 
-    return equal;
-  },
+    $notequals$(lhs, rhs) {
+      let unequal;
 
-  $notequals$(lhs, rhs) {
-    let unequal;
+      if (lhs.length !== rhs.length) {
+        unequal = true;
+      } else {
+        let i = 0;
 
-    if (lhs.length !== rhs.length) {
-      unequal = true;
-    } else {
-      let i = 0;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        unequal = i !== lhs.length;
       }
 
-      unequal = i !== lhs.length;
-    }
+      return unequal;
+    },
 
-    return unequal;
-  },
+    $match$(lhs, rhs) {
+      let equal;
 
-  $match$(lhs, rhs) {
-    let equal;
+      if (lhs.length !== rhs.length) {
+        equal = false;
+      } else {
+        let i = 0;
 
-    if (lhs.length !== rhs.length) {
-      equal = false;
-    } else {
-      let i = 0;
+        while (i < lhs.length && lhs[i] === rhs[i]) {
+          i++;
+        }
 
-      while (i < lhs.length && lhs[i] === rhs[i]) {
-        i++;
+        equal = i === lhs.length;
       }
 
-      equal = i === lhs.length;
+      return equal;
     }
 
-    return equal;
   }
-
 };
 export function pointArrayEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($$open$Point$close$$Equatable, lhs, rhs);
+  return equal$lhs$rhs$($$open$Point$close$$Type, lhs, rhs);
 }

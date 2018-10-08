@@ -11,5 +11,5 @@ public func addInts(lhs: Int, rhs: Int) -> Int {
 }
 
 public func subtractInts(lhs: Int, rhs: Int) -> Int {
-	return add(lhs: lhs, rhs: rhs)
+	return subtract(lhs: lhs, rhs: rhs)
 }
