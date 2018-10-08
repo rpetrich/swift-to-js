@@ -144,12 +144,18 @@ const mangledSymbols: { [symbol: string]: string } = {
 	"/=": "$divided$",
 };
 
-function mangleSymbol(symbol: string) {
-	return Object.hasOwnProperty.call(mangledSymbols, symbol) ? mangledSymbols[symbol] : "$" + String(symbol.charCodeAt(0)) + "$";
+function mangleSymbol(symbol: string): string {
+	if (Object.hasOwnProperty.call(mangledSymbols, symbol)) {
+		return mangledSymbols[symbol];
+	}
+	if (symbol.length > 2 && symbol[0] === "[") {
+		return "$" + mangleName(symbol.substring(1, symbol.length - 1)).name + "$";
+	}
+	return "$" + String(symbol.charCodeAt(0)) + "$";
 }
 
 export function mangleName(name: string) {
-	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
+	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(\[.*\])|(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
 }
 
 export function mappedValueForName(name: string, scope: Scope): MappedNameValue | undefined {

@@ -39,7 +39,7 @@ const $Double$question$$Type = {
 export function optionalDoubleEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($Double$question$$Type, lhs, rhs);
 }
-const $$open$String$close$$Type = {
+const $$String$$Type = {
   Equatable: {
     $equals$(lhs, rhs) {
       let equal;
@@ -98,7 +98,7 @@ const $$open$String$close$$Type = {
   }
 };
 export function stringArrayEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($$open$String$close$$Type, lhs, rhs);
+  return equal$lhs$rhs$($$String$$Type, lhs, rhs);
 }
 const $Point$Type = {
   Equatable: {
@@ -125,7 +125,7 @@ export function pointEqualDirect$lhs$rhs$(lhs, rhs) {
 export function pointNotEqualDirect$lhs$rhs$(lhs, rhs) {
   return !(lhs.x === rhs.x && lhs.y === rhs.y);
 }
-const $$open$Point$close$$Type = {
+const $$Point$$Type = {
   Equatable: {
     $equals$(lhs, rhs) {
       let equal;
@@ -184,5 +184,5 @@ const $$open$Point$close$$Type = {
   }
 };
 export function pointArrayEqual$lhs$rhs$(lhs, rhs) {
-  return equal$lhs$rhs$($$open$Point$close$$Type, lhs, rhs);
+  return equal$lhs$rhs$($$Point$$Type, lhs, rhs);
 }
