@@ -1,5 +1,5 @@
 import generate from "@babel/generator";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -280,8 +280,6 @@ export function conformance(type: Value, name: string, scope: Scope, location?: 
 	return { kind: "conformance", type, conformance: name, location: readLocation(location) };
 }
 
-const isValidIdentifier = /^[A-Z_$][A-Z_$0-9]*$/;
-
 export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	switch (value.kind) {
 		case "type":
@@ -312,7 +310,6 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 			}
 		}
 		default: {
-			const expression = read(value, scope);
 			return {
 				fields: [],
 				conformances: {},
@@ -328,22 +325,10 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue;
 
 
-const baseProperty = identifier("base");
-const offsetProperty = identifier("offset");
-
 export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
 	if (value.kind === "boxed") {
 		return annotateValue(value.contents, value.location);
-	// } else if (value.kind === "direct") {
-	// 	// TODO: Introduce real type for this case
-	// 	if (value.expression.type === "MemberExpression" && value.expression.property.type === "NumericLiteral" && value.expression.property.value === 0) {
-	// 		console.log(value);
-	// 		return annotateValue(expr(value.expression.object) as VariableValue, value.location);
-	// 	}
-	// } else if (value.kind === "subscript") {
-	// 	return value;
 	}
-	return variable(identifier("unbox_invalid_of_" + value.kind), value.location);
 	throw new Error(`Unable to unbox from ${value.kind} value`);
 }
 
@@ -558,8 +543,6 @@ export function annotateValue<T extends Value>(value: T, location?: LocationSour
 	}
 	return value;
 }
-
-const voidToVoid = parseFunctionType(`() -> () -> ()`); // TODO: Replace with proper type extracted from the context
 
 function isExpressionStatement(node: Node): boolean {
 	return node.type === "ExpressionStatement";

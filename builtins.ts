@@ -1,9 +1,9 @@
-import { abstractMethod, noinline, returnFunctionType, returnType, wrapped } from "./functions";
+import { abstractMethod, noinline, wrapped } from "./functions";
 import { parseType } from "./parse";
 import { expressionSkipsCopy, field, inheritLayout, primitive, protocol, reifyType, Field, FunctionMap, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
-import { Function, Tuple, Type } from "./types";
-import { cached, concat, expectLength, lookupForMap } from "./utils";
+import { Function, Tuple } from "./types";
+import { cached, concat, lookupForMap } from "./utils";
 import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
 import { arrayPattern, blockStatement, breakStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
@@ -521,55 +521,6 @@ function integerRangeCheck(scope: Scope, value: Value, source: NumericRange, des
 			scope,
 		);
 	});
-}
-
-function integerThrowingInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
-	expectLength(type.arguments.types, 1);
-	return integerRangeCheck(
-		scope,
-		arg(0, "value"),
-		rangeForNumericType(reifyType(type.arguments.types[0], scope), scope),
-		rangeForNumericType(typeArgument, scope),
-	);
-}
-
-function integerOptionalInit(scope: Scope, arg: ArgGetter, type: Function, typeArgument: ReifiedType): Value {
-	expectLength(type.arguments.types, 1);
-	const source = rangeForNumericType(reifyType(type.arguments.types[0], scope), scope);
-	const dest = rangeForNumericType(typeArgument, scope);
-	const requiresGreaterThanCheck = possiblyGreaterThan(source, dest, scope);
-	const requiresLessThanCheck = possiblyLessThan(source, dest, scope);
-	if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
-		return arg(0, "value");
-	}
-	return reuse(arg(0, "value"), scope, "value", (value) => {
-		let check;
-		if (requiresGreaterThanCheck && requiresLessThanCheck) {
-			check = logical(
-				"||",
-				binary(">", value, dest.min, scope),
-				binary("<", value, dest.max, scope),
-				scope,
-			);
-		} else if (requiresGreaterThanCheck) {
-			check = binary(">", value, dest.max, scope);
-		} else if (requiresLessThanCheck) {
-			check = binary("<", value, dest.min, scope);
-		} else {
-			return arg(0, "value");
-		}
-		return conditional(
-			check,
-			literal(null),
-			value,
-			scope,
-		);
-	});
-}
-
-function forwardToTypeArgument(scope: Scope, arg: ArgGetter, type: Function, name: string) {
-	const typeArg = arg(0, "type");
-	return call(functionValue(name, typeArg, type), [typeArg], [typeTypeValue], scope);
 }
 
 function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {

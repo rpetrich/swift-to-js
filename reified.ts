@@ -3,7 +3,7 @@ import { parseType } from "./parse";
 import { lookup, mangleName, Scope } from "./scope";
 import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, conditional, expr, extractContentOfBox, functionValue, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeTypeValue, typeValue, undefinedValue, Value } from "./values";
+import { array, call, conditional, expr, extractContentOfBox, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
 
 import { isLiteral, objectExpression, objectProperty, Expression } from "@babel/types";
 
@@ -62,19 +62,6 @@ export interface EnumCase {
 	fieldTypes: ReadonlyArray<ReifiedType>;
 }
 
-function representationForFields(onlyStoredFields: ReadonlyArray<Field>) {
-	switch (onlyStoredFields.length) {
-		case 0:
-			return PossibleRepresentation.Undefined;
-		case 1:
-			return onlyStoredFields[0].type.possibleRepresentations;
-		default:
-			return PossibleRepresentation.Object;
-	}
-}
-
-const emptyTypeParameters: ReadonlyArray<string> = [];
-const emptyTypes: ReadonlyArray<Type> = [];
 const emptyFields: ReadonlyArray<Field> = [];
 const emptyConformances: ProtocolConformanceMap = Object.create(null);
 const noFunctions: Readonly<FunctionMap> = Object.create(null);
@@ -162,7 +149,6 @@ export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = no
 					})));
 				},
 				copy(value, scope) {
-					const usedFirst = false;
 					const expression = read(value, scope);
 					if (expressionSkipsCopy(expression)) {
 						return expr(expression);

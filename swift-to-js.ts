@@ -6,10 +6,10 @@ import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass,
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import generate from "@babel/generator";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "@babel/types";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement } from "@babel/types";
 import { spawn } from "child_process";
 import { readdirSync, readFile as readFile_ } from "fs";
 import { argv } from "process";
@@ -173,10 +173,6 @@ function findFunctionType(type: Type): Function {
 
 function getFunctionType(term: Term) {
 	return findFunctionType(getType(term));
-}
-
-function collapseToExpression(expressions: Expression[]): Expression {
-	return expressions.length === 0 ? undefinedLiteral : expressions.length === 1 ? expressions[0] : sequenceExpression(expressions);
 }
 
 function noSemanticExpressions(term: Term) {
@@ -558,7 +554,6 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "declref_expr": {
 			expectLength(term.children, 0);
-			const type = getTypeValue(term);
 			return annotateValue(extractReference(term, scope), term);
 		}
 		case "subscript_expr": {
@@ -758,7 +753,6 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "assign_expr": {
 			expectLength(term.children, 2);
-			const type = getTypeValue(term.children[0]);
 			const destTerm = term.children[0];
 			if (destTerm.name === "discard_assignment_expr") {
 				return translateTermToValue(term.children[1], scope, bindingContext);
@@ -1651,7 +1645,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 								expectLength(child.children, 1);
 							}
 							const childDeclaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-							const type = getTypeValue(childDeclaration);
 							if (flagsForDeclarationTerm(child) & DeclarationFlags.Export) {
 								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(thisExpression()));
 								const [args, body] = functionize(scope, propertyName, (innerScope) => fn(innerScope, () => expr(thisExpression())), getFunctionType(childDeclaration));

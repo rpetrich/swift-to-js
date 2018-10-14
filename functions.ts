@@ -1,6 +1,6 @@
 import { Term } from "./ast";
 import { parseFunctionType } from "./parse";
-import { ReifiedType, TypeMap } from "./reified";
+import { TypeMap } from "./reified";
 import { addDeclaration, lookup, newScope, rootScope, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { boxed, call, callable, expr, read, stringifyType, typeFromValue, typeValue, ArgGetter, Location, Value } from "./values";
@@ -12,13 +12,6 @@ export type FunctionBuilder = (scope: Scope, arg: ArgGetter, name: string, argum
 export interface GetterSetterBuilder {
 	get: FunctionBuilder;
 	set: FunctionBuilder;
-}
-
-function getArgumentPointers(type: Type): boolean[] {
-	if (type.kind === "function") {
-		return type.arguments.types.map((arg) => arg.kind === "modified" && arg.modifier === "inout");
-	}
-	throw new TypeError(`Expected a function, got a ${type.kind}: ${stringifyType(type)}`);
 }
 
 export function statementsInValue(value: Value, scope: Scope): Statement[] {
