@@ -1,5 +1,5 @@
 import generate from "@babel/generator";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -508,8 +508,7 @@ export function array(values: Value[], scope: Scope, location?: LocationSource) 
 	const elements: Expression[] = [];
 	for (const value of values.slice().reverse()) {
 		if (value.kind === "statements") {
-			// TODO: Disallow return statements nested inside other statements
-			const parsed = parseStatementsValue(value, (statement) => statement.type !== "ReturnStatement");
+			const parsed = parseStatementsValue(value, containsNoReturnStatements);
 			if (typeof parsed !== "undefined") {
 				let newStatements = parsed.statements.slice();
 				if (typeof parsed.value === "undefined") {
@@ -562,8 +561,8 @@ export function annotateValue<T extends Value>(value: T, location?: LocationSour
 
 const voidToVoid = parseFunctionType(`() -> () -> ()`); // TODO: Replace with proper type extracted from the context
 
-function isExpressionStatement(statement: Statement): boolean {
-	return statement.type === "ExpressionStatement";
+function isExpressionStatement(node: Node): boolean {
+	return node.type === "ExpressionStatement";
 }
 
 function expressionFromStatement(statement: Statement): Expression {
@@ -589,6 +588,42 @@ function parseStatementsValue(value: StatementsValue, allowedStatement: (stateme
 		return { statements: body };
 	}
 	return undefined;
+}
+
+interface ContainsNoReturnStatementsState {
+	result: boolean;
+	ignoreCount: number;
+}
+
+const containsNoReturnStatementsHandler = {
+	enter(current: Node, parent: unknown, state: ContainsNoReturnStatementsState) {
+		if (state.ignoreCount === 0 && isReturnStatement(current)) {
+			state.result = true;
+		}
+		if (isFunction(current)) {
+			state.ignoreCount++;
+		}
+	},
+	exit(current: Node, parent: unknown, state: ContainsNoReturnStatementsState) {
+		if (isFunction(current)) {
+			state.ignoreCount--;
+		}
+	},
+};
+
+function containsNoReturnStatements(node: Node): boolean {
+	if (isReturnStatement(node)) {
+		return false;
+	}
+	if (isExpressionStatement(node)) {
+		return true;
+	}
+	const state: ContainsNoReturnStatementsState = {
+		result: true,
+		ignoreCount: 0,
+	};
+	traverse(node, containsNoReturnStatementsHandler, state);
+	return state.result;
 }
 
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
@@ -823,8 +858,7 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 	const transformed = transform(value, scope, expr);
 	switch (transformed.kind) {
 		case "statements":
-			// TODO: Disallow return statements nested inside other statements
-			const parsed = parseStatementsValue(transformed, (statement) => statement.type !== "ReturnStatement");
+			const parsed = parseStatementsValue(transformed, containsNoReturnStatements);
 			if (typeof parsed !== "undefined") {
 				if (typeof parsed.value !== "undefined" && !isPure(parsed.value)) {
 					return concat(parsed.statements, [expressionStatement(parsed.value)]);
@@ -847,7 +881,7 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 	}
 	if (value.kind === "statements") {
 		// TODO: Disallow return statements nested inside other statements
-		const parsed = parseStatementsValue(value, (statement) => statement.type !== "ReturnStatement");
+		const parsed = parseStatementsValue(value, containsNoReturnStatements);
 		if (typeof parsed !== "undefined") {
 			const tail = callback(typeof parsed.value !== "undefined" ? parsed.value : undefinedLiteral);
 			return statements(concat(
