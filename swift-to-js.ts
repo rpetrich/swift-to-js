@@ -852,6 +852,10 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				);
 			});
 		}
+		case "super_ref_expr": {
+			return expr(identifier("super"));
+		}
+		case "derived_to_base_expr":
 		case "try_expr":
 		case "force_try_expr": {
 			expectLength(term.children, 1);
@@ -1697,15 +1701,49 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							throw new Error(`Expected a parameter list for a function declaration`);
 						}
 						const fn = translateFunctionTerm(name, child, parameterLists, isConstructor ? className : undefined, scope, functions);
-						addFunctionToType(methods, conformances, name, fn);
+						if (child.properties.final || isConstructor) {
+							addFunctionToType(methods, conformances, name, fn);
+						} else {
+							const type = getFunctionType(child);
+							const innerReturnType = returnType(type);
+							if (innerReturnType.kind !== "function") {
+								throw new TypeError(`Expected a function, got a ${innerReturnType.kind}: ${stringifyType(innerReturnType)}`);
+							}
+							const methodIdentifier = mangleName(name);
+							const [args, body] = functionize(scope, name, (innerScope, arg) => {
+								const innerFunction = fn(innerScope, () => expr(thisExpression()));
+								if (innerFunction.kind === "callable") {
+									return innerFunction.call(innerScope, arg, innerReturnType.arguments.types.length);
+								}
+								return call(
+									innerFunction,
+									innerReturnType.arguments.types.map((_, i) => arg(i)),
+									innerReturnType.arguments.types.map((argumentType) => typeValue(argumentType)),
+									innerScope,
+								);
+							}, type);
+							bodyContents.push(classMethod("method", methodIdentifier, args, blockStatement(body)));
+							addFunctionToType(methods, conformances, name, (innerScope, arg) => {
+								const self = arg(0, "self");
+								return callable((innerMostScope, innerArg) => {
+									return call(
+										member(self, methodIdentifier.name, innerMostScope),
+										innerReturnType.arguments.types.map((_, i) => innerArg(i)),
+										innerReturnType.arguments.types.map((argumentType) => typeValue(argumentType)),
+										innerMostScope,
+									);
+								}, innerReturnType);
+							});
+						}
 						break;
 					}
 					default:
 						break;
 				}
 			}
+			const inherits = term.properties.inherits;
 			const flags = flagsForDeclarationTerm(term);
-			const declaration = classDeclaration(classIdentifier, undefined, classBody(bodyContents), []);
+			const declaration = classDeclaration(classIdentifier, typeof inherits === "string" ? identifier(inherits) : undefined, classBody(bodyContents), []);
 			return [flags & DeclarationFlags.Export ? exportNamedDeclaration(declaration, []) : declaration];
 		}
 		default: {
