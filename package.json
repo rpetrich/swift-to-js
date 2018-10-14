@@ -16,8 +16,7 @@
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "UNLICENSED",
   "devDependencies": {
-    "@types/babel-core": "^6.25.5",
-    "@types/babel-types": "^7.0.4",
+    "@types/babel__generator": "^7.0.0",
     "@types/jest": "^23.3.2",
     "@types/node": "^10.10.3",
     "jest": "^23.6.0",
@@ -27,8 +26,8 @@
     "typescript": "^3.1.1"
   },
   "dependencies": {
-    "babel-core": "^6.26.3",
-    "babel-types": "^6.26.0"
+    "@babel/generator": "^7.1.2",
+    "@babel/types": "^7.1.2"
   },
   "jest": {
     "testEnvironment": "node",

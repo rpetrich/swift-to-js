@@ -1,4 +1,4 @@
-import { exportNamedDeclaration, identifier, returnStatement, variableDeclaration, variableDeclarator, Declaration, Identifier, Statement } from "babel-types";
+import { exportNamedDeclaration, identifier, returnStatement, variableDeclaration, variableDeclarator, Declaration, Identifier, Statement } from "@babel/types";
 import { functions as builtinFunctions } from "./builtins";
 import { parseType } from "./parse";
 import { TypeMap } from "./reified";

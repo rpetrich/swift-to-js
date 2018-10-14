@@ -5,7 +5,7 @@ import { addDeclaration, lookup, newScope, rootScope, DeclarationFlags, Scope } 
 import { Function, Type } from "./types";
 import { boxed, call, callable, expr, read, stringifyType, typeFromValue, typeValue, ArgGetter, Location, Value } from "./values";
 
-import { blockStatement, functionDeclaration, identifier, returnStatement, Identifier, Statement } from "babel-types";
+import { blockStatement, functionDeclaration, identifier, returnStatement, Identifier, Statement } from "@babel/types";
 
 export type FunctionBuilder = (scope: Scope, arg: ArgGetter, name: string, argumentLength: number) => Value;
 

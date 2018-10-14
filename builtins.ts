@@ -6,7 +6,7 @@ import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
 import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
-import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "babel-types";
+import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -588,9 +588,17 @@ function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => 
 		}
 	} else {
 		addVariable(scope, i, "Int");
+		const iExpression = read(lookup(i, scope), scope);
+		if (iExpression.type !== "Identifier") {
+			throw new TypeError(`Expected i to be an identifier, got a ${iExpression.type}`);
+		}
 		const endIdentifier = uniqueName(scope, "end");
 		addVariable(scope, endIdentifier, "Int");
-		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([read(lookup(i, scope), scope), read(lookup(endIdentifier, scope), scope)]), read(range, scope))]));
+		const endIdentifierExpression = read(lookup(endIdentifier, scope), scope);
+		if (endIdentifierExpression.type !== "Identifier") {
+			throw new TypeError(`Expected end to be an identifier, got a ${endIdentifierExpression.type}`);
+		}
+		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([iExpression, endIdentifierExpression]), read(range, scope))]));
 		end = lookup(endIdentifier, scope);
 	}
 	const result = forStatement(

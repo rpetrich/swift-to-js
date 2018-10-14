@@ -8,11 +8,14 @@ import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeType, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
-import { transformFromAst } from "babel-core";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "babel-types";
+import generate from "@babel/generator";
+import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "@babel/types";
 import { spawn } from "child_process";
-import { readdirSync } from "fs";
+import { readdirSync, readFile as readFile_ } from "fs";
 import { argv } from "process";
+import { promisify } from "util";
+
+const readFile = promisify(readFile_);
 
 const emptyStatements: Statement[] = [];
 
@@ -265,7 +268,8 @@ export function convertToPattern(value: Value): PatternOutput {
 		const returningIndex = value.statements.findIndex((statement) => statement.type === "ReturnStatement");
 		if (returningIndex === value.statements.length - 1) {
 			prefix = value.statements.slice(0, value.statements.length - 1);
-			value = expr((value.statements[value.statements.length - 1] as ReturnStatement).argument, value.location);
+			const argument = (value.statements[value.statements.length - 1] as ReturnStatement).argument;
+			value = expr(argument === null ? identifier("undefined") : argument, value.location);
 		} else if (returningIndex === -1) {
 			prefix = value.statements;
 			value = expr(identifier("undefined"), value.location);
@@ -1809,6 +1813,7 @@ export async function compile(path: string): Promise<CompilerOutput> {
 			}
 		});
 	});
+	const file = readFile(path);
 	let ast = await stderr;
 	if (ast[0] !== "(") {
 		const lines = (await stderr).split(/\r\n|\r|\n/g);
@@ -1820,18 +1825,17 @@ export async function compile(path: string): Promise<CompilerOutput> {
 	const rootTerm = parseAST(ast);
 	await stdout;
 	const convertedProgram = compileTermToProgram(rootTerm);
-	const result = transformFromAst(convertedProgram, undefined, {
-		babelrc: false,
+	const result = generate(convertedProgram, {
 		filename: path,
-		code: true,
+		sourceFileName: path,
 		compact: false,
 		sourceMaps: true,
-	});
+	}, (await file).toString());
 	// console.log(rootTerm.children);
 	// console.log(JSON.stringify(result.ast, null, 2));
 	// console.log(result.map);
 	return {
-		code: result.code!,
+		code: result.code,
 		map: result.map!,
 		ast,
 	};
