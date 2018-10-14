@@ -3,7 +3,7 @@ import { functions as builtinFunctions } from "./builtins";
 import { parseType } from "./parse";
 import { TypeMap } from "./reified";
 import { concat } from "./utils";
-import { boxed, constructBox, expr, read, statements, typeRequiresBox, typeValue, BoxedValue, ConformanceValue, ExpressionValue, SubscriptValue, TypeValue, Value, VariableValue } from "./values";
+import { array, boxed, conditional, expr, expressionLiteralValue, read, statements, typeRequiresBox, typeValue, undefinedValue, BoxedValue, ConformanceValue, ExpressionValue, SubscriptValue, TypeValue, Value, VariableValue } from "./values";
 
 export enum DeclarationFlags {
 	None = 0,
@@ -44,17 +44,26 @@ export function addVariable(scope: Scope, name: string, typeOrTypeString: string
 	const mangled = mangleName(name);
 	scope.mapping[name] = isBoxed ? boxed(expr(mangled), type) : expr(mangled);
 	scope.declarations[name] = { flags, declaration: undefined };
-	if (type.kind !== "type") {
-		// TODO: Support runtime types
-		throw new TypeError(`Do not support runtime types in addVariable!`);
-	}
-	const requiresBox = isBoxed && typeRequiresBox(type.type, scope);
-	if (requiresBox) {
-		init = constructBox(init, type.type, scope);
+	if (isBoxed) {
+		// Create a box for the initializer, of the type requires it
+		const requiresBox = typeRequiresBox(type, scope);
+		const definitelyBoxed = array(typeof init !== "undefined" ? [init] : [], scope);
+		const possiblyBoxed = conditional(requiresBox, definitelyBoxed, init || undefinedValue, scope);
+		if (requiresBox.kind === "expression") {
+			const storedAsBox = expressionLiteralValue(requiresBox.expression);
+			if (typeof storedAsBox === "undefined") {
+				init = possiblyBoxed;
+			} else if (storedAsBox) {
+				init = definitelyBoxed;
+				flags |= DeclarationFlags.Const;
+			}
+		} else {
+			init = possiblyBoxed;
+		}
 	}
 	const initExpression = typeof init !== "undefined" ? read(init, scope) : undefined;
 	return variableDeclaration(
-		flags & DeclarationFlags.Const || requiresBox ? "const" : "let",
+		flags & DeclarationFlags.Const ? "const" : "let",
 		[variableDeclarator(mangled, typeof initExpression !== "undefined" && (initExpression.type !== "Identifier" || initExpression.name !== "undefined") ? initExpression : undefined)],
 	);
 }

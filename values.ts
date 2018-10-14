@@ -97,15 +97,13 @@ export function statements(body: Statement[], location?: LocationSource): Statem
 
 export interface CallableValue {
 	kind: "callable";
-	call: (scope: Scope, arg: ArgGetter) => Value;
+	call: (scope: Scope, arg: ArgGetter, length: number) => Value;
 	type: Function;
 	location?: Location;
 }
 
-export function callable(callback: (scope: Scope, arg: ArgGetter) => Value, type: Type, location?: LocationSource): CallableValue {
-	if (type.kind !== "function") {
-		throw new TypeError(`Expected a function type when constructing a callable, got a ${type.kind}!`);
-	}
+export function callable(callback: (scope: Scope, arg: ArgGetter, length: number) => Value, functionType: Function | string, location?: LocationSource): CallableValue {
+	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
 	return { kind: "callable", call: callback, type, location: readLocation(location) };
 }
 
@@ -145,7 +143,8 @@ export interface FunctionValue {
 	location?: Location;
 }
 
-export function functionValue(name: string, parentType: Value | undefined, type: Function, substitutions: Value[] = [], location?: LocationSource): FunctionValue {
+export function functionValue(name: string, parentType: Value | undefined, functionType: Function | string, substitutions: Value[] = [], location?: LocationSource): FunctionValue {
+	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
 	return { kind: "function", name, parentType, type, substitutions, location: readLocation(location) };
 }
 
@@ -166,11 +165,12 @@ export interface SubscriptValue {
 	getter: Value;
 	setter: Value;
 	args: Value[];
+	types: Value[];
 	location?: Location;
 }
 
-export function subscript(getter: Value, setter: Value, args: Value[], location?: LocationSource): SubscriptValue {
-	return { kind: "subscript", getter, setter, args, location: readLocation(location) };
+export function subscript(getter: Value, setter: Value, args: Value[], types: Value[], location?: LocationSource): SubscriptValue {
+	return { kind: "subscript", getter, setter, args, types, location: readLocation(location) };
 }
 
 
@@ -339,38 +339,19 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 	// } else if (value.kind === "subscript") {
 	// 	return value;
 	}
+	return variable(identifier("unbox_invalid_of_" + value.kind), value.location);
 	throw new Error(`Unable to unbox from ${value.kind} value`);
 }
 
 const unboxedRepresentations = PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array;
 
-export function typeRequiresBox(type: Type, scope: Scope): boolean {
-	switch (type.kind) {
-		case "array":
-		case "dictionary":
-			return false;
-		case "modified":
-			return typeRequiresBox(type.type, scope);
-		default:
-			const possibleRepresentations = reifyType(type, scope).possibleRepresentations;
-			return (possibleRepresentations & unboxedRepresentations) !== possibleRepresentations;
-	}
+export function typeRequiresBox(type: Value, scope: Scope): Value {
+	const possibleRepresentations = typeFromValue(type, scope).possibleRepresentations;
+	return literal((possibleRepresentations & unboxedRepresentations) !== possibleRepresentations);
 }
 
-export function constructBox(value: Value | undefined, type: Type, scope: Scope): Value {
-	return array(typeof value !== "undefined" ? [value] : [], scope);
-}
-
-export function contentsOfBox(target: BoxedValue, scope: Scope): Value {
-	if (target.type.kind === "type") {
-		if (typeRequiresBox(target.type.type, scope)) {
-			return member(target.contents, 0, scope);
-		}
-	} else {
-		// TODO: Support runtime types
-		throw new TypeError(`Do not support runtime types in contentsOfBox!`);
-	}
-	return target.contents;
+export function extractContentOfBox(target: BoxedValue, scope: Scope) {
+	return member(target.contents, 0, scope);
 }
 
 export type UpdateOperator = "=" | "+=" | "-=" | "*=" | "/=" | "|=" | "&=";
@@ -398,7 +379,13 @@ export const updateOperatorForBinaryOperator: Mapped<"+" | "-" | "*" | "/" | "|"
 export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOperator = "=", location?: LocationSource): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return set(contentsOfBox(dest, scope), source, scope, operator, location);
+			return conditional(
+				typeRequiresBox(dest.type, scope),
+				set(extractContentOfBox(dest, scope), source, scope, operator, location),
+				set(dest.contents, source, scope, operator, location),
+				scope,
+				location,
+			);
 		case "direct": {
 			if (dest.expression.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
@@ -413,7 +400,8 @@ export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOp
 					return binary(binaryOperatorForUpdateOperator[operator], value, source, scope);
 				}, location);
 			}
-			return call(dest.setter, concat(dest.args, [source]), [], scope, location, "set");
+			// TODO: Populate with correct type
+			return call(dest.setter, concat(dest.args, [source]), concat(dest.types, [typeValue("Any")]), scope, location, "set");
 		}
 		case "expression": {
 			switch (dest.expression.type) {
@@ -435,7 +423,13 @@ export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOp
 export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: LocationSource): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return update(contentsOfBox(dest, scope), scope, updater);
+			return conditional(
+				typeRequiresBox(dest.type, scope),
+				set(extractContentOfBox(dest, scope), updater(extractContentOfBox(dest, scope)), scope, "=", location),
+				set(dest.contents, updater(extractContentOfBox(dest, scope)), scope, "=", location),
+				scope,
+				location,
+			);
 		case "direct":
 			switch (dest.expression.type) {
 				case "ThisExpression":
@@ -477,7 +471,7 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 			// Call the getter, apply the operation, then apply the setter
 			let i = -1;
 			const reusableArgs: Value[] = [];
-			const { args, getter, setter } = dest;
+			const { args, types, getter, setter } = dest;
 			function iterate(): Value {
 				if (++i < args.length) {
 					return reuse(args[i], scope, "subscript", (argValue) => {
@@ -485,9 +479,10 @@ export function update(dest: Value, scope: Scope, updater: (value: Value) => Val
 						return iterate();
 					});
 				} else {
-					const valueFetched = call(getter, reusableArgs, [], scope, location, "get");
+					const valueFetched = call(getter, reusableArgs, types, scope, location, "get");
 					const result = updater(valueFetched);
-					return call(setter, concat(reusableArgs, [result]), [], scope, location, "set");
+					// TODO: Pass correct type
+					return call(setter, concat(reusableArgs, [result]), concat(types, [typeValue("Any")]), scope, location, "set");
 				}
 			}
 			return iterate();
@@ -588,7 +583,7 @@ export function read(value: Value, scope: Scope): Expression {
 			if (typeof builder === "undefined") {
 				throw new Error(`Could not find function to read for ${value.name}`);
 			}
-			const unbound = annotateValue(insertFunction(value.name, scope, value.type, builder), value.location);
+			const unbound = annotateValue(insertFunction(value.name, scope, builder, value.type), value.location);
 			let func;
 			if (value.substitutions.length) {
 				func = call(
@@ -616,7 +611,8 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(value.expression, value.location);
 		}
 		case "callable": {
-			const [args, body] = functionize(scope, value.call, value.location);
+			// TODO: Include length to value.call
+			const [args, body] = functionize(scope, "anonymous", (innerScope, arg) => value.call(innerScope, arg, 0), value.type, undefined, value.location);
 			return annotate(functionExpression(undefined, args, annotate(blockStatement(body), value.location)), value.location);
 		}
 		case "direct": {
@@ -639,10 +635,16 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 		}
 		case "subscript": {
-			return annotate(read(call(value.getter, value.args, [], scope, value.location, "get"), scope), value.location);
+			return annotate(read(call(value.getter, value.args, value.types, scope, value.location, "get"), scope), value.location);
 		}
 		case "boxed": {
-			return annotate(read(contentsOfBox(value, scope), scope), value.location);
+			return read(conditional(
+				typeRequiresBox(value.type, scope),
+				extractContentOfBox(value, scope),
+				value.contents,
+				scope,
+				value.location,
+			), scope);
 		}
 		case "conformance":
 		case "type": {
@@ -667,14 +669,16 @@ export function read(value: Value, scope: Scope): Expression {
 					flags: DeclarationFlags.Const,
 					declaration: variableDeclaration("const", [variableDeclarator(mangled, objectExpression([]))]),
 				};
+				function returnValue() {
+					return value;
+				}
 				function witnessTableForConformance(current: ProtocolConformance) {
-					function returnValue() {
-						return value;
-					}
 					const properties = Object.keys(current.functions).map((key) => {
-						const result = current!.functions[key](globalScope, returnValue, voidToVoid, `${stringified}.${key}`);
+						const scopeName = `${stringified}.${key}`;
+						const result = current!.functions[key](globalScope, returnValue, scopeName, 1);
 						if (result.kind === "callable") {
-							const [args, methodBody] = functionize(globalScope, result.call);
+							// TODO: Pass real argument count
+							const [args, methodBody] = functionize(globalScope, scopeName, (innerScope, arg) => result.call(innerScope, arg, 0), result.type);
 							return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
 						} else {
 							return objectProperty(mangleName(key), read(result, scope));
@@ -826,33 +830,25 @@ export const typeTypeValue = typeValue(typeType);
 
 export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<Value | string>, scope: Scope, location?: LocationSource, type: "call" | "get" | "set" = "call"): Value {
 	const getter: ArgGetter = (i) => {
-		if (i < args.length) {
-			return args[i];
+		if (i < 0) {
+			throw new RangeError(`Asked for a negative argument index`);
 		}
-		throw new Error(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i + 1}, but only ${args.length} arguments provided!`);
+		if (i >= args.length) {
+			throw new RangeError(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i + 1}, but only ${args.length} arguments provided`);
+		}
+		return args[i];
 	};
+	if (args.length !== argTypes.length) {
+		throw new RangeError(`Expected arguments and argument types to have the same length`);
+	}
 	switch (target.kind) {
 		case "function":
-			let targetFunctionType: Function;
 			if (target.substitutions.length !== 0) {
 				// Type substitutions are passed as prefix arguments
 				args = concat(target.substitutions, args);
-				const subsitutionTypes = target.substitutions.map(() => typeType);
-				argTypes = concat(argTypes, target.type.arguments.types.map((innerType) => typeValue(innerType)));
-				targetFunctionType = {
-					kind: "function",
-					arguments: {
-						kind: "tuple",
-						types: concat(subsitutionTypes, target.type.arguments.types),
-					},
-					return: target.type.return,
-					attributes: target.type.attributes,
-					throws: target.type.throws,
-					rethrows: target.type.rethrows,
-				};
-			} else {
-				targetFunctionType = target.type;
+				argTypes = concat(target.substitutions.map((): Value | string => typeTypeValue), argTypes);
 			}
+			// console.log(target.name, target.substitutions.length, args, argTypes);
 			let fn;
 			if (typeof target.parentType === "undefined") {
 				// Global functions
@@ -881,12 +877,12 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 					if (typeof fn !== "function") {
 						throw new Error(`Expected a callable function!`);
 					}
-					return annotateValue(fn(scope, getter, targetFunctionType, target.name), location);
+					return annotateValue(fn(scope, getter, target.name, args.length), location);
 				default:
 					if (typeof fn === "function") {
 						throw new Error(`Expected a ${type}ter!`);
 					}
-					return annotateValue(fn[type](scope, getter, targetFunctionType, target.name), location);
+					return annotateValue(fn[type](scope, getter, target.name, args.length), location);
 			}
 		case "callable":
 			if (type !== "call") {
@@ -894,7 +890,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 			}
 			// Inlining is responsible for making the codegen even remotely sane
 			// return call(expr(read(target, scope)), args, scope, location);
-			return annotateValue(target.call(scope, getter), location);
+			return annotateValue(target.call(scope, getter, args.length), location);
 		default:
 			break;
 	}

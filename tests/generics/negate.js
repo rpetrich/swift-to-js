@@ -7,8 +7,8 @@ const $Int$Type = {
       return -value;
     },
 
-    negate(lhs, rhs) {
-      return lhs = -rhs;
+    negate(lhs) {
+      return lhs[0] = -lhs[0];
     },
 
     Numeric: {
@@ -21,7 +21,7 @@ const $Int$Type = {
       },
 
       $added$(lhs, rhs) {
-        return lhs = lhs + rhs;
+        return lhs[0] = lhs[0] + rhs;
       },
 
       $minus$(lhs, rhs) {
@@ -29,7 +29,7 @@ const $Int$Type = {
       },
 
       $subtracted$(lhs, rhs) {
-        return lhs = lhs - rhs;
+        return lhs[0] = lhs[0] - rhs;
       },
 
       $multiply$(lhs, rhs) {
@@ -37,7 +37,7 @@ const $Int$Type = {
       },
 
       $multiplied$(lhs, rhs) {
-        return lhs = lhs * rhs;
+        return lhs[0] = lhs[0] * rhs;
       },
 
       Equatable: {
@@ -66,7 +66,7 @@ const $Int$Type = {
     },
 
     $added$(lhs, rhs) {
-      return lhs = lhs + rhs;
+      return lhs[0] = lhs[0] + rhs;
     },
 
     $minus$(lhs, rhs) {
@@ -74,7 +74,7 @@ const $Int$Type = {
     },
 
     $subtracted$(lhs, rhs) {
-      return lhs = lhs - rhs;
+      return lhs[0] = lhs[0] - rhs;
     },
 
     $multiply$(lhs, rhs) {
@@ -82,7 +82,7 @@ const $Int$Type = {
     },
 
     $multiplied$(lhs, rhs) {
-      return lhs = lhs * rhs;
+      return lhs[0] = lhs[0] * rhs;
     },
 
     Equatable: {
@@ -110,8 +110,8 @@ const $Double$Type = {
       return -value;
     },
 
-    negate(lhs, rhs) {
-      return lhs = -rhs;
+    negate(lhs) {
+      return lhs[0] = -lhs[0];
     }
 
   }

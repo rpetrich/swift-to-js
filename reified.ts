@@ -3,7 +3,7 @@ import { parseType } from "./parse";
 import { lookup, mangleName, Scope } from "./scope";
 import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, contentsOfBox, expr, functionValue, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeValue, undefinedValue, Value } from "./values";
+import { array, call, conditional, expr, extractContentOfBox, functionValue, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeTypeValue, typeValue, undefinedValue, Value } from "./values";
 
 import { isLiteral, objectExpression, objectProperty, Expression } from "babel-types";
 
@@ -97,9 +97,13 @@ export function protocol(conformances: ProtocolConformanceMap = emptyConformance
 	return {
 		fields: emptyFields,
 		functions(functionName) {
-			return (scope, arg, type) => {
+			return (scope, arg, name, length) => {
 				const typeArg = arg(0, "T");
-				return call(functionValue(functionName, typeArg, type), type.arguments.types.map((_, i) => i ? arg(i) : typeArg), type.arguments.types.map((innerType) => typeValue(innerType)), scope);
+				const fn = typeFromValue(typeArg, scope).functions(functionName);
+				if (typeof fn !== "function") {
+					throw new TypeError(`Expected a function, got a ${typeof fn}`);
+				}
+				return fn(scope, arg, name, length);
 			};
 		},
 		conformances,
@@ -240,7 +244,12 @@ export function expressionSkipsCopy(expression: Expression): boolean {
 export function store(dest: Value, source: Value, type: Value, scope: Scope): Value {
 	switch (dest.kind) {
 		case "boxed":
-			return store(contentsOfBox(dest, scope), source, type, scope);
+			return conditional(
+				typeRequiresBox(dest.type, scope),
+				store(extractContentOfBox(dest, scope), source, type, scope),
+				store(dest.contents, source, type, scope),
+				scope,
+			);
 		case "direct":
 			const reified = typeFromValue(type, scope);
 			if (reified.store) {

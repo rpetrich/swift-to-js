@@ -6,7 +6,7 @@ import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass,
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeType, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import { transformFromAst } from "babel-core";
 import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "babel-types";
@@ -147,7 +147,20 @@ function getTypeValue(term: Term) {
 function findFunctionType(type: Type): Function {
 	switch (type.kind) {
 		case "generic":
-			return findFunctionType(type.base);
+			const baseType = findFunctionType(type.base);
+			return {
+				kind: "function",
+				arguments: {
+					kind: "tuple",
+					types: concat(type.arguments.map((argument) => typeType), baseType.arguments.types),
+					location: baseType.arguments.location,
+				},
+				return: baseType.return,
+				throws: baseType.throws,
+				rethrows: baseType.rethrows,
+				attributes: baseType.attributes,
+				location: baseType.location,
+			};
 		case "function":
 			return type;
 		default:
@@ -561,22 +574,21 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				location: type.location,
 			};
 			const getter = extractReference(term, scope, getterType);
-			// TODO: Define the setter type
 			const setterType: Function = {
 				kind: "function",
 				arguments: {
 					kind: "tuple",
-					types: term.children.map(getType),
+					types: concat(term.children.map(getType), [type]),
 					location: type.location,
 				},
-				return: type,
+				return: parseType("Void"),
 				throws: false,
 				rethrows: false,
 				attributes: [],
 				location: type.location,
 			};
 			const setter = extractReference(term, scope, setterType);
-			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term);
+			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term.children.map(getTypeValue), term);
 		}
 		case "prefix_unary_expr":
 		case "call_expr":
@@ -777,7 +789,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						return result;
 					}
 				});
-			}, getType(term), term);
+			}, getFunctionType(term), term);
 		}
 		case "tuple_shuffle_expr": {
 			const elements = getProperty(term, "elements", Array.isArray);
@@ -995,31 +1007,30 @@ function flagsForDeclarationTerm(term: Term): DeclarationFlags {
 }
 
 function typeMappingForGenericArguments(typeArguments: Type, arg: ArgGetter): TypeMap {
-	if (typeArguments.kind !== "generic") {
-		throw new TypeError(`Expected a generic type, got a ${typeArguments.kind}`);
-	}
 	const result: TypeMap = Object.create(null);
-	for (let i = 0; i < typeArguments.arguments.length; i++) {
-		const typeParameter = typeArguments.arguments[i];
-		let name: string;
-		if (typeParameter.kind === "name") {
-			name = typeParameter.name;
-		} else if (typeParameter.kind === "constrained") {
-			if (typeParameter.type.kind === "name") {
-				name = typeParameter.type.name;
+	if (typeArguments.kind === "generic") {
+		for (let i = 0; i < typeArguments.arguments.length; i++) {
+			const typeParameter = typeArguments.arguments[i];
+			let name: string | undefined;
+			if (typeParameter.kind === "name") {
+				name = typeParameter.name;
+			} else if (typeParameter.kind === "constrained") {
+				if (typeParameter.type.kind === "name") {
+					name = typeParameter.type.name;
+				} else {
+					throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.type.kind}`);
+				}
 			} else {
-				throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.type.kind}`);
+				throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.kind}`);
 			}
-		} else {
-			throw new Error(`Expected a type name or a constrained type name, got a ${typeParameter.kind}`);
+			result[name] = (scope: Scope) => typeFromValue(arg(i, name), scope);
 		}
-		result[name] = (scope: Scope) => typeFromValue(arg(i, name), scope);
 	}
 	return result;
 }
 
 function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][], constructedTypeName: string | undefined, scope: Scope, functions: FunctionMap, selfValue?: MappedNameValue): (scope: Scope, arg: ArgGetter) => Value {
-	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Type, isInitial: boolean): (scope: Scope, arg: ArgGetter) => Value {
+	function constructCallable(head: Statement[], parameterListIndex: number, functionType: Function, isInitial: boolean): (scope: Scope, arg: ArgGetter) => Value {
 		return (targetScope: Scope, arg: ArgGetter) => {
 			// Apply generic function mapping for outermost function
 			let typeMap: TypeMap | undefined;
@@ -1047,7 +1058,11 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 				const parameterStatements = concat(head, applyParameterMappings(typeArgumentCount, termsWithName(parameterList, "parameter"), arg, targetScope, childScope, isInitial && !!constructedTypeName));
 				if (parameterListIndex !== parameterLists.length - 1) {
 					// Not the innermost function, emit a wrapper. If we were clever we could curry some of the body
-					return callable(constructCallable(parameterStatements, parameterListIndex + 1, returnType(functionType), false), functionType);
+					const type = returnType(functionType);
+					if (type.kind !== "function") {
+						throw new TypeError(`Expected a function as return type of wrapper function, instead got ${type.kind}`);
+					}
+					return callable(constructCallable(parameterStatements, parameterListIndex + 1, type, false), type);
 				}
 				// Emit the innermost function
 				const brace = findTermWithName(term.children, "brace_stmt");
@@ -1103,7 +1118,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 		};
 	}
 
-	return constructCallable(emptyStatements, 0, getType(term), true);
+	return constructCallable(emptyStatements, 0, getFunctionType(term), true);
 }
 
 function noArguments(): never {
@@ -1147,13 +1162,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				throw new Error(`Expected a parameter list for a function declaration`);
 			}
 			const fn = translateFunctionTerm(name, term, parameterLists, isConstructor ? "self" : undefined, scope, functions);
+			const type = getFunctionType(term);
 			if (/^anonname=/.test(name)) {
 				scope.functions[name] = fn;
 			} else if (!isConstructor && (flagsForDeclarationTerm(term) & DeclarationFlags.Export) && functions === scope.functions) {
-				addFunctionToType(functions, undefined, name, noinline(fn));
-				insertFunction(name, scope, getFunctionType(term), fn, undefined, true);
+				addFunctionToType(functions, undefined, name, noinline(fn, type));
+				insertFunction(name, scope, fn, type, undefined, true);
 			} else {
-				addFunctionToType(functions, undefined, name, isConstructor ? fn : noinline(fn));
+				addFunctionToType(functions, undefined, name, isConstructor ? fn : noinline(fn, type));
 			}
 			return emptyStatements;
 		}
@@ -1349,7 +1365,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const enumName = term.args[0];
 			const copyFunctionName = `${enumName}.copy`;
 			const methods: FunctionMap = {
-				[copyFunctionName]: noinline((innerScope, arg) => copyHelper(arg(0, "source"), innerScope)),
+				[copyFunctionName]: noinline((innerScope, arg) => copyHelper(arg(0, "source"), innerScope), "(T) -> T"),
 			};
 			function copyHelper(value: Value, innerScope: Scope): Value {
 				// Passthrough to the underlying type, which should generally be simple
@@ -1435,7 +1451,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					methods[name] = wrapped((innerScope, arg) => {
 						const args = type.arguments.types.map((argType, argIndex) => copy(arg(argIndex), typeValue(argType)));
 						return array(concat([literal(index) as Value], args), scope);
-					});
+					}, type);
 					cases.push({
 						name,
 						fieldTypes: type.arguments.types.map((argType) => {
@@ -1634,7 +1650,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							const type = getTypeValue(childDeclaration);
 							if (flagsForDeclarationTerm(child) & DeclarationFlags.Export) {
 								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(thisExpression()));
-								const [args, body] = functionize(scope, (innerScope) => fn(innerScope, () => expr(thisExpression())));
+								const [args, body] = functionize(scope, propertyName, (innerScope) => fn(innerScope, () => expr(thisExpression())), getFunctionType(childDeclaration));
 								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(body)));
 								// Default implementation will call getter/setter
 								layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope)));

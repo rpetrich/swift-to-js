@@ -4,6 +4,9 @@ export function add$lhs$rhs$(T, lhs, rhs) {
 export function subtract$lhs$rhs$(T, lhs, rhs) {
   return T.Numeric.$minus$(lhs, rhs);
 }
+export function double$target$(T, target) {
+  T.Numeric.$added$(target, target);
+}
 const $Int$Type = {
   Numeric: {
     init$exactly$(value) {
@@ -15,7 +18,7 @@ const $Int$Type = {
     },
 
     $added$(lhs, rhs) {
-      return lhs = lhs + rhs;
+      return lhs[0] = lhs[0] + rhs;
     },
 
     $minus$(lhs, rhs) {
@@ -23,7 +26,7 @@ const $Int$Type = {
     },
 
     $subtracted$(lhs, rhs) {
-      return lhs = lhs - rhs;
+      return lhs[0] = lhs[0] - rhs;
     },
 
     $multiply$(lhs, rhs) {
@@ -31,7 +34,7 @@ const $Int$Type = {
     },
 
     $multiplied$(lhs, rhs) {
-      return lhs = lhs * rhs;
+      return lhs[0] = lhs[0] * rhs;
     },
 
     Equatable: {
@@ -69,4 +72,12 @@ export function addInts$lhs$rhs$(lhs, rhs) {
 }
 export function subtractInts$lhs$rhs$(lhs, rhs) {
   return subtract$lhs$rhs$($Int$Type, lhs, rhs);
+}
+export function double$int$(int) {
+  double$target$($Int$Type, int);
+}
+export function double$ofInt$(int) {
+  const temp = [int];
+  double$target$($Int$Type, temp);
+  return temp[0];
 }
