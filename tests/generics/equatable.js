@@ -49,7 +49,8 @@ const $$String$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length) {
+          if (lhs[i] !== rhs[i]) break;
           i++;
         }
 
@@ -67,7 +68,8 @@ const $$String$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length) {
+          if (lhs[i] !== rhs[i]) break;
           i++;
         }
 
@@ -85,7 +87,8 @@ const $$String$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && lhs[i] === rhs[i]) {
+        while (i < lhs.length) {
+          if (lhs[i] !== rhs[i]) break;
           i++;
         }
 
@@ -135,11 +138,10 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && function () {
+        while (i < lhs.length) {
           const lhs = lhs[i];
           const rhs = rhs[i];
-          return lhs.x === rhs.x && lhs.y === rhs.y;
-        }()) {
+          if (!(lhs.x === rhs.x && lhs.y === rhs.y)) break;
           i++;
         }
 
@@ -157,11 +159,10 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && function () {
+        while (i < lhs.length) {
           const lhs = lhs[i];
           const rhs = rhs[i];
-          return lhs.x === rhs.x && lhs.y === rhs.y;
-        }()) {
+          if (!(lhs.x === rhs.x && lhs.y === rhs.y)) break;
           i++;
         }
 
@@ -179,11 +180,10 @@ const $$Point$$Type = {
       } else {
         let i = 0;
 
-        while (i < lhs.length && function () {
+        while (i < lhs.length) {
           const lhs = lhs[i];
           const rhs = rhs[i];
-          return lhs.x === rhs.x && lhs.y === rhs.y;
-        }()) {
+          if (!(lhs.x === rhs.x && lhs.y === rhs.y)) break;
           i++;
         }
 

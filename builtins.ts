@@ -4,9 +4,9 @@ import { expressionSkipsCopy, field, inheritLayout, primitive, protocol, reifyTy
 import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Tuple, Type } from "./types";
 import { cached, concat, expectLength, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, variable, ArgGetter, BinaryOperator, Value } from "./values";
 
-import { arrayPattern, blockStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
+import { arrayPattern, blockStatement, breakStatement, expressionStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -1001,34 +1001,40 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 										[
 											addVariable(scope, i, "Int", literal(0)),
 											whileStatement(
-												read(logical("&&",
-													binary("<",
-														lookup(i, scope),
-														member(lhs, "length", scope),
-														scope,
-													),
-													call(
-														call(
-															functionValue("==", conformance(valueType, "Equatable", scope), "() -> () -> Bool"),
-															[valueType],
-															[typeTypeValue],
-															scope,
-														),
-														[
-															member(lhs, lookup(i, scope), scope),
-															member(rhs, lookup(i, scope), scope),
-														],
-														[
-															valueType,
-															valueType,
-														],
-														scope,
-													),
+												read(binary("<",
+													lookup(i, scope),
+													member(lhs, "length", scope),
 													scope,
 												), scope),
-												blockStatement(
+												blockStatement(concat(
+													ignore(
+														transform(
+															call(
+																call(
+																	functionValue("!=", conformance(valueType, "Equatable", scope), "(Type) -> (T, T) -> Bool"),
+																	[valueType],
+																	[typeTypeValue],
+																	scope,
+																),
+																[
+																	member(lhs, lookup(i, scope), scope),
+																	member(rhs, lookup(i, scope), scope),
+																],
+																[
+																	valueType,
+																	valueType,
+																],
+																scope,
+															),
+															scope,
+															(expression) => statements([
+																ifStatement(expression, breakStatement()),
+															]),
+														),
+														scope,
+													),
 													ignore(expr(updateExpression("++", read(lookup(i, scope), scope))), scope),
-												),
+												)),
 											),
 										],
 										ignore(set(

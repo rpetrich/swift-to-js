@@ -823,14 +823,16 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 	const transformed = transform(value, scope, expr);
 	switch (transformed.kind) {
 		case "statements":
-			const parsed = parseStatementsValue(transformed, (statement) => statement.type === "ExpressionStatement" || statement.type === "VariableDeclaration");
-			if (typeof parsed === "undefined") {
-				return transformed.statements;
-			} else if (typeof parsed.value !== "undefined" && !isPure(parsed.value)) {
-				return concat(parsed.statements, [expressionStatement(parsed.value)]);
-			} else {
-				return parsed.statements;
+			// TODO: Disallow return statements nested inside other statements
+			const parsed = parseStatementsValue(transformed, (statement) => statement.type !== "ReturnStatement");
+			if (typeof parsed !== "undefined") {
+				if (typeof parsed.value !== "undefined" && !isPure(parsed.value)) {
+					return concat(parsed.statements, [expressionStatement(parsed.value)]);
+				} else {
+					return parsed.statements;
+				}
 			}
+			break;
 		case "expression":
 			return ignoreExpression(transformed.expression, scope);
 		default:
