@@ -1066,7 +1066,13 @@ function simplifyExpression(expression: Expression | PatternLike | SpreadElement
 			const newExpressions: Expression[] = [];
 			for (let i = 0; i < oldExpressions.length - 1; i++) {
 				const simplified = simplifyExpression(oldExpressions[i]);
-				if (!isPure(simplified)) {
+				if (simplified.type === "SequenceExpression" && isPure(simplified.expressions[simplified.expressions.length - 1])) {
+					for (const element of simplified.expressions) {
+						if (!isPure(element)) {
+							newExpressions.push(element);
+						}
+					}
+				} else if (!isPure(simplified)) {
 					newExpressions.push(simplified);
 				}
 			}
