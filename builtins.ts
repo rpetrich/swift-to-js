@@ -1696,11 +1696,11 @@ export const functions: FunctionMap = {
 		const a = arg(1, "a");
 		const b = arg(2, "b");
 		const temp = uniqueName(scope, "temp");
-		return statements([
-			addVariable(scope, temp, type, a, DeclarationFlags.Const),
-			expressionStatement(read(set(a, b, scope), scope)),
-			expressionStatement(read(set(b, lookup(temp, scope), scope), scope)),
-		]);
+		return statements(concat(
+			[addVariable(scope, temp, type, a, DeclarationFlags.Const)],
+			ignore(set(a, b, scope), scope),
+			ignore(set(b, lookup(temp, scope), scope), scope),
+		));
 	},
 };
 

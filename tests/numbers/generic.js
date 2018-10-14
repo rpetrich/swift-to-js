@@ -18,7 +18,7 @@ const $Int$Type = {
     },
 
     $added$(lhs, rhs) {
-      return lhs[0] = lhs[0] + rhs;
+      lhs[0] = lhs[0] + rhs;
     },
 
     $minus$(lhs, rhs) {
@@ -26,7 +26,7 @@ const $Int$Type = {
     },
 
     $subtracted$(lhs, rhs) {
-      return lhs[0] = lhs[0] - rhs;
+      lhs[0] = lhs[0] - rhs;
     },
 
     $multiply$(lhs, rhs) {
@@ -34,7 +34,7 @@ const $Int$Type = {
     },
 
     $multiplied$(lhs, rhs) {
-      return lhs[0] = lhs[0] * rhs;
+      lhs[0] = lhs[0] * rhs;
     },
 
     Equatable: {

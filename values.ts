@@ -1,5 +1,5 @@
 import generate from "@babel/generator";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, unaryExpression, variableDeclaration, variableDeclarator, Expression, ExpressionStatement, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, SpreadProperty, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -381,47 +381,51 @@ export const updateOperatorForBinaryOperator: Mapped<"+" | "-" | "*" | "/" | "|"
 };
 
 export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOperator = "=", location?: LocationSource): Value {
+	let result: Value;
 	switch (dest.kind) {
 		case "boxed":
-			return conditional(
+			result = conditional(
 				typeRequiresBox(dest.type, scope),
 				set(extractContentOfBox(dest, scope), source, scope, operator, location),
 				set(dest.contents, source, scope, operator, location),
 				scope,
 				location,
 			);
+			break;
 		case "direct": {
 			if (dest.expression.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
 			}
-			const result = assignmentExpression(operator, dest.expression, read(source, scope));
-			return expr(result);
-			// return statements([annotate(expressionStatement(result), location)], location);
+			result = expr(assignmentExpression(operator, dest.expression, read(source, scope)));
+			break;
 		}
 		case "subscript": {
 			if (operator !== "=") {
-				return update(dest, scope, (value) => {
+				result = update(dest, scope, (value) => {
 					return binary(binaryOperatorForUpdateOperator[operator], value, source, scope);
 				}, location);
+			} else {
+				// TODO: Populate with correct type
+				result = call(dest.setter, concat(dest.args, [source]), concat(dest.types, [typeValue("Any")]), scope, location, "set");
 			}
-			// TODO: Populate with correct type
-			return call(dest.setter, concat(dest.args, [source]), concat(dest.types, [typeValue("Any")]), scope, location, "set");
+			break;
 		}
 		case "expression": {
 			switch (dest.expression.type) {
 				case "Identifier":
 				case "MemberExpression":
-					const result = assignmentExpression(operator, dest.expression, read(source, scope));
-					return expr(result);
-					// return statements([annotate(expressionStatement(result), location)], location);
-				default:
+					result = expr(assignmentExpression(operator, dest.expression, read(source, scope)));
 					break;
+				default:
+					throw new TypeError(`Unable to set an expression with a ${dest.expression.type} value`);
 			}
+			break;
 		}
 		default: {
 			throw new TypeError(`Unable to set a ${dest.kind} value`);
 		}
 	}
+	return statements(ignore(result, scope), location);
 }
 
 export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: LocationSource): Value {
@@ -503,28 +507,31 @@ export function array(values: Value[], scope: Scope, location?: LocationSource) 
 	let prefixStatements: Statement[] = [];
 	const elements: Expression[] = [];
 	for (const value of values.slice().reverse()) {
-		if (value.kind === "statements" && value.statements[value.statements.length - 1].type === "ReturnStatement") {
-			const argument = (value.statements[value.statements.length - 1] as ReturnType<typeof returnStatement>).argument;
-			const newStatements = value.statements.slice(0, value.statements.length - 1);
-			if (argument === null) {
-				elements.unshift(identifier("undefined"));
-			} else if (argument.type === "Identifier") {
-				elements.unshift(argument);
-			} else {
-				const temp = uniqueName(scope, "element");
-				newStatements.push(addVariable(scope, temp, dummyType, expr(argument), DeclarationFlags.Const));
-				elements.unshift(read(lookup(temp, scope), scope));
+		if (value.kind === "statements") {
+			// TODO: Disallow return statements nested inside other statements
+			const parsed = parseStatementsValue(value, (statement) => statement.type !== "ReturnStatement");
+			if (typeof parsed !== "undefined") {
+				let newStatements = parsed.statements.slice();
+				if (typeof parsed.value === "undefined") {
+					elements.unshift(undefinedLiteral);
+				} else if (parsed.value.type === "Identifier") {
+					elements.unshift(parsed.value);
+				} else {
+					const temp = uniqueName(scope, "element");
+					newStatements = concat(newStatements, [addVariable(scope, temp, dummyType, expr(parsed.value), DeclarationFlags.Const)]);
+					elements.unshift(read(lookup(temp, scope), scope));
+				}
+				prefixStatements = concat(newStatements, prefixStatements);
+				continue;
 			}
-			prefixStatements = concat(newStatements, prefixStatements);
+		}
+		const expression = read(value, scope);
+		if (prefixStatements.length !== 0 && !isPure(expression)) {
+			const temp = uniqueName(scope, "element");
+			prefixStatements.push(addVariable(scope, temp, dummyType, expr(expression), DeclarationFlags.Const));
+			elements.unshift(read(lookup(temp, scope), scope));
 		} else {
-			const expression = read(value, scope);
-			if (prefixStatements.length !== 0 && !isPure(expression)) {
-				const temp = uniqueName(scope, "element");
-				prefixStatements.push(addVariable(scope, temp, dummyType, expr(expression), DeclarationFlags.Const));
-				elements.unshift(read(lookup(temp, scope), scope));
-			} else {
-				elements.unshift(expression);
-			}
+			elements.unshift(expression);
 		}
 	}
 	if (prefixStatements.length === 0) {
@@ -564,6 +571,24 @@ function expressionFromStatement(statement: Statement): Expression {
 		return statement.expression;
 	}
 	throw new TypeError(`Expected expression statment, got a ${statement.type}`);
+}
+
+function parseStatementsValue(value: StatementsValue, allowedStatement: (statement: Statement) => boolean): { statements: Statement[], value?: Expression } | undefined {
+	const body = value.statements;
+	if (body.length === 0) {
+		return { statements: body };
+	}
+	// Avoid generating an IIFE for statements list
+	const lastStatement = body[body.length - 1];
+	if (lastStatement.type === "ReturnStatement") {
+		const exceptLast = body.slice(0, body.length - 1);
+		if (exceptLast.every(allowedStatement)) {
+			return lastStatement.argument === null ? { statements: exceptLast } : { statements: exceptLast, value: lastStatement.argument };
+		}
+	} else if (body.every(allowedStatement)) {
+		return { statements: body };
+	}
+	return undefined;
 }
 
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
@@ -625,20 +650,15 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(value.expression, value.location);
 		}
 		case "statements": {
-			const body = value.statements;
-			if (body.length > 0) {
-				// Avoid generating an IIFE for statements list
-				const lastStatement = body[body.length - 1];
-				if (lastStatement.type === "ReturnStatement") {
-					const exceptLast = body.slice(0, body.length - 1);
-					if (exceptLast.every(isExpressionStatement)) {
-						return sequenceExpression(concat(exceptLast.map(expressionFromStatement), [lastStatement.argument === null ? identifier("undefined") : lastStatement.argument]));
-					}
-				} else if (body.every(isExpressionStatement)) {
-					return sequenceExpression(concat(body.map(expressionFromStatement), [undefinedLiteral]));
-				}
+			const parsed = parseStatementsValue(value, isExpressionStatement);
+			if (typeof parsed === "undefined") {
+				return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
 			}
-			return annotate(callExpression(annotate(functionExpression(undefined, [], annotate(blockStatement(value.statements), value.location)), value.location), []), value.location);
+			const result = typeof parsed.value !== "undefined" ? parsed.value : undefinedLiteral;
+			if (parsed.statements.length === 0) {
+				return result;
+			}
+			return sequenceExpression(concat(parsed.statements.map(expressionFromStatement), [result]));
 		}
 		case "subscript": {
 			return annotate(read(call(value.getter, value.args, value.types, scope, value.location, "get"), scope), value.location);
@@ -783,6 +803,13 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 			}
 			return body;
 		}
+		case "ConditionalExpression": {
+			return [ifStatement(
+				expression.test,
+				blockStatement(ignoreExpression(expression.consequent, scope)),
+				blockStatement(ignoreExpression(expression.alternate, scope)),
+			)];
+		}
 		default:
 			if (isLiteral(expression)) {
 				return [];
@@ -796,41 +823,33 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 	const transformed = transform(value, scope, expr);
 	switch (transformed.kind) {
 		case "statements":
-			return transformed.statements;
+			const parsed = parseStatementsValue(transformed, (statement) => statement.type === "ExpressionStatement" || statement.type === "VariableDeclaration");
+			if (typeof parsed === "undefined") {
+				return transformed.statements;
+			} else if (typeof parsed.value !== "undefined" && !isPure(parsed.value)) {
+				return concat(parsed.statements, [expressionStatement(parsed.value)]);
+			} else {
+				return parsed.statements;
+			}
 		case "expression":
 			return ignoreExpression(transformed.expression, scope);
 		default:
 			break;
 	}
-	return [expressionStatement(read(value, scope))];
+	return ignoreExpression(read(value, scope), scope);
 }
 
 
 function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
 	if (value.kind === "statements") {
-		const contents = value.statements;
-		if (contents.length === 0) {
-			return callback(undefinedLiteral);
-		}
-		const lastStatement = contents[contents.length - 1];
-		let head: Statement[];
-		let tail: Value;
-		if (lastStatement.type === "ReturnStatement") {
-			head = contents.slice(0, contents.length - 1);
-			tail = callback(lastStatement.argument === null ? identifier("undefined") : simplifyExpression(lastStatement.argument));
-		} else {
-			head = contents;
-			tail = callback(undefinedLiteral);
-		}
-		if (tail.kind === "expression" && tail.expression.type === "Identifier" && tail.expression.name === "undefined") {
-			return statements(head);
-		} else if (tail.kind === "statements") {
-			return statements(concat(head, tail.statements));
-		} else {
+		// TODO: Disallow return statements nested inside other statements
+		const parsed = parseStatementsValue(value, (statement) => statement.type !== "ReturnStatement");
+		if (typeof parsed !== "undefined") {
+			const tail = callback(typeof parsed.value !== "undefined" ? parsed.value : undefinedLiteral);
 			return statements(concat(
-				head,
-				[returnStatement(simplifyExpression(read(tail, scope)))],
-			));
+				parsed.statements,
+				tail.kind === "statements" ? tail.statements : [returnStatement(simplifyExpression(read(tail, scope)))],
+			), tail.location);
 		}
 	}
 	return callback(simplifyExpression(read(value, scope)));
@@ -1080,6 +1099,9 @@ function simplifyExpression(expression: Expression | PatternLike | SpreadElement
 				return simplifyExpression(oldExpressions[oldExpressions.length - 1]);
 			} else {
 				newExpressions.push(simplifyExpression(oldExpressions[oldExpressions.length - 1]));
+				if (newExpressions.length === 1) {
+					return annotate(newExpressions[0], expression.loc);
+				}
 				return annotate(sequenceExpression(newExpressions), expression.loc);
 			}
 		}
