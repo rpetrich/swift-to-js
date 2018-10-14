@@ -6,7 +6,7 @@ import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass,
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, tuple, typeFromValue, typeType, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedLiteral, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import generate from "@babel/generator";
 import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, sequenceExpression, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, Identifier, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement, ThisExpression } from "@babel/types";
@@ -1180,16 +1180,16 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "return_stmt": {
 			expectLength(term.children, 0, 1);
 			if (term.children.length) {
-				const value = translateTermToValue(term.children[0], scope);
+				const value = transform(translateTermToValue(term.children[0], scope), scope, (expression) => {
+					if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
+						return expr(expression);
+					}
+					return copy(expr(expression), getTypeValue(term.children[0]));
+				});
 				if (value.kind === "statements") {
 					return value.statements;
 				}
-				const expression = read(value, scope);
-				if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
-					return [annotate(returnStatement(expression), term)];
-				}
-				const copied = copy(expr(expression), getTypeValue(term.children[0]));
-				return [annotate(returnStatement(read(copied, scope)), term)];
+				return [annotate(returnStatement(read(value, scope)), term)];
 			} else if (term.properties.implicit) {
 				return [annotate(returnStatement(read(lookup("self", scope), scope)), term)];
 			} else {

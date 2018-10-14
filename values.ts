@@ -839,8 +839,10 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 	return ignoreExpression(read(value, scope), scope);
 }
 
-
-function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
+export function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
+	if (value.kind === "tuple" && value.values.length > 1) {
+		value = array(value.values, scope, value.location);
+	}
 	if (value.kind === "statements") {
 		// TODO: Disallow return statements nested inside other statements
 		const parsed = parseStatementsValue(value, (statement) => statement.type !== "ReturnStatement");
