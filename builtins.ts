@@ -78,7 +78,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
 	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
 	function initExactly(outerScope: Scope, outerArg: ArgGetter): Value {
-		const sourceTypeArg = outerArg(1, "T");
+		const sourceTypeArg = outerArg(1, "Self");
 		return callable((scope: Scope, arg: ArgGetter) => {
 			const sourceIntConformance = conformance(sourceTypeArg, integerTypeName, scope);
 			const source = rangeForNumericType(typeFromValue(sourceIntConformance, scope), scope);
@@ -110,7 +110,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 					scope,
 				);
 			});
-		}, "(T) -> T");
+		}, "(Self) -> Self");
 	}
 	const customStringConvertibleConformance: ProtocolConformance = {
 		functions: {
@@ -126,17 +126,17 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	};
 	const equatableConformance: ProtocolConformance = {
 		functions: {
-			"==": wrapped(binaryBuiltin("===", 0), "(T, T) -> Bool"),
-			"!=": wrapped(binaryBuiltin("!==", 0), "(T, T) -> Bool"),
+			"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+			"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 		},
 		conformances: Object.create(null),
 	};
 	const numericConformance: ProtocolConformance = {
 		functions: {
 			"init(exactly:)": initExactly,
-			"+": wrapped(binaryBuiltin("+", 0, (value, scope) => integerRangeCheck(scope, value, widerHigh, range)), "(T, T) -> T"),
-			"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range)), "(T, T) -> T"),
-			"*": wrapped(binaryBuiltin("*", 0, (value, scope) => integerRangeCheck(scope, value, widerBoth, range)), "(T, T) -> T"),
+			"+": wrapped(binaryBuiltin("+", 0, (value, scope) => integerRangeCheck(scope, value, widerHigh, range)), "(Self, Self) -> Self"),
+			"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range)), "(Self, Self) -> Self"),
+			"*": wrapped(binaryBuiltin("*", 0, (value, scope) => integerRangeCheck(scope, value, widerBoth, range)), "(Self, Self) -> Self"),
 		},
 		conformances: {
 			Equatable: equatableConformance,
@@ -144,7 +144,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	};
 	const signedNumericConformance: ProtocolConformance = {
 		functions: {
-			"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(T) -> T"),
+			"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(Self) -> Self"),
 		},
 		conformances: {
 			Numeric: numericConformance,
@@ -152,10 +152,10 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	};
 	const comparableConformance: ProtocolConformance = {
 		functions: {
-			"<": wrapped(binaryBuiltin("<", 0), "(T, T) -> Bool"),
-			">": wrapped(binaryBuiltin(">", 0), "(T, T) -> Bool"),
-			"<=": wrapped(binaryBuiltin("<=", 0), "(T, T) -> Bool"),
-			">=": wrapped(binaryBuiltin(">=", 0), "(T, T) -> Bool"),
+			"<": wrapped(binaryBuiltin("<", 0), "(Self, Self) -> Bool"),
+			">": wrapped(binaryBuiltin(">", 0), "(Self, Self) -> Bool"),
+			"<=": wrapped(binaryBuiltin("<=", 0), "(Self, Self) -> Bool"),
+			">=": wrapped(binaryBuiltin(">=", 0), "(Self, Self) -> Bool"),
 		},
 		conformances: {
 			Equatable: equatableConformance,
@@ -165,7 +165,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 		functions: {
 			"...": wrapped((scope, arg) => {
 				return tuple([arg(0, "start"), arg(1, "end")]);
-			}, "(T, T) -> T"),
+			}, "(Self, Self) -> Self"),
 		},
 		conformances: {
 			Equatable: equatableConformance,
@@ -184,11 +184,11 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	};
 	const fixedWidthIntegerConformance: ProtocolConformance = {
 		functions: {
-			"&+": wrapped(binaryBuiltin("+", 0, wrap), "(T, T) -> T"),
-			"&*": wrapped(binaryBuiltin("*", 0, wrap), "(T, T) -> T"),
-			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(T, T) -> T"),
-			"&<<": wrapped(binaryBuiltin("<<", 0, wrap), "(T, T) -> T"),
-			"&>>": wrapped(binaryBuiltin(">>", 0, wrap), "(T, T) -> T"),
+			"&+": wrapped(binaryBuiltin("+", 0, wrap), "(Self, Self) -> Self"),
+			"&*": wrapped(binaryBuiltin("*", 0, wrap), "(Self, Self) -> Self"),
+			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
+			"&<<": wrapped(binaryBuiltin("<<", 0, wrap), "(Self, Self) -> Self"),
+			"&>>": wrapped(binaryBuiltin(">>", 0, wrap), "(Self, Self) -> Self"),
 		},
 		conformances: {
 			BinaryInteger: binaryIntegerConformance,
@@ -204,7 +204,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				return literal(max);
 			},
 			"init(_:)": (outerScope, outerArg, type) => {
-				const sourceTypeArg = outerArg(1, "T");
+				const sourceTypeArg = outerArg(1, "Self");
 				return callable((scope, arg) => {
 					const sourceType = typeFromValue(conformance(sourceTypeArg, integerTypeName, scope), scope);
 					return integerRangeCheck(
@@ -213,10 +213,10 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 						rangeForNumericType(sourceType, scope),
 						range,
 					);
-				}, "(T) -> T");
+				}, "(Self) -> Self");
 			},
 			"init(exactly:)": initExactly,
-			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(T, T) -> T"),
+			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
 		},
 		conformances: {
 			FixedWidthInteger: fixedWidthIntegerConformance,
@@ -227,7 +227,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	const reifiedType: ReifiedType = {
 		fields,
 		functions: lookupForMap({
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(T) -> T"),
+			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
 			"init(clamping:)": (scope: Scope, arg: ArgGetter, name: string) => {
 				const source = rangeForNumericType(typeFromValue(conformance(arg(1, "Other"), integerTypeName, scope), scope), scope);
 				return callable((innerScope, innerArg) => {
@@ -265,33 +265,33 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 							);
 						}
 					});
-				}, "(T) -> T");
+				}, "(Self) -> Self");
 			},
-			"+": wrapped((scope, arg, type) => integerRangeCheck(scope, binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), widerHigh, range), "(T) -> T"),
+			"+": wrapped((scope, arg, type) => integerRangeCheck(scope, binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), widerHigh, range), "(Self) -> Self"),
 			"-": wrapped((scope, arg, type, length) => {
 				if (length === 1) {
 					return integerRangeCheck(scope, unary("-", arg(0, "value"), scope), widerLow, range);
 				}
 				return integerRangeCheck(scope, binary("-", arg(0, "lhs"), arg(1, "rhs"), scope), widerLow, range);
-			}, "(T) -> T"),
-			"*": wrapped((scope, arg, type) => integerRangeCheck(scope, binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), widerBoth, range), "(T) -> T"),
+			}, "(Self) -> Self"),
+			"*": wrapped((scope, arg, type) => integerRangeCheck(scope, binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), widerBoth, range), "(Self) -> Self"),
 			"/": (scope, arg) => binary("|", binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), literal(0), scope),
-			"%": wrapped(binaryBuiltin("%", 0), "(T, T) -> T"),
-			"<": wrapped(binaryBuiltin("<", 0), "(T, T) -> Bool"),
-			">": wrapped(binaryBuiltin(">", 0), "(T, T) -> Bool"),
-			"<=": wrapped(binaryBuiltin("<=", 0), "(T, T) -> Bool"),
-			">=": wrapped(binaryBuiltin(">=", 0), "(T, T) -> Bool"),
-			"&": wrapped(binaryBuiltin("&", 0), "(T, T) -> T"),
-			"|": wrapped(binaryBuiltin("|", 0), "(T, T) -> T"),
-			"^": wrapped(binaryBuiltin("^", 0), "(T, T) -> T"),
-			"==": wrapped(binaryBuiltin("===", 0), "(T, T) -> Bool"),
-			"!=": wrapped(binaryBuiltin("!==", 0), "(T, T) -> Bool"),
-			"+=": wrapped(updateBuiltin("+", 0), "(inout T, T) -> Void"),
-			"-=": wrapped(updateBuiltin("-", 0), "(inout T, T) -> Void"),
-			"*=": wrapped(updateBuiltin("*", 0), "(inout T, T) -> Void"),
+			"%": wrapped(binaryBuiltin("%", 0), "(Self, Self) -> Self"),
+			"<": wrapped(binaryBuiltin("<", 0), "(Self, Self) -> Bool"),
+			">": wrapped(binaryBuiltin(">", 0), "(Self, Self) -> Bool"),
+			"<=": wrapped(binaryBuiltin("<=", 0), "(Self, Self) -> Bool"),
+			">=": wrapped(binaryBuiltin(">=", 0), "(Self, Self) -> Bool"),
+			"&": wrapped(binaryBuiltin("&", 0), "(Self, Self) -> Self"),
+			"|": wrapped(binaryBuiltin("|", 0), "(Self, Self) -> Self"),
+			"^": wrapped(binaryBuiltin("^", 0), "(Self, Self) -> Self"),
+			"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+			"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
+			"+=": wrapped(updateBuiltin("+", 0), "(inout Self, Self) -> Void"),
+			"-=": wrapped(updateBuiltin("-", 0), "(inout Self, Self) -> Void"),
+			"*=": wrapped(updateBuiltin("*", 0), "(inout Self, Self) -> Void"),
 			"...": wrapped((scope, arg) => {
 				return tuple([arg(0, "start"), arg(1, "end")]);
-			}, "(T, T) -> T.Stride"),
+			}, "(Self, Self) -> Self.Stride"),
 		} as FunctionMap),
 		conformances: applyDefaultConformances({
 			Equatable: equatableConformance,
@@ -333,7 +333,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 								), scope),
 							),
 						]);
-					}, "(String) -> T?"),
+					}, "(String) -> Self?"),
 				},
 				conformances: Object.create(null),
 			},
@@ -359,51 +359,51 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 	const reifiedType: ReifiedType = {
 		fields,
 		functions: lookupForMap({
-			"init(_:)": wrapped(returnOnlyArgument, "(T) -> T"),
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(T) -> T"),
-			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument, "(T) -> T"),
-			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), "(T, T) -> T"),
+			"init(_:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
+			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
+			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
+			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
 			"-": wrapped((scope, arg, type, length) => {
 				if (length === 1) {
 					return unary("-", arg(0, "value"), scope);
 				}
 				return binary("-", arg(0, "lhs"), arg(1, "rhs"), scope);
-			}, "(T, T) -> T"),
-			"*": wrapped((scope, arg, type) => binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), "(T, T) -> T"),
-			"/": wrapped((scope, arg, type) => binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), "(T, T) -> T"),
-			"%": wrapped(binaryBuiltin("%", 0), "(T, T) -> T"),
-			"<": wrapped(binaryBuiltin("<", 0), "(T, T) -> Bool"),
-			">": wrapped(binaryBuiltin(">", 0), "(T, T) -> Bool"),
-			"<=": wrapped(binaryBuiltin("<=", 0), "(T, T) -> Bool"),
-			">=": wrapped(binaryBuiltin(">=", 0), "(T, T) -> Bool"),
-			"&": wrapped(binaryBuiltin("&", 0), "(T, T) -> T"),
-			"|": wrapped(binaryBuiltin("|", 0), "(T, T) -> T"),
-			"^": wrapped(binaryBuiltin("^", 0), "(T, T) -> T"),
-			"+=": wrapped(updateBuiltin("+", 0), "(inout T, T) -> Void"),
-			"-=": wrapped(updateBuiltin("-", 0), "(inout T, T) -> Void"),
-			"*=": wrapped(updateBuiltin("*", 0), "(inout T, T) -> Void"),
-			"/=": wrapped(updateBuiltin("/", 0), "(inout T, T) -> Void"),
+			}, "(Self, Self) -> Self"),
+			"*": wrapped((scope, arg, type) => binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
+			"/": wrapped((scope, arg, type) => binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
+			"%": wrapped(binaryBuiltin("%", 0), "(Self, Self) -> Self"),
+			"<": wrapped(binaryBuiltin("<", 0), "(Self, Self) -> Bool"),
+			">": wrapped(binaryBuiltin(">", 0), "(Self, Self) -> Bool"),
+			"<=": wrapped(binaryBuiltin("<=", 0), "(Self, Self) -> Bool"),
+			">=": wrapped(binaryBuiltin(">=", 0), "(Self, Self) -> Bool"),
+			"&": wrapped(binaryBuiltin("&", 0), "(Self, Self) -> Self"),
+			"|": wrapped(binaryBuiltin("|", 0), "(Self, Self) -> Self"),
+			"^": wrapped(binaryBuiltin("^", 0), "(Self, Self) -> Self"),
+			"+=": wrapped(updateBuiltin("+", 0), "(inout Self, Self) -> Void"),
+			"-=": wrapped(updateBuiltin("-", 0), "(inout Self, Self) -> Void"),
+			"*=": wrapped(updateBuiltin("*", 0), "(inout Self, Self) -> Void"),
+			"/=": wrapped(updateBuiltin("/", 0), "(inout Self, Self) -> Void"),
 		} as FunctionMap),
 		conformances: applyDefaultConformances({
 			Equatable: {
 				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(T, T) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(T, T) -> Bool"),
+					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 				},
 				conformances: Object.create(null),
 			},
 			SignedNumeric: {
 				functions: {
-					"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(T) -> T"),
+					"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(Self) -> Self"),
 				},
 				conformances: Object.create(null),
 			},
 			FloatingPoint: {
 				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(T, T) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(T, T) -> Bool"),
+					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 					"squareRoot()": (scope, arg, type) => {
-						return callable(() => call(member(expr(identifier("Math")), "sqrt", scope), [arg(1, "value")], ["Double"], scope), "() -> T");
+						return callable(() => call(member(expr(identifier("Math")), "sqrt", scope), [arg(1, "value")], ["Double"], scope), "() -> Self");
 					},
 				},
 				conformances: Object.create(null),
@@ -435,7 +435,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 								), scope),
 							),
 						]);
-					}, "(String) -> T?"),
+					}, "(String) -> Self?"),
 				},
 				conformances: Object.create(null),
 			},
@@ -574,11 +574,11 @@ function adaptedMethod(otherMethodName: string, conformanceName: string | undefi
 }
 
 function updateMethod(otherMethodName: string, conformanceName: string | undefined) {
-	return adaptedMethod(otherMethodName, conformanceName, "(T, T) -> T", (targetMethod, scope, type, arg) => {
+	return adaptedMethod(otherMethodName, conformanceName, "(Self, Self) -> Self", (targetMethod, scope, type, arg) => {
 		const lhs = arg(0, "lhs");
 		const rhs = arg(1, "rhs");
 		return set(lhs, call(targetMethod, [lhs, rhs], [type, type], scope), scope);
-	}, "(inout T, T) -> Void");
+	}, "(inout Self, Self) -> Void");
 }
 
 function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: Scope): ProtocolConformanceMap {
@@ -614,17 +614,17 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	addProtocol("Equatable", {
 		functions: {
 			"==": abstractMethod,
-			"!=": adaptedMethod("==", "Equatable", "(T, T) -> Bool", (equalsMethod, scope, type, arg) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(T, T) -> Bool"),
-			"~=": adaptedMethod("==", "Equatable", "(T, T) -> Bool", (equalsMethod, scope, type, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), "(T, T) -> Bool"),
+			"!=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
+			"~=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), "(Self, Self) -> Bool"),
 		},
 		conformances: Object.create(null),
 	});
 	addProtocol("Comparable", {
 		functions: {
 			"<": abstractMethod,
-			">": adaptedMethod("<", "Comparable", "(T, T) -> Bool", (lessThanMethod, scope, type, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), "(T, T) -> Bool"),
-			"<=": adaptedMethod("<", "Comparable", "(T, T) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(T, T) -> Bool"),
-			">=": adaptedMethod("<", "Comparable", "(T, T) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(T, T) -> Bool"),
+			">": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), "(Self, Self) -> Bool"),
+			"<=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
+			">=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
 		},
 		conformances: Object.create(null),
 	});
@@ -643,9 +643,9 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 	addProtocol("SignedNumeric", {
 		functions: {
 			"-": abstractMethod, // TODO: Implement - in terms of negate
-			"negate": adaptedMethod("-", "SignedNumeric", "(T) -> T", (negateMethod, scope, type, arg) => {
+			"negate": adaptedMethod("-", "SignedNumeric", "(Self) -> Self", (negateMethod, scope, type, arg) => {
 				return set(arg(0, "lhs"), call(negateMethod, [arg(0, "rhs")], [type], scope), scope);
-			}, "(inout T) -> Void"),
+			}, "(inout Self) -> Void"),
 		},
 		conformances: Object.create(null),
 	});
@@ -742,11 +742,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					scope,
 				);
 			});
-		}, "(String) -> T?"),
+		}, "(String) -> Self?"),
 		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), "() -> Int1"),
 		"&&": wrapped((scope, arg) => logical("&&", arg(0, "lhs"), call(arg(1, "rhs"), [], [], scope), scope), "(Bool, () -> Bool) -> Bool"),
 		"||": wrapped((scope, arg) => logical("||", arg(0, "lhs"), call(arg(1, "rhs"), [], [], scope), scope), "(Bool, () -> Bool) -> Bool"),
-		"!": wrapped((scope, arg) => unary("!", arg(0, "value"), scope), "(T) -> Bool"),
+		"!": wrapped((scope, arg) => unary("!", arg(0, "value"), scope), "(Self) -> Bool"),
 		"random": wrapped((scope, arg) => binary("<", call(member(expr(identifier("Math")), "random", scope), [], [], scope), literal(0.5), scope), "() -> Bool"),
 	}, applyDefaultConformances({
 		Equatable: {
@@ -824,7 +824,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const reified = typeFromValue(wrappedType, globalScope);
 			if (wrappedType.kind !== "type") {
 				// TODO: Support runtime types
-				throw new TypeError(`Runtime types are not supported as T in T?`);
+				throw new TypeError(`Runtime types are not supported as Self in Self?`);
 			}
 			// Assume values that can be represented as boolean, number or string can be value-wise compared
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
@@ -847,7 +847,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						);
 					});
 				});
-			}, "(T?, T?) -> Bool");
+			}, "(Self?, Self?) -> Bool");
 			const compareUnequal = wrapped(isDirectlyComparable ? binaryBuiltin("!==", 0) : (scope: Scope, arg: ArgGetter) => {
 				const unequalMethod = call(functionValue("!=", conformance(wrappedType, "Equatable", scope), "() -> () -> Bool"), [wrappedType], [typeTypeValue], scope);
 				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
@@ -867,12 +867,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						);
 					});
 				});
-			}, "(T?, T?) -> Bool");
+			}, "(Self?, Self?) -> Bool");
 			return {
 				fields: [],
 				functions: lookupForMap({
 					"none": (scope) => emptyOptional(wrappedType, scope),
-					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), wrappedType, scope), "(T) -> T?"),
+					"some": wrapped((scope, arg) => wrapInOptional(arg(0, "wrapped"), wrappedType, scope), "(Self) -> Self?"),
 					"==": compareEqual,
 					"!=": compareUnequal,
 					"flatMap": returnTodo,
@@ -929,7 +929,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const reified = typeFromValue(valueType, globalScope);
 			if (valueType.kind !== "type") {
 				// TODO: Support runtime types
-				throw new TypeError(`Runtime types are not supported as T in [T]`);
+				throw new TypeError(`Runtime types are not supported as Self in [Self]`);
 			}
 			const optionalValueType = typeValue({ kind: "optional", type: valueType.type });
 			const reifiedOptional = typeFromValue(optionalValueType, globalScope);
@@ -962,7 +962,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 														transform(
 															call(
 																call(
-																	functionValue("!=", conformance(valueType, "Equatable", scope), "(Type) -> (T, T) -> Bool"),
+																	functionValue("!=", conformance(valueType, "Equatable", scope), "(Type) -> (Self, Self) -> Bool"),
 																	[valueType],
 																	[typeTypeValue],
 																	scope,
@@ -1003,7 +1003,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 							]);
 						});
 					});
-				}, "(T, T) -> Bool");
+				}, "(Self, Self) -> Bool");
 			}
 			return {
 				fields: [
@@ -1035,7 +1035,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				],
 				functions: lookupForMap({
 					// TODO: Fill in proper init
-					"init(_:)": wrapped((scope, arg) => call(member(expr(identifier("Array")), "from", scope), [arg(0, "iterable")], [dummyType], scope), "(Any) -> T"),
+					"init(_:)": wrapped((scope, arg) => call(member(expr(identifier("Array")), "from", scope), [arg(0, "iterable")], [dummyType], scope), "(Any) -> Self"),
 					"count": returnLength,
 					"subscript(_:)": {
 						get(scope, arg) {
@@ -1053,18 +1053,18 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						const pushExpression = member(arg(2, "array"), "push", scope);
 						const newElement = copy(arg(2, "newElement"), valueType);
 						return call(pushExpression, [newElement], [valueType], scope);
-					}, "(inout T, T.Element) -> Void"),
+					}, "(inout Self, Self.Element) -> Void"),
 					"insert(at:)": wrapped((scope, arg) => {
 						const arrayValue = arg(1, "array");
 						const newElement = copy(arg(2, "newElement"), valueType);
 						const i = arg(3, "i");
 						return call(functionValue("Swift.(swift-to-js).arrayInsertAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [arrayValue, newElement, i], [dummyType, valueType, dummyType], scope);
-					}, "(inout T, T.Element, Int) -> Void"),
+					}, "(inout Self, Self.Element, Int) -> Void"),
 					"remove(at:)": wrapped((scope, arg) => {
 						const arrayValue = arg(1, "array");
 						const i = arg(2, "i");
 						return call(functionValue("Swift.(swift-to-js).arrayRemoveAt()", undefined, { kind: "function", arguments: { kind: "tuple", types: [] }, return: voidType, throws: true, rethrows: false, attributes: [] }), [arrayValue, i], [dummyType, valueType], scope);
-					}, "(inout T, Int) -> T.Element"),
+					}, "(inout Self, Int) -> Self.Element"),
 					"removeFirst()": wrapped((scope, arg) => {
 						return reuse(call(member(arg(1, "array"), "shift", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
@@ -1078,7 +1078,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								scope,
 							);
 						});
-					}, "(inout T) -> T.Element"),
+					}, "(inout Self) -> Self.Element"),
 					"removeLast()": wrapped((scope, arg) => {
 						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
@@ -1092,7 +1092,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								scope,
 							);
 						});
-					}, "(inout T) -> T.Element"),
+					}, "(inout Self) -> Self.Element"),
 					"popLast()": wrapped((scope, arg) => {
 						return reuse(call(member(arg(1, "array"), "pop", scope), [], [], scope), scope, "element", (reusableArray) => {
 							return conditional(
@@ -1106,11 +1106,11 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								scope,
 							);
 						});
-					}, "(inout T) -> T.Element?"),
+					}, "(inout Self) -> Self.Element?"),
 					"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
 						return set(member(arg(1, "array"), "length", scope), literal(0), scope);
-					}, "(inout T, Bool) -> Void"),
-					"reserveCapacity()": wrapped((scope, arg) => undefinedValue, "(inout T, Int) -> Void"),
+					}, "(inout Self, Bool) -> Void"),
+					"reserveCapacity()": wrapped((scope, arg) => undefinedValue, "(inout Self, Int) -> Void"),
 					"index(after:)": wrapped((scope, arg) => {
 						const arrayValue = arg(1, "array");
 						return reuse(arg(2, "index"), scope, "index", (index) => {
@@ -1121,7 +1121,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								scope,
 							);
 						});
-					}, "(inout T, Int) -> Int"),
+					}, "(inout Self, Int) -> Int"),
 					"index(before:)": wrapped((scope, arg) => {
 						return reuse(arg(2, "index"), scope, "index", (index) => {
 							return conditional(
@@ -1131,12 +1131,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								scope,
 							);
 						});
-					}, "(inout T, Int) -> Int"),
+					}, "(inout Self, Int) -> Int"),
 					"distance(from:to:)": wrapped((scope, arg) => {
 						const start = arg(2, "start");
 						const end = arg(3, "end");
 						return binary("-", end, start, scope);
-					}, "(inout T, Int, Int) -> Int"),
+					}, "(inout Self, Int, Int) -> Int"),
 					"joined(separator:)": (scope, arg, type) => {
 						return callable((innerScope, innerArg) => {
 							return call(
@@ -1145,7 +1145,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								[dummyType],
 								scope,
 							);
-						}, "(T, String) -> String");
+						}, "(Self, String) -> String");
 					},
 				} as FunctionMap),
 				conformances: applyDefaultConformances({
@@ -1365,7 +1365,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						)),
 						[returnStatement(read(lookup(mapped, scope), scope))],
 					));
-				}, "((T) -> V) -> [V]");
+				}, "((Self) -> V) -> [V]");
 			},
 			reduce: (scope, arg, type) => {
 				const range = arg(2, "range");
@@ -1386,8 +1386,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			// TODO: Implement Equatable
 			Equatable: {
 				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(T, T) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(T, T) -> Bool"),
+					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 				},
 				conformances: Object.create(null),
 			},
@@ -1546,7 +1546,7 @@ export const functions: FunctionMap = {
 				),
 			),
 		]);
-	}, "(inout T, T.Element, Int) -> Void"),
+	}, "(inout Self, Self.Element, Int) -> Void"),
 	"Swift.(swift-to-js).arrayRemoveAt()": noinline((scope, arg) => {
 		return statements([
 			ifStatement(
@@ -1587,7 +1587,7 @@ export const functions: FunctionMap = {
 				), scope),
 			),
 		]);
-	}, "(inout T, Int) -> T.Element"),
+	}, "(inout Self, Int) -> Self.Element"),
 	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
 		return call(expr(identifier("Sequence$reduce")), [arg(0), arg(1)], [dummyType, dummyType], scope);
 	}, "(Result, (Result, Self.Element) -> Result) -> Result"),

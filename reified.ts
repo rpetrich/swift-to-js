@@ -85,7 +85,7 @@ export function protocol(conformances: ProtocolConformanceMap = emptyConformance
 		fields: emptyFields,
 		functions(functionName) {
 			return (scope, arg, name, length) => {
-				const typeArg = arg(0, "T");
+				const typeArg = arg(0, "Self");
 				const fn = typeFromValue(typeArg, scope).functions(functionName);
 				if (typeof fn !== "function") {
 					throw new TypeError(`Expected a function, got a ${typeof fn}`);

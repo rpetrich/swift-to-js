@@ -1367,7 +1367,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			const enumName = term.args[0];
 			const copyFunctionName = `${enumName}.copy`;
 			const methods: FunctionMap = {
-				[copyFunctionName]: noinline((innerScope, arg) => copyHelper(arg(0, "source"), innerScope), "(T) -> T"),
+				[copyFunctionName]: noinline((innerScope, arg) => copyHelper(arg(0, "source"), innerScope), "(Self) -> Self"),
 			};
 			function copyHelper(value: Value, innerScope: Scope): Value {
 				// Passthrough to the underlying type, which should generally be simple

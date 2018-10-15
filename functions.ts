@@ -79,10 +79,10 @@ export function noinline(builder: FunctionBuilder, functionType: string | Functi
 
 export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, length: number) => Value, functionType: string | Function): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, name: string): Value => {
-		const typeArgument = arg(0, "T");
+		const typeArgument = arg(0, "Self");
 		const innerType = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
 		return callable((innerScope, innerArg, length) => newScope("wrapped", innerScope, (innerInner) => fn(innerInner, innerArg, typeArgument, length), {
-			T(innerInner) {
+			Self(innerInner) {
 				return typeFromValue(typeArgument, innerInner);
 			},
 		}), innerType);
