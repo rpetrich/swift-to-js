@@ -1,10 +1,10 @@
 import generate from "@babel/generator";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
+import { isFunction, isReturnStatement, arrayExpression, assignmentExpression, binaryExpression, blockStatement, functionDeclaration, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { reifyType, PossibleRepresentation, ProtocolConformance, ReifiedType } from "./reified";
+import { reifyType, PossibleRepresentation, ProtocolConformance, ReifiedType, TypeMap } from "./reified";
 import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
@@ -696,51 +696,106 @@ export function read(value: Value, scope: Scope): Expression {
 			if (type.kind !== "type") {
 				throw new TypeError(`Expected a type, got a ${type.kind}`);
 			}
+			// Direct remapping
 			if (type.type.kind === "name") {
-				// TODO: Support specializing types at runtime
 				const result = mappedValueForName(type.type.name, scope);
 				if (typeof result !== "undefined") {
 					return read(result, scope);
 				}
 			}
-			const stringified = stringifyType(type.type);
+			// Deep-remap types, replacing with a placeholder so that similar type patterns are specialized and a standardized name is generated
+			const substitutionNames: string[] = [];
+			const substitutions: Value[] = [];
+			const stringified = stringifyType(type.type, (innerType) => {
+				if (innerType.kind === "name") {
+					const result = mappedValueForName(innerType.name, scope);
+					if (typeof result !== "undefined") {
+						substitutionNames.push(innerType.name);
+						substitutions.push(result);
+						return {
+							kind: "name",
+							name: "_",
+						};
+					}
+				}
+				return innerType;
+			});
 			const name: string = `:${stringified}.Type`;
 			const mangled = mangleName(name);
-			const reified = typeFromValue(value, scope);
 			const globalScope = rootScope(scope);
+			// Emit a type table if one doesn't exist
 			if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
-				globalScope.declarations[name] = {
-					flags: DeclarationFlags.Const,
-					declaration: variableDeclaration("const", [variableDeclarator(mangled, objectExpression([]))]),
-				};
 				function returnValue() {
 					return value;
 				}
-				function witnessTableForConformance(current: ProtocolConformance) {
-					const properties = Object.keys(current.functions).map((key) => {
-						const scopeName = `${stringified}.${key}`;
-						const result = current!.functions[key](globalScope, returnValue, scopeName, 1);
-						if (result.kind === "callable") {
-							// TODO: Pass real argument count
-							const [args, methodBody] = functionize(globalScope, scopeName, (innerScope, arg) => result.call(innerScope, arg, 0), result.type);
-							return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
-						} else {
-							return objectProperty(mangleName(key), read(result, scope));
+				const reified = typeFromValue(value, scope);
+				function typeConformancesObject(innerScope: Scope) {
+					function witnessTableForConformance(current: ProtocolConformance) {
+						const properties = Object.keys(current.functions).map((key) => {
+							const scopeName = `${stringified}.${key}`;
+							const result = current!.functions[key](innerScope, returnValue, scopeName, 1);
+							if (result.kind === "callable") {
+								// TODO: Pass real argument count
+								const [args, methodBody] = functionize(innerScope, scopeName, (innerScope, arg) => result.call(innerScope, arg, 0), result.type);
+								return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
+							} else {
+								return objectProperty(mangleName(key), read(result, innerScope));
+							}
+						});
+						for (const key of Object.keys(current.conformances)) {
+							properties.push(objectProperty(mangleName(key), witnessTableForConformance(current.conformances[key])));
 						}
-					});
-					for (const key of Object.keys(current.conformances)) {
-						properties.push(objectProperty(mangleName(key), witnessTableForConformance(current.conformances[key])));
+						return objectExpression(properties);
 					}
-					return objectExpression(properties);
+					return objectExpression(Object.keys(reified.conformances).map((key) => {
+						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
+					}))
 				}
+				// Placeholder to avoid infinite recursion in tables that are self-referential
 				globalScope.declarations[name] = {
 					flags: DeclarationFlags.Const,
-					declaration: variableDeclaration("const", [variableDeclarator(mangled, objectExpression(Object.keys(reified.conformances).map((key) => {
-						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
-					})))]),
+					declaration: variableDeclaration("const", [variableDeclarator(mangled)]),
 				};
+				if (substitutions.length === 0) {
+					// Emit direct able
+					globalScope.declarations[name] = {
+						flags: DeclarationFlags.Const,
+						declaration: variableDeclaration("const", [variableDeclarator(mangled, typeConformancesObject(globalScope))]),
+					};
+				} else {
+					// Emit function that returns a table based on parameters
+					const typeMapping: TypeMap = Object.create(null);
+					const functionized = functionize(globalScope, stringified, (innerScope) => {
+						substitutionNames.forEach((key, i) => {
+							typeMapping[key] = (innerMostScope) => typeFromValue(substitutions[i], innerMostScope);
+							innerScope.mapping[key] = variable(mangleName(key));
+						});
+						return expr(typeConformancesObject(innerScope));
+					}, {
+						kind: "function",
+						arguments: {
+							kind: "tuple",
+							types: substitutions.map(() => typeType),
+						},
+						return: typeType,
+						throws: false,
+						rethrows: false,
+						attributes: [],
+					}, typeMapping);
+					globalScope.declarations[name] = {
+						flags: DeclarationFlags.Const,
+						declaration: functionDeclaration(mangled, substitutionNames.map(mangleName), blockStatement(functionized[1])),
+					};
+				}
 			}
-			return annotate(mangled, value.location);
+			// Emit reference to table
+			if (substitutions.length === 0) {
+				// Directly as there are no substitutions
+				return annotate(mangled, value.location);
+			} else {
+				// Parameterized by substitutions
+				return annotate(callExpression(mangled, substitutions.map((substitution) => read(substitution, scope))), value.location);
+			}
 		}
 		default: {
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
@@ -902,7 +957,6 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 				args = concat(target.substitutions, args);
 				argTypes = concat(target.substitutions.map((): Value | string => typeTypeValue), argTypes);
 			}
-			// console.log(target.name, target.substitutions.length, args, argTypes);
 			let fn;
 			if (typeof target.parentType === "undefined") {
 				// Global functions
@@ -1338,35 +1392,40 @@ export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, call
 	});
 }
 
-export function stringifyType(type: Type): string {
+function passthrough(type: Type) {
+	return type;
+}
+
+export function stringifyType(type: Type, replacer: (type: Type) => Type = passthrough): string {
+	type = replacer(type);
 	switch (type.kind) {
 		case "optional":
-			return stringifyType(type.type) + "?";
+			return stringifyType(type.type, replacer) + "?";
 		case "generic":
 			if (type.base.kind === "function") {
-				return "<" + type.arguments.map(stringifyType).join(", ") + "> " + stringifyType(type.base);
+				return "<" + type.arguments.map((innerType) => stringifyType(type, replacer)).join(", ") + "> " + stringifyType(type.base, replacer);
 			} else {
-				return stringifyType(type.base) + "<" + type.arguments.map(stringifyType).join(", ") + ">";
+				return stringifyType(type.base, replacer) + "<" + type.arguments.map((innerType) => stringifyType(type, replacer)).join(", ") + ">";
 			}
 		case "function":
 			// TODO: Handle attributes
-			return stringifyType(type.arguments) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return);
+			return stringifyType(type.arguments, replacer) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return, replacer);
 		case "tuple":
-			return "(" + type.types.map(stringifyType).join(", ") + ")";
+			return "(" + type.types.map((innerType) => stringifyType(type, replacer)).join(", ") + ")";
 		case "array":
-			return "[" + stringifyType(type.type) + "]";
+			return "[" + stringifyType(type.type, replacer) + "]";
 		case "dictionary":
-			return "[" + stringifyType(type.keyType) + ": " + stringifyType(type.valueType) + "]";
+			return "[" + stringifyType(type.keyType, replacer) + ": " + stringifyType(type.valueType, replacer) + "]";
 		case "metatype":
-			return stringifyType(type.base) + "." + type.as;
+			return stringifyType(type.base, replacer) + "." + type.as;
 		case "modified":
-			return type.modifier + " " + stringifyType(type.type);
+			return type.modifier + " " + stringifyType(type.type, replacer);
 		case "namespaced":
-			return stringifyType(type.namespace) + "." + stringifyType(type.type);
+			return stringifyType(type.namespace, replacer) + "." + stringifyType(type.type, replacer);
 		case "name":
 			return type.name;
 		case "constrained":
-			return stringifyType(type.type) + " where " + stringifyType(type.type) + " : " + stringifyType(type.constraint);
+			return stringifyType(type.type, replacer) + " where " + stringifyType(type.type, replacer) + " : " + stringifyType(type.constraint, replacer);
 		default:
 			throw new TypeError(`Received an unexpected type ${(type as Type).kind}`);
 	}

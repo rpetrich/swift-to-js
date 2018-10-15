@@ -198,3 +198,71 @@ const $$Point$$Type = {
 export function pointArrayEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($$Point$$Type, lhs, rhs);
 }
+
+function $$_$$Type(T) {
+  return {
+    Equatable: {
+      $equals$(lhs, rhs) {
+        let equal;
+
+        if (lhs.length !== rhs.length) {
+          equal = false;
+        } else {
+          let i = 0;
+
+          while (i < lhs.length) {
+            if (T.Equatable.$notequals$(lhs[i], rhs[i])) break;
+            i++;
+          }
+
+          equal = i === lhs.length;
+        }
+
+        return equal;
+      },
+
+      $notequals$(lhs, rhs) {
+        let unequal;
+
+        if (lhs.length !== rhs.length) {
+          unequal = true;
+        } else {
+          let i = 0;
+
+          while (i < lhs.length) {
+            if (T.Equatable.$notequals$(lhs[i], rhs[i])) break;
+            i++;
+          }
+
+          unequal = i !== lhs.length;
+        }
+
+        return unequal;
+      },
+
+      $match$(lhs, rhs) {
+        let equal;
+
+        if (lhs.length !== rhs.length) {
+          equal = false;
+        } else {
+          let i = 0;
+
+          while (i < lhs.length) {
+            if (T.Equatable.$notequals$(lhs[i], rhs[i])) break;
+            i++;
+          }
+
+          equal = i === lhs.length;
+        }
+
+        return equal;
+      }
+
+    }
+  };
+}
+
+export function arrayEqual$lhs$rhs$(T, lhs, rhs) {
+  return equal$lhs$rhs$($$_$$Type(T), lhs, rhs);
+}

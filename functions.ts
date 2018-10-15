@@ -18,7 +18,8 @@ export function statementsInValue(value: Value, scope: Scope): Statement[] {
 	return value.kind === "statements" ? value.statements : [returnStatement(read(value, scope))];
 }
 
-export function functionize(scope: Scope, name: string, expression: (scope: Scope, arg: ArgGetter) => Value, type: Function, types?: TypeMap, location?: Location | Term): [Identifier[], Statement[]] {
+export function functionize(scope: Scope, name: string, expression: (scope: Scope, arg: ArgGetter) => Value, functionType: Function | string, types?: TypeMap, location?: Location | Term): [Identifier[], Statement[]] {
+	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
 	const args: Identifier[] = [];
 	return [args, statementsInValue(newScope(name, scope, (inner) => {
 		let usedCount = 0;

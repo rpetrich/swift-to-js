@@ -39,7 +39,7 @@ public func pointArrayEqual(lhs: [Point], rhs: [Point]) -> Bool {
 	return equal(lhs: lhs, rhs: rhs)
 }
 
-// public func arrayEqual<T: Equatable>(lhs: [T], rhs: [T]) -> Bool {
-// 	return equal(lhs: lhs, rhs: rhs)
-// }
+public func arrayEqual<T: Equatable>(lhs: [T], rhs: [T]) -> Bool {
+	return equal(lhs: lhs, rhs: rhs)
+}
 
