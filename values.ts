@@ -1,5 +1,5 @@
 import generate from "@babel/generator";
-import { isFunction, isReturnStatement, arrayExpression, assignmentExpression, binaryExpression, blockStatement, functionDeclaration, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionDeclaration, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder, GetterSetterBuilder } from "./functions";
@@ -736,7 +736,7 @@ export function read(value: Value, scope: Scope): Expression {
 							const result = current!.functions[key](innerScope, returnValue, scopeName, 1);
 							if (result.kind === "callable") {
 								// TODO: Pass real argument count
-								const [args, methodBody] = functionize(innerScope, scopeName, (innerScope, arg) => result.call(innerScope, arg, 0), result.type);
+								const [args, methodBody] = functionize(innerScope, scopeName, (innerMostScope, arg) => result.call(innerMostScope, arg, 0), result.type);
 								return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
 							} else {
 								return objectProperty(mangleName(key), read(result, innerScope));
@@ -749,7 +749,7 @@ export function read(value: Value, scope: Scope): Expression {
 					}
 					return objectExpression(Object.keys(reified.conformances).map((key) => {
 						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
-					}))
+					}));
 				}
 				// Placeholder to avoid infinite recursion in tables that are self-referential
 				globalScope.declarations[name] = {
