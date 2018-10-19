@@ -880,6 +880,40 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					return member(arg(0, "view"), "length", scope);
 				}, "(Self) -> Int"),
 			});
+			const hashValue = wrapped((scope, arg) => {
+				return reuse(arg(0, "string"), scope, "string", (str) => {
+					const hash = uniqueName(scope, "hash");
+					const i = uniqueName(scope, "i");
+					return statements([
+						addVariable(scope, hash, "Int", literal(0)),
+						forStatement(
+							addVariable(scope, i, "Int", literal(0)),
+							read(binary("<", lookup(i, scope), member(str, "length", scope), scope), scope),
+							updateExpression("++", mangleName(i)),
+							blockStatement(
+								ignore(set(
+									lookup(hash, scope),
+									binary("-",
+										binary("+",
+											binary("<<",
+												lookup(hash, scope),
+												literal(5),
+												scope,
+											),
+											call(member(str, "charCodeAt", scope), [lookup(i, scope)], ["Int"], scope),
+											scope,
+										),
+										lookup(hash, scope),
+										scope,
+									),
+									scope,
+								), scope),
+							),
+						),
+						returnStatement(read(binary("|", lookup(hash, scope), literal(0), scope), scope)),
+					]);
+				});
+			}, "(String) -> Int");
 			return primitive(PossibleRepresentation.String, literal(""), {
 				"init(_:)": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope), "(String) -> String" ),
 				"+": wrapped(binaryBuiltin("+", 0), "(String, String) -> String"),
@@ -894,11 +928,18 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				"utf8": wrapped((scope, arg) => {
 					return call(member(expr(newExpression(identifier("TextEncoder"), [read(literal("utf-8"), scope)])), "encode", scope), [arg(0, "value")], [typeValue("String")], scope);
 				}, "(String) -> String.UTF8View"),
+				hashValue,
 			}, {
 				Equatable: {
 					functions: {
 						"==": wrapped(binaryBuiltin("===", 0), "(String, String) -> Bool"),
 						"!=": wrapped(binaryBuiltin("!==", 0), "(String, String) -> Bool"),
+					},
+					conformances: Object.create(null),
+				},
+				Hashable: {
+					functions: {
+						hashValue,
 					},
 					conformances: Object.create(null),
 				},
