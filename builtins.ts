@@ -929,12 +929,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 									read(binary("<",
 										lookup(i, scope),
 										count,
-										scope
+										scope,
 									), scope),
 									updateExpression("++", read(lookup(i, scope), scope)),
 									blockStatement(
-										ignore(set(lookup(result, scope), source, scope, "+="), scope)
-									)
+										ignore(set(lookup(result, scope), source, scope, "+="), scope),
+									),
 								),
 								returnStatement(read(lookup(result, scope), scope)),
 							]);
@@ -954,23 +954,23 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
 				}, "(inout String, String) -> Void"),
 				"insert(_:at:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return reuse(arg(1, "character"), scope, "character", (character) => {
 							return reuse(arg(2, "index"), scope, "index", (index) => {
 								return set(
-									string,
+									self,
 									binary(
 										"+",
 										binary(
 											"+",
-											call(member(string, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+											call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
 											character,
-											scope
+											scope,
 										),
-										call(member(string, "substring", scope), [index], ["Int"], scope),
-										scope
+										call(member(self, "substring", scope), [index], ["Int"], scope),
+										scope,
 									),
-									scope
+									scope,
 								);
 							});
 						});
@@ -981,22 +981,22 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// "replaceSubrange(_:with:)": wrapped((scope, arg) => {
 				// }, "(inout String, ?, ?) -> Void"),
 				"remove(at:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return reuse(arg(1, "index"), scope, "index", (index) => {
 							const removed = uniqueName(scope, "removed");
 							return statements(concat(
-								[addVariable(scope, removed, "String", member(string, index, scope)) as Statement],
+								[addVariable(scope, removed, "String", member(self, index, scope)) as Statement],
 								ignore(set(
-									string,
+									self,
 									binary(
 										"+",
-										call(member(string, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
-										call(member(string, "substring", scope), [index], ["Int"], scope),
-										scope
+										call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+										call(member(self, "substring", scope), [index], ["Int"], scope),
+										scope,
 									),
-									scope
+									scope,
 								), scope),
-								[returnStatement(read(lookup(removed, scope), scope))]
+								[returnStatement(read(lookup(removed, scope), scope))],
 							));
 						});
 					});
@@ -1011,65 +1011,65 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// 	});
 				// }, "(inout String, (Character) throws -> Bool) rethrows -> Void"),
 				"removeFirst()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						const first = uniqueName(scope, "first");
 						return statements(concat(
-							[addVariable(scope, first, "Character", member(string, 0, scope)) as Statement],
+							[addVariable(scope, first, "Character", member(self, 0, scope)) as Statement],
 							ignore(set(
-								string,
-								call(member(string, "substring", scope), [literal(1)], ["Int"], scope),
-								scope
+								self,
+								call(member(self, "substring", scope), [literal(1)], ["Int"], scope),
+								scope,
 							), scope),
-							[returnStatement(read(lookup(first, scope), scope))]
+							[returnStatement(read(lookup(first, scope), scope))],
 						));
 						return member(arg(0, "string"), 0, scope);
 					});
 				}, "(inout String) -> Character"),
 				"removeFirst(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return set(
-							string,
-							call(member(string, "substring", scope), [arg(1, "k")], ["Int"], scope),
-							scope
-						)
+							self,
+							call(member(self, "substring", scope), [arg(1, "k")], ["Int"], scope),
+							scope,
+						);
 					});
 				}, "(inout String, Int) -> Void"),
 				"removeLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						const index = uniqueName(scope, "index");
 						const last = uniqueName(scope, "last");
 						return statements(concat(
 							[
-								addVariable(scope, index, "Int", binary("-", member(string, "length", scope), literal(1), scope)) as Statement,
-								addVariable(scope, last, "Character", member(string, lookup(index, scope), scope)) as Statement,
+								addVariable(scope, index, "Int", binary("-", member(self, "length", scope), literal(1), scope)) as Statement,
+								addVariable(scope, last, "Character", member(self, lookup(index, scope), scope)) as Statement,
 							],
 							ignore(set(
-								string,
+								self,
 								call(
-									member(string, "substring", scope),
-									[binary("-", member(string, "length", scope), lookup(index, scope), scope)],
+									member(self, "substring", scope),
+									[binary("-", member(self, "length", scope), lookup(index, scope), scope)],
 									["Int"],
-									scope
+									scope,
 								),
-								scope
+								scope,
 							), scope),
-							[returnStatement(read(lookup(last, scope), scope))]
+							[returnStatement(read(lookup(last, scope), scope))],
 						));
 						return member(arg(0, "string"), 0, scope);
 					});
 				}, "(inout String) -> Character"),
 				"removeLast(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return set(
-							string,
+							self,
 							call(
-								member(string, "substring", scope),
-								[binary("-", member(string, "length", scope), arg(1, "k"), scope)],
+								member(self, "substring", scope),
+								[binary("-", member(self, "length", scope), arg(1, "k"), scope)],
 								["Int"],
-								scope
+								scope,
 							),
-							scope
-						)
+							scope,
+						);
 					});
 				}, "(inout String, Int) -> Void"),
 				// "removeSubrange()": wrapped((scope, arg) => {
@@ -1083,7 +1083,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						member(arg(0, "string"), "substring", scope),
 						[literal(0)],
 						["Int"],
-						scope
+						scope,
 					);
 				}, "(String) -> Void"),
 				"dropFirst(_:)": wrapped((scope, arg) => {
@@ -1091,37 +1091,37 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						member(arg(0, "string"), "substring", scope),
 						[arg(1, "k")],
 						["Int"],
-						scope
+						scope,
 					);
 				}, "(String, Int) -> Void"),
 				"dropLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return call(
-							member(string, "substring", scope),
-							[binary("-", member(string, "length", scope), literal(1), scope)],
+							member(self, "substring", scope),
+							[binary("-", member(self, "length", scope), literal(1), scope)],
 							["Int"],
-							scope
+							scope,
 						);
 					});
 				}, "(String) -> Void"),
 				"dropLast(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						return call(
-							member(string, "substring", scope),
-							[binary("-", member(string, "length", scope), arg(1, "k"), scope)],
+							member(self, "substring", scope),
+							[binary("-", member(self, "length", scope), arg(1, "k"), scope)],
 							["Int"],
-							scope
+							scope,
 						);
 					});
 				}, "(String, Int) -> Void"),
 				"popLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (string) => {
+					return reuse(arg(0, "string"), scope, "string", (self) => {
 						const characterType = typeValue("Character");
 						return conditional(
-							binary("!==", member(string, "length", scope), literal(0), scope),
-							wrapInOptional(member(string, binary("-", member(string, "length", scope), literal(1), scope), scope), characterType, scope),
+							binary("!==", member(self, "length", scope), literal(0), scope),
+							wrapInOptional(member(self, binary("-", member(self, "length", scope), literal(1), scope), scope), characterType, scope),
 							emptyOptional(characterType, scope),
-							scope
+							scope,
 						);
 					});
 				}, "(inout String) -> Character?"),
@@ -1135,7 +1135,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					return binary("!==",
 						call(member(arg(0, "string"), "indexOf", scope), [arg(1, "element")], ["Character"], scope),
 						literal(0),
-						scope
+						scope,
 					);
 				}, "(String, Character) -> Bool"),
 				// "allSatisfy(_:)": wrapped((scope, arg) => {
@@ -1146,13 +1146,13 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// }, "(String, (Character) -> Bool) -> Character?"),
 				"firstIndex(of:)": wrapped((scope, arg) => {
 					const index = call(member(arg(0, "string"), "indexOf", scope), [arg(1, "element")], ["Character"], scope);
-					return reuse(index, scope, "index", (index) => {
+					return reuse(index, scope, "index", (reusedIndex) => {
 						const indexType = typeValue("Int");
 						return conditional(
-							binary("!==", index, literal(-1), scope),
-							wrapInOptional(index, indexType, scope),
+							binary("!==", reusedIndex, literal(-1), scope),
+							wrapInOptional(reusedIndex, indexType, scope),
 							emptyOptional(indexType, scope),
-							scope
+							scope,
 						);
 					});
 				}, "(String, Character) -> String.Index?"),
