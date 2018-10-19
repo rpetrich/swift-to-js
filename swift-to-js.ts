@@ -2,7 +2,7 @@ import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { functionize, insertFunction, noinline, returnType, statementsInValue, wrapped, FunctionBuilder } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, expressionSkipsCopy, field, getField, newClass, primitive, reifyType, store, struct, EnumCase, Field, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reifyType, store, EnumCase, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
@@ -97,7 +97,7 @@ function constructTypeFromNames(baseType: string, typeParameters?: ReadonlyArray
 	}
 }
 
-function extractReference(term: Term, scope: Scope, type?: Function): Value {
+function extractReference(term: Term, scope: Scope, type?: Function, suffix: string = ""): Value {
 	const decl = getProperty(term, "decl", isString);
 	const declaration = parseDeclaration(decl);
 	if (typeof declaration.local === "string") {
@@ -129,7 +129,7 @@ function extractReference(term: Term, scope: Scope, type?: Function): Value {
 		} else {
 			substitutionValues = [];
 		}
-		return functionValue(declaration.member, parentType, type || getFunctionType(term), substitutionValues, term);
+		return functionValue(`${declaration.member}${suffix}`, parentType, type || getFunctionType(term), substitutionValues, term);
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
 }
@@ -179,11 +179,24 @@ function noSemanticExpressions(term: Term) {
 	return term.name !== "semantic_expr";
 }
 
-function requiresGetter(term: Term): boolean {
-	if (Object.hasOwnProperty.call(term.properties, "storage_kind")) {
-		return getProperty(term, "storage_kind", isString) === "computed";
+function isReadImpl(value: unknown): value is "stored" | "getter" | "inherited" {
+	return value === "stored" || value === "getter" || value === "inherited";
+}
+
+function readTypeOfProperty(term: Term) {
+	return getProperty(term, "readImpl", isReadImpl);
+}
+
+function isWriteImpl(value: unknown): value is "stored" | "setter" | "inherited" {
+	return value === "stored" || value === "setter" || value === "inherited";
+}
+
+function writeTypeOfProperty(term: Term) {
+	if (Object.hasOwnProperty.call(term.properties, "writeImpl")) {
+		return getProperty(term, "writeImpl", isWriteImpl);
+	} else {
+		return undefined;
 	}
-	return getProperty(term, "readImpl", isString) !== "stored";
 }
 
 function returnUndef(): undefined {
@@ -524,12 +537,21 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			if (typeof memberName !== "string") {
 				throw new TypeError(`Expected a member expression when parsing declaration: ${decl}`);
 			}
-			for (const fieldDeclaration of typeFromValue(type, scope).fields) {
-				if (fieldDeclaration.name === memberName) {
-					return annotateValue(getField(translateTermToValue(term.children[0], scope, bindingContext), fieldDeclaration, scope), term);
-				}
+			const reified = typeFromValue(type, scope);
+			const getter = reified.functions(memberName);
+			if (typeof getter === "undefined") {
+				throw new TypeError(`Could not find ${memberName} in ${stringifyValue(type)}`);
 			}
-			throw new TypeError(`Could not find ${memberName} in ${stringifyValue(type)}`);
+			const setter = reified.functions(memberName + "_set");
+			const childValue = translateTermToValue(term.children[0], scope, bindingContext);
+			return subscript(
+				getter(scope, () => type, decl, 1),
+				typeof setter !== "undefined" ? setter(scope, () => type, decl, 1) : callable(() => {
+					throw new TypeError(`Could not find ${memberName} setter in ${stringifyValue(type)}`);
+				}, "() -> Void"),
+				[childValue],
+				[type],
+			);
 		}
 		case "tuple_element_expr": {
 			expectLength(term.children, 1);
@@ -586,8 +608,14 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				attributes: [],
 				location: type.location,
 			};
-			const setter = extractReference(term, scope, setterType);
-			return subscript(getter, setter, term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term.children.map(getTypeValue), term);
+			const setter = extractReference(term, scope, setterType, "_set");
+			return subscript(
+				call(getter, [typeValue(type)], ["Type"], scope),
+				call(setter, [typeValue(type)], ["Type"], scope),
+				term.children.map((child) => translateTermToValue(child, scope, bindingContext)),
+				term.children.map(getTypeValue),
+				term,
+			);
 		}
 		case "prefix_unary_expr":
 		case "call_expr":
@@ -1123,10 +1151,6 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 	return constructCallable(emptyStatements, 0, getFunctionType(term), true);
 }
 
-function noArguments(): never {
-	throw new Error(`Did not expect getters to inspect arguments`);
-}
-
 function nameForFunctionTerm(term: Term): string {
 	expectLength(term.args, 1, 2);
 	return term.args[0].replace(/\((_:)+\)$/, "");
@@ -1410,7 +1434,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 					return call(member(expr(expression), "slice", scope), [], [], innerScope);
 				}
 			}
-			const layout: Field[] = [];
 			let requiresCopyHelper: boolean = false;
 			const cases: EnumCase[] = [];
 			const selfType: Type = {
@@ -1421,7 +1444,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
 			// Reify self
 			const reifiedSelfType: ReifiedType = {
-				fields: layout,
 				functions: lookupForMap(methods),
 				conformances: Object.create(null),
 				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
@@ -1481,33 +1503,29 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			for (const child of term.children) {
 				if (child.name === "var_decl") {
 					expectLength(child.args, 1);
-					if (requiresGetter(child)) {
+					if (readTypeOfProperty(child) === "getter") {
 						expectLength(child.children, 1);
-						const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 						const fieldName = child.args[0];
 						if (fieldName === "rawValue") {
 							// The built-in rawValue accessors don't have proper pattern matching :(
 							if (typeof baseType !== "undefined" && typeof baseReifiedType !== "undefined") {
-								layout.push(field("rawValue", baseReifiedType, (value, innerScope) => copy(value, typeValue(baseType))));
+								methods.rawValue = wrapped((innerScope, arg) => copy(arg(0, "value"), typeValue(baseType)), "(Self) -> Int");
 							} else {
 								throw new TypeError(`Unable to synthesize rawValue for ${enumName}`);
 							}
 						} else if (fieldName === "hashValue") {
 							// The built-in hashValue accessors don't have proper pattern matching :(
-							if (baseReifiedType) {
-								const passthroughField = baseReifiedType.fields.find((fieldDeclaration) => fieldDeclaration.name === "hashValue");
-								if (!passthroughField) {
-									throw new Error(`Unable to synthsize hashValue for ${enumName} because underlying type ${inherits} does not have a hashValue`);
-								}
-								layout.push(passthroughField);
+							if (typeof baseType !== "undefined" && typeof baseReifiedType !== "undefined") {
+								methods.hashValue = wrapped((innerScope, arg) => copy(arg(0, "value"), typeValue(baseType)), "(Self) -> Int");
 							} else {
 								throw new TypeError(`Unable to synthesize hashValue for ${enumName}`);
 							}
 						} else {
-							const fieldType = getTypeValue(child);
-							layout.push(field(fieldName, typeFromValue(fieldType, scope), (value: Value, innerScope: Scope) => {
-								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], [fieldType], innerScope), [], [], innerScope);
-							}));
+							methods[fieldName] = wrapped((innerScope, arg) => {
+								const childTypeValue = getTypeValue(child);
+								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [arg(0, "self")], [childTypeValue], innerScope), [], [], innerScope);
+							}, "() -> Void");
 						}
 						body = concat(body, translateStatement(child.children[0], scope, methods));
 					} else {
@@ -1522,7 +1540,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "struct_decl": {
 			expectLength(term.args, 1);
 			let body: Statement[] = [];
-			const layout: Field[] = [];
 			const methods: FunctionMap = {};
 			const structName = term.args[0];
 			const conformances: ProtocolConformanceMap = Object.create(null);
@@ -1534,22 +1551,88 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				}
 			}
 			const innerTypes: TypeMap = Object.create(null);
+			const storedFields: Array<{ name: string, type: Value }> = [];
 			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
-			scope.types[structName] = () => struct(layout, methods, conformances, innerTypes);
+			scope.types[structName] = (globalScope) => {
+				return {
+					functions: lookupForMap(methods),
+					conformances,
+					possibleRepresentations: storedFields.length === 0 ? PossibleRepresentation.Undefined : storedFields.length === 1 ? typeFromValue(storedFields[0].type, globalScope).possibleRepresentations : PossibleRepresentation.Object,
+					defaultValue(innerScope, consume) {
+						if (storedFields.length === 0) {
+							return undefinedValue;
+						}
+						if (storedFields.length === 1) {
+							// TODO: Handle case where defaultValue isn't available
+							const defaultValue = typeFromValue(storedFields[0].type, globalScope).defaultValue;
+							if (typeof defaultValue === "undefined") {
+								throw new TypeError(`Cannot default instantiate ${storedFields[0].name} in ${structName}`);
+							}
+							return defaultValue(innerScope, consume);
+						}
+						return expr(objectExpression(storedFields.map((fieldDeclaration) => {
+							const consumed = consume(fieldDeclaration.name);
+							let fieldExpression: Expression;
+							if (typeof consumed !== "undefined") {
+								fieldExpression = consumed;
+							} else {
+								const defaultValue = typeFromValue(fieldDeclaration.type, innerScope).defaultValue;
+								if (typeof defaultValue === "undefined") {
+									throw new TypeError(`Cannot default instantiate ${fieldDeclaration.name} in ${structName}`);
+								}
+								fieldExpression = read(defaultValue(innerScope, () => undefined), innerScope);
+							}
+							return objectProperty(mangleName(fieldDeclaration.name), fieldExpression);
+						})));
+					},
+					copy(value, innerScope) {
+						if (storedFields.length === 0) {
+							return value;
+						}
+						if (storedFields.length === 1) {
+							const onlyFieldType = typeFromValue(storedFields[0].type, innerScope);
+							return onlyFieldType.copy ? onlyFieldType.copy(value, scope) : value;
+						}
+						const expression = read(value, scope);
+						if (expressionSkipsCopy(expression)) {
+							return expr(expression);
+						}
+						return reuse(expr(expression), scope, "copySource", (source) => {
+							return expr(objectExpression(storedFields.map((fieldDeclaration, index) => {
+								const propertyExpr = member(source, mangleName(fieldDeclaration.name).name, scope);
+								const reified = typeFromValue(fieldDeclaration.type, innerScope);
+								const copiedValue = reified.copy ? reified.copy(propertyExpr, scope) : propertyExpr;
+								return objectProperty(mangleName(fieldDeclaration.name), read(copiedValue, scope));
+							})));
+						});
+					},
+					innerTypes,
+				};
+			};
 			for (const child of term.children) {
 				switch (child.name) {
 					case "var_decl": {
 						expectLength(child.args, 1);
+						const fieldName = child.args[0];
 						const childTypeValue = getTypeValue(child);
-						if (requiresGetter(child)) {
+						if (readTypeOfProperty(child) === "getter") {
 							expectLength(child.children, 1);
-							layout.push(field(child.args[0], typeFromValue(childTypeValue, scope), (value: Value, innerScope: Scope) => {
+							methods[fieldName] = wrapped((innerScope, arg) => {
 								const declaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
-								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [value], [childTypeValue], innerScope), [], [], innerScope);
-							}));
+								return call(call(functionValue(declaration.args[0], undefined, getFunctionType(declaration)), [arg(0, "self")], [childTypeValue], innerScope), [], [], innerScope);
+							}, "() -> Void");
 							body = concat(body, translateStatement(child.children[0], scope, methods));
 						} else {
-							layout.push(field(child.args[0], typeFromValue(childTypeValue, scope)));
+							storedFields.push({
+								name: fieldName,
+								type: childTypeValue,
+							});
+							methods[fieldName] = wrapped((innerScope, arg) => {
+								return member(arg(0, "self"), fieldName, innerScope);
+							}, "(Self) -> Any");
+							methods[fieldName + "_set"] = wrapped((innerScope, arg) => {
+								return set(member(arg(0, "lhs"), fieldName, innerScope), arg(1, "rhs"), innerScope);
+							}, "(inout Self, Any) -> Void");
 						}
 						break;
 					}
@@ -1577,7 +1660,6 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "pattern_binding_decl": {
 			if (term.children.length === 2) {
 				const valueChild = term.children[1];
-				// const value = copy(translateTermToValue(valueChild, scope), getTypeValue(valueChild));
 				const value = translateTermToValue(valueChild, scope);
 				const flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
 				const pattern = translatePattern(term.children[0], value, scope, flags);
@@ -1598,35 +1680,34 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		}
 		case "class_decl": {
 			expectLength(term.args, 1);
-			const layout: Field[] = [];
+			// const layout: Field[] = [];
 			const methods: FunctionMap = Object.create(null);
 			const classIdentifier = mangleName(term.args[0]);
 			const className = term.args[0];
 			const selfType = typeValue({ kind: "name", name: className });
 			const conformances: ProtocolConformanceMap = Object.create(null);
 			const innerTypes: TypeMap = Object.create(null);
+			const storedFields: Array<{ name: string, type: Value }> = [];
 			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
-			scope.types[className] = () => newClass(layout, methods, conformances, innerTypes, (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
+			scope.types[className] = () => newClass(methods, conformances, innerTypes, (innerScope: Scope, consume: (fieldName: string) => Expression | undefined) => {
 				const self = uniqueName(innerScope, camelCase(className));
 				const newExpr = newExpression(classIdentifier, []);
 				let bodyStatements: Statement[] = [addVariable(innerScope, self, selfType, expr(newExpr), DeclarationFlags.Const)];
 				const selfValue = lookup(self, scope);
-				for (const fieldDeclaration of layout) {
-					if (fieldDeclaration.stored) {
-						const fieldExpression = consume(fieldDeclaration.name);
-						let fieldValue;
-						if (typeof fieldExpression === "undefined") {
-							const defaultValue = fieldDeclaration.type.defaultValue;
-							if (typeof defaultValue === "undefined") {
-								// Swift always ensures all mandatory fields are filled, so we can be certain that later in the body it will be assigned
-								continue;
-							}
-							fieldValue = defaultValue(innerScope, () => undefined);
-						} else {
-							fieldValue = expr(fieldExpression);
+				for (const storedField of storedFields) {
+					const fieldExpression = consume(storedField.name);
+					let fieldValue;
+					if (typeof fieldExpression === "undefined") {
+						const defaultValue = typeFromValue(storedField.type, innerScope).defaultValue;
+						if (typeof defaultValue === "undefined") {
+							// Swift always ensures all mandatory fields are filled, so we can be certain that later in the body it will be assigned
+							continue;
 						}
-						bodyStatements = concat(bodyStatements, ignore(set(member(selfValue, fieldDeclaration.name, scope), fieldValue, scope), scope));
+						fieldValue = defaultValue(innerScope, () => undefined);
+					} else {
+						fieldValue = expr(fieldExpression);
 					}
+					bodyStatements = concat(bodyStatements, ignore(set(member(selfValue, storedField.name, scope), fieldValue, scope), scope));
 				}
 				if (bodyStatements.length === 1) {
 					return expr(newExpr);
@@ -1642,44 +1723,43 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 						if (child.args.length < 1) {
 							expectLength(child.args, 1);
 						}
-						const propertyName = child.args[0];
-						if (requiresGetter(child)) {
+						const fieldName = child.args[0];
+						if (readTypeOfProperty(child) === "getter") {
 							// TODO: Implement getters/setters
 							if (child.children.length < 1) {
 								expectLength(child.children, 1);
 							}
 							const childDeclaration = findTermWithName(child.children, "func_decl") || termWithName(child.children, "accessor_decl");
 							if (flagsForDeclarationTerm(child) & DeclarationFlags.Export) {
-								const fn = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(thisExpression()));
-								const [args, body] = functionize(scope, propertyName, (innerScope) => fn(innerScope, () => expr(thisExpression())), getFunctionType(childDeclaration));
-								bodyContents.push(classMethod("get", identifier(propertyName), args, blockStatement(body)));
+								const fn = translateFunctionTerm(fieldName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(thisExpression()));
+								const [args, body] = functionize(scope, fieldName, (innerScope) => fn(innerScope, () => expr(thisExpression())), getFunctionType(childDeclaration));
+								bodyContents.push(classMethod("get", identifier(fieldName), args, blockStatement(body)));
 								// Default implementation will call getter/setter
-								layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope)));
+								methods[fieldName] = wrapped((innerScope, arg) => {
+									return member(arg(0, "self"), fieldName, innerScope);
+								}, "(Self) -> Any");
 							} else {
-								// layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope), (value: Value, innerScope: Scope) => {
-								// 	return callable(fn, type, childDeclaration);
-								// }));
-								const childType = getTypeValue(child);
-								layout.push(field(child.args[0], typeFromValue(childType, scope), (value: Value, innerScope: Scope) => {
-									const selfExpression = read(value, innerScope);
-									if (selfExpression.type === "Identifier" || selfExpression.type === "ThisExpression") {
-										return translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, expr(selfExpression))(scope, noArguments);
-									} else {
-										const self = uniqueName(innerScope, "self");
-										const head = addVariable(innerScope, self, childType, expr(selfExpression), DeclarationFlags.Const);
-										const selfValue = lookup(self, scope);
-										const func = translateFunctionTerm(propertyName + ".get", childDeclaration, [[]], undefined, scope, functions, selfValue);
-										const result = func(scope, noArguments);
-										if (result.kind === "statements") {
-											return statements(concat([head], result.statements), result.location);
-										} else {
-											return statements([head, returnStatement(read(result, innerScope))], result.location);
-										}
-									}
-								}));
+								methods[fieldName] = wrapped((innerScope, arg) => {
+									return reuse(arg(0, "self"), innerScope, "self", (self) => {
+										const fn = translateFunctionTerm(fieldName + ".get", childDeclaration, [[]], undefined, scope, functions, self);
+										return fn(scope, arg);
+									});
+								}, "(Self) -> Any");
 							}
 						} else {
-							layout.push(field(child.args[0], typeFromValue(getTypeValue(child), scope)));
+							const childTypeValue = getTypeValue(child);
+							storedFields.push({
+								name: fieldName,
+								type: childTypeValue,
+							});
+							methods[fieldName] = wrapped((innerScope, arg) => {
+								return member(arg(0, "self"), fieldName, innerScope);
+							}, "(Self) -> Any");
+							if (writeTypeOfProperty(child) === "stored") {
+								methods[fieldName + "_set"] = wrapped((innerScope, arg) => {
+									return set(member(arg(0, "lhs"), fieldName, innerScope), arg(1, "rhs"), innerScope);
+								}, "(inout Self, Any) -> Void");
+							}
 						}
 						break;
 					}

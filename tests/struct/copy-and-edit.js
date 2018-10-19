@@ -3,8 +3,8 @@ export function pointOffsetFromOrigin$x$y$(x, y) {
     x: origin.x,
     y: origin.y
   };
-  result.x += x;
-  result.y += y;
+  result.x = result.x + x;
+  result.y = result.y + y;
   return result;
 }
 let origin = {

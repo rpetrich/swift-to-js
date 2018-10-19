@@ -1,11 +1,11 @@
-import { FunctionBuilder, GetterSetterBuilder } from "./functions";
+import { FunctionBuilder } from "./functions";
 import { parseType } from "./parse";
-import { lookup, mangleName, Scope } from "./scope";
+import { lookup, Scope } from "./scope";
 import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
 import { array, call, conditional, expr, extractContentOfBox, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
 
-import { isLiteral, objectExpression, objectProperty, Expression } from "@babel/types";
+import { isLiteral, Expression } from "@babel/types";
 
 export enum PossibleRepresentation {
 	None,
@@ -22,8 +22,7 @@ export enum PossibleRepresentation {
 }
 
 export interface ReifiedType {
-	fields: ReadonlyArray<Field>;
-	functions: (name: string) => FunctionBuilder | GetterSetterBuilder | undefined;
+	functions: (name: string) => FunctionBuilder | undefined;
 	conformances: ProtocolConformanceMap;
 	innerTypes: Readonly<TypeMap>;
 	possibleRepresentations: PossibleRepresentation;
@@ -40,7 +39,7 @@ export interface TypeMap {
 }
 
 export interface FunctionMap {
-	[name: string]: FunctionBuilder | GetterSetterBuilder;
+	[name: string]: FunctionBuilder;
 }
 
 export interface ProtocolConformance {
@@ -52,24 +51,17 @@ export interface ProtocolConformanceMap {
 	[protocolName: string]: ProtocolConformance;
 }
 
-export type Field = {
-	name: string;
-	type: ReifiedType;
-} & ({ stored: true } | { stored: false; getter: (target: Value, scope: Scope) => Value; });
-
 export interface EnumCase {
 	name: string;
 	fieldTypes: ReadonlyArray<ReifiedType>;
 }
 
-const emptyFields: ReadonlyArray<Field> = [];
 const emptyConformances: ProtocolConformanceMap = Object.create(null);
 const noFunctions: Readonly<FunctionMap> = Object.create(null);
 const noInnerTypes: Readonly<TypeMap> = Object.create(null);
 
-export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, fields: ReadonlyArray<Field> = emptyFields, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
+export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
-		fields,
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
 		conformances,
 		possibleRepresentations,
@@ -82,7 +74,6 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 
 export function protocol(conformances: ProtocolConformanceMap = emptyConformances): ReifiedType {
 	return {
-		fields: emptyFields,
 		functions(functionName) {
 			return (scope, arg, name, length) => {
 				const typeArg = arg(0, "Self");
@@ -99,9 +90,8 @@ export function protocol(conformances: ProtocolConformanceMap = emptyConformance
 	};
 }
 
-export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes) {
+export function inheritLayout(type: ReifiedType, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
-		fields,
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
 		conformances,
 		possibleRepresentations: type.possibleRepresentations,
@@ -112,106 +102,18 @@ export function inheritLayout(type: ReifiedType, fields: ReadonlyArray<Field>, f
 	};
 }
 
-export function struct(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
-	const onlyStored = storedFields(fields);
-	switch (onlyStored.length) {
-		case 0:
-			return {
-				fields,
-				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-				conformances,
-				possibleRepresentations: PossibleRepresentation.Undefined,
-				defaultValue() {
-					return undefinedValue;
-				},
-				innerTypes,
-			};
-		case 1:
-			// TODO: Map fields appropriately on unary structs
-			return inheritLayout(onlyStored[0].type, fields, functions, conformances, innerTypes);
-		default:
-			return {
-				fields,
-				functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-				conformances,
-				possibleRepresentations: PossibleRepresentation.Object,
-				defaultValue(scope, consume) {
-					return expr(objectExpression(onlyStored.map((fieldDeclaration) => {
-						let value = consume(fieldDeclaration.name);
-						if (typeof value === "undefined") {
-							const defaultValue = fieldDeclaration.type.defaultValue;
-							if (typeof defaultValue === "undefined") {
-								throw new TypeError(`Cannot default instantiate ${fieldDeclaration.name}`);
-							}
-							value = read(defaultValue(scope, alwaysUndefined), scope);
-						}
-						return objectProperty(mangleName(fieldDeclaration.name), value);
-					})));
-				},
-				copy(value, scope) {
-					const expression = read(value, scope);
-					if (expressionSkipsCopy(expression)) {
-						return expr(expression);
-					}
-					return reuse(expr(expression), scope, "copySource", (source) => {
-						return expr(objectExpression(onlyStored.map((fieldDeclaration, index) => {
-							const propertyExpr = member(source, mangleName(fieldDeclaration.name).name, scope);
-							const copiedValue = fieldDeclaration.type.copy ? fieldDeclaration.type.copy(propertyExpr, scope) : propertyExpr;
-							return objectProperty(mangleName(fieldDeclaration.name), read(copiedValue, scope));
-						})));
-					});
-				},
-				// store(target, value, scope) {
-				//  	let usedFirst = false;
-				//  	return reuse(value, scope, (first, after) => {
-				// 		return onlyStored.reduce((existing, fieldLayout) => {
-				// 			const identifier = usedFirst ? after : (usedFirst = true, first);
-				// 			return existing.concat(storeValue(mangleName(fieldLayout.name), getField(expr(identifier), fieldLayout, scope), fieldLayout.type, scope));
-				// 		}, [] as Expression[]);
-				// 	});
-				// },
-				innerTypes,
-			};
-	}
-}
-
 function cannotDefaultInstantiateClass(): never {
 	throw new TypeError(`Cannot default instantiate a class`);
 }
 
-export function newClass(fields: ReadonlyArray<Field>, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
+export function newClass(functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
 	return {
-		fields,
 		functions: lookupForMap(functions),
 		conformances,
 		possibleRepresentations: PossibleRepresentation.Object,
 		defaultValue,
 		innerTypes,
 	};
-}
-
-export function field(name: string, type: ReifiedType, getter?: (target: Value, scope: Scope) => Value): Field {
-	if (getter) {
-		return {
-			name,
-			type,
-			stored: false,
-			getter,
-		};
-	}
-	return {
-		name,
-		type,
-		stored: true,
-	};
-}
-
-function isStored(fieldDeclaration: Field) {
-	return fieldDeclaration.stored;
-}
-
-function storedFields(fields: ReadonlyArray<Field>) {
-	return fields.filter(isStored);
 }
 
 export function expressionSkipsCopy(expression: Expression): boolean {
@@ -247,14 +149,6 @@ export function store(dest: Value, source: Value, type: Value, scope: Scope): Va
 			return set(dest, source, scope, "=");
 		default:
 			throw new TypeError(`Unable to store to a ${dest.kind} value`);
-	}
-}
-
-export function getField(value: Value, fieldDeclaration: Field, scope: Scope) {
-	if (fieldDeclaration.stored) {
-		return member(value, fieldDeclaration.name, scope);
-	} else {
-		return fieldDeclaration.getter(value, scope);
 	}
 }
 
@@ -314,7 +208,6 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 					return reifiedTypes[0];
 				default:
 					return {
-						fields: [],
 						functions: lookupForMap(noFunctions),
 						conformances: {},
 						possibleRepresentations: PossibleRepresentation.Array,

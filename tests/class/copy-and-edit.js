@@ -5,8 +5,8 @@ export function pointOffsetFromOrigin$x$y$(x, y) {
   point0.x = _x;
   point0.y = _y;
   const result = point0;
-  result.x += x;
-  result.y += y;
+  result.x = result.x + x;
+  result.y = result.y + y;
   return result;
 }
 export class Point {}
