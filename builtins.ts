@@ -915,10 +915,252 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				});
 			}, "(String) -> Int");
 			return primitive(PossibleRepresentation.String, literal(""), {
-				"init(_:)": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope), "(String) -> String" ),
+				"init()": wrapped((scope, arg) => literal(""), "(String) -> String"),
+				"init(_:)": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope), "(String) -> String"),
+				"init(repeating:count:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "source"), scope, "source", (source) => {
+						return reuse(arg(1, "count"), scope, "count", (count) => {
+							const result = uniqueName(scope, "result");
+							const i = uniqueName(scope, "i");
+							return statements([
+								addVariable(scope, result, "String", literal("")),
+								forStatement(
+									addVariable(scope, i, "Int", literal(0)),
+									read(binary("<",
+										lookup(i, scope),
+										count,
+										scope
+									), scope),
+									updateExpression("++", read(lookup(i, scope), scope)),
+									blockStatement(
+										ignore(set(lookup(result, scope), source, scope, "+="), scope)
+									)
+								),
+								returnStatement(read(lookup(result, scope), scope)),
+							]);
+						});
+					});
+				}, "(String, Int) -> String"),
 				"+": wrapped(binaryBuiltin("+", 0), "(String, String) -> String"),
+				"+=": wrapped((scope, arg) => {
+					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
+				}, "(inout String, String) -> Void"),
 				"lowercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toLowerCase", scope), [], [], scope), "(String) -> String"),
 				"uppercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toUpperCase", scope), [], [], scope), "(String) -> String"),
+				"write(_:)": wrapped((scope, arg) => {
+					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
+				}, "(inout String, String) -> Void"),
+				"append(_:)": wrapped((scope, arg) => {
+					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
+				}, "(inout String, String) -> Void"),
+				"insert(_:at:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return reuse(arg(1, "character"), scope, "character", (character) => {
+							return reuse(arg(2, "index"), scope, "index", (index) => {
+								return set(
+									string,
+									binary(
+										"+",
+										binary(
+											"+",
+											call(member(string, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+											character,
+											scope
+										),
+										call(member(string, "substring", scope), [index], ["Int"], scope),
+										scope
+									),
+									scope
+								);
+							});
+						});
+					});
+				}, "(inout String, Character, Int) -> Void"),
+				// "insert(contentsOf:at:)": wrapped((scope, arg) => {
+				// }, "(inout String, ?, String.Index) -> Void"),
+				// "replaceSubrange(_:with:)": wrapped((scope, arg) => {
+				// }, "(inout String, ?, ?) -> Void"),
+				"remove(at:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return reuse(arg(1, "index"), scope, "index", (index) => {
+							const removed = uniqueName(scope, "removed");
+							return statements(concat(
+								[addVariable(scope, removed, "String", member(string, index, scope)) as Statement],
+								ignore(set(
+									string,
+									binary(
+										"+",
+										call(member(string, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+										call(member(string, "substring", scope), [index], ["Int"], scope),
+										scope
+									),
+									scope
+								), scope),
+								[returnStatement(read(lookup(removed, scope), scope))]
+							));
+						});
+					});
+				}, "(inout String, String.Index) -> Character"),
+				"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
+					return set(arg(0, "string"), literal(""), scope);
+				}, "(inout String, Bool) -> Void"),
+				// "removeAll(where:)": wrapped((scope, arg) => {
+				// 	return reuse(arg(0, "string"), "string", scope, (string) => {
+				// 		return reuse(arg(1, "predicate"), "predicate", scope, (predicate) => {
+				// 		});
+				// 	});
+				// }, "(inout String, (Character) throws -> Bool) rethrows -> Void"),
+				"removeFirst()": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						const first = uniqueName(scope, "first");
+						return statements(concat(
+							[addVariable(scope, first, "Character", member(string, 0, scope)) as Statement],
+							ignore(set(
+								string,
+								call(member(string, "substring", scope), [literal(1)], ["Int"], scope),
+								scope
+							), scope),
+							[returnStatement(read(lookup(first, scope), scope))]
+						));
+						return member(arg(0, "string"), 0, scope);
+					});
+				}, "(inout String) -> Character"),
+				"removeFirst(_:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return set(
+							string,
+							call(member(string, "substring", scope), [arg(1, "k")], ["Int"], scope),
+							scope
+						)
+					});
+				}, "(inout String, Int) -> Void"),
+				"removeLast()": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						const index = uniqueName(scope, "index");
+						const last = uniqueName(scope, "last");
+						return statements(concat(
+							[
+								addVariable(scope, index, "Int", binary("-", member(string, "length", scope), literal(1), scope)) as Statement,
+								addVariable(scope, last, "Character", member(string, lookup(index, scope), scope)) as Statement,
+							],
+							ignore(set(
+								string,
+								call(
+									member(string, "substring", scope),
+									[binary("-", member(string, "length", scope), lookup(index, scope), scope)],
+									["Int"],
+									scope
+								),
+								scope
+							), scope),
+							[returnStatement(read(lookup(last, scope), scope))]
+						));
+						return member(arg(0, "string"), 0, scope);
+					});
+				}, "(inout String) -> Character"),
+				"removeLast(_:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return set(
+							string,
+							call(
+								member(string, "substring", scope),
+								[binary("-", member(string, "length", scope), arg(1, "k"), scope)],
+								["Int"],
+								scope
+							),
+							scope
+						)
+					});
+				}, "(inout String, Int) -> Void"),
+				// "removeSubrange()": wrapped((scope, arg) => {
+				// }, "(inout String, Range<String.Index>) -> Void"),
+				// "filter(_:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) -> Bool) -> String"),
+				// "drop(while:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) -> Bool) -> Substring"),
+				"dropFirst()": wrapped((scope, arg) => {
+					return call(
+						member(arg(0, "string"), "substring", scope),
+						[literal(0)],
+						["Int"],
+						scope
+					);
+				}, "(String) -> Void"),
+				"dropFirst(_:)": wrapped((scope, arg) => {
+					return call(
+						member(arg(0, "string"), "substring", scope),
+						[arg(1, "k")],
+						["Int"],
+						scope
+					);
+				}, "(String, Int) -> Void"),
+				"dropLast()": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return call(
+							member(string, "substring", scope),
+							[binary("-", member(string, "length", scope), literal(1), scope)],
+							["Int"],
+							scope
+						);
+					});
+				}, "(String) -> Void"),
+				"dropLast(_:)": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						return call(
+							member(string, "substring", scope),
+							[binary("-", member(string, "length", scope), arg(1, "k"), scope)],
+							["Int"],
+							scope
+						);
+					});
+				}, "(String, Int) -> Void"),
+				"popLast()": wrapped((scope, arg) => {
+					return reuse(arg(0, "string"), scope, "string", (string) => {
+						const characterType = typeValue("Character");
+						return conditional(
+							binary("!==", member(string, "length", scope), literal(0), scope),
+							wrapInOptional(member(string, binary("-", member(string, "length", scope), literal(1), scope), scope), characterType, scope),
+							emptyOptional(characterType, scope),
+							scope
+						);
+					});
+				}, "(inout String) -> Character?"),
+				"hasPrefix(_:)": wrapped((scope, arg) => {
+					return call(member(arg(0, "string"), "hasPrefix", scope), [arg(1, "prefix")], ["String"], scope);
+				}, "(String, String) -> Bool"),
+				"hasSuffix(_:)": wrapped((scope, arg) => {
+					return call(member(arg(0, "string"), "hasSuffix", scope), [arg(1, "suffix")], ["String"], scope);
+				}, "(String, String) -> Bool"),
+				"contains(_:)": wrapped((scope, arg) => {
+					return binary("!==",
+						call(member(arg(0, "string"), "indexOf", scope), [arg(1, "element")], ["Character"], scope),
+						literal(0),
+						scope
+					);
+				}, "(String, Character) -> Bool"),
+				// "allSatisfy(_:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) throws -> Bool) rethrows -> Bool"),
+				// "contains(where:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) -> Bool) -> Bool"),
+				// "first(where:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) -> Bool) -> Character?"),
+				"firstIndex(of:)": wrapped((scope, arg) => {
+					const index = call(member(arg(0, "string"), "indexOf", scope), [arg(1, "element")], ["Character"], scope);
+					return reuse(index, scope, "index", (index) => {
+						const indexType = typeValue("Int");
+						return conditional(
+							binary("!==", index, literal(-1), scope),
+							wrapInOptional(index, indexType, scope),
+							emptyOptional(indexType, scope),
+							scope
+						);
+					});
+				}, "(String, Character) -> String.Index?"),
+				// "firstIndex(where:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) throws -> Bool) rethrows -> String.Index?"),
+				"reserveCapacity(_:)": wrapped((scope, arg) => {
+					return statements([]);
+				}, "(String, String) -> Void"),
 				"unicodeScalars": wrapped((scope, arg) => {
 					return call(member("Array", "from", scope), [arg(0, "value")], [typeValue("String")], scope);
 				}, "(String) -> String.UnicodeScalarView"),
@@ -928,6 +1170,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				"utf8": wrapped((scope, arg) => {
 					return call(member(expr(newExpression(identifier("TextEncoder"), [read(literal("utf-8"), scope)])), "encode", scope), [arg(0, "value")], [typeValue("String")], scope);
 				}, "(String) -> String.UTF8View"),
+				"isEmpty": wrapped((scope, arg) => {
+					return binary("===", member(arg(0, "string"), "length", scope), literal(0), scope);
+				}, "(String) -> Bool"),
+				"count": wrapped((scope, arg) => {
+					return member(arg(0, "string"), "length", scope);
+				}, "(String) -> Int"),
 				hashValue,
 			}, {
 				Equatable: {
