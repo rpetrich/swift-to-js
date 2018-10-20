@@ -1,5 +1,5 @@
 export function addOne$to$(int) {
-  int[0] += 1;
+  int[0]++;
 }
 export function incremented$integer$(integer) {
   const copy = [integer];

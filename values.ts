@@ -1,11 +1,11 @@
 import generate from "@babel/generator";
-import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionDeclaration, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
+import { isFunction, isReturnStatement, arrayExpression, assignmentExpression, binaryExpression, blockStatement, functionDeclaration, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, updateExpression,unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
 import { reifyType, PossibleRepresentation, ProtocolConformance, ReifiedType, TypeMap } from "./reified";
-import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
+import { addVariable, lookup, mangleName, mappedValueForName, MappedNameValue, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -379,7 +379,18 @@ export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOp
 			if (dest.expression.type === "ThisExpression") {
 				throw new Error("Cannot assign to a this expression!");
 			}
-			result = expr(assignmentExpression(operator, dest.expression, read(source, scope)));
+			const sourceExpression = read(source, scope);
+			if (expressionLiteralValue(sourceExpression) === 1) {
+				if (operator === "+=") {
+					result = expr(updateExpression("++", dest.expression), location);
+					break;
+				}
+				if (operator === "-=") {
+					result = expr(updateExpression("--", dest.expression), location);
+					break;
+				}
+			}
+			result = expr(assignmentExpression(operator, dest.expression, sourceExpression), location);
 			break;
 		}
 		case "subscript": {
@@ -747,7 +758,7 @@ export function read(value: Value, scope: Scope): Expression {
 					}
 					return objectExpression(Object.keys(reified.conformances).map((key) => {
 						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
-					}));
+					}))
 				}
 				// Placeholder to avoid infinite recursion in tables that are self-referential
 				globalScope.declarations[name] = {
