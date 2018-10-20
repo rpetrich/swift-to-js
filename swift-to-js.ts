@@ -595,11 +595,12 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				location: type.location,
 			};
 			const getter = extractReference(term, scope, getterType);
+			const setterArgTypes = concat(term.children.map(getType), [type]);
 			const setterType: Function = {
 				kind: "function",
 				arguments: {
 					kind: "tuple",
-					types: concat(term.children.map(getType), [type]),
+					types: setterArgTypes,
 					location: type.location,
 				},
 				return: parseType("Void"),
@@ -611,7 +612,19 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			const setter = extractReference(term, scope, setterType, "_set");
 			return subscript(
 				call(getter, [typeValue(type)], ["Type"], scope),
-				call(setter, [typeValue(type)], ["Type"], scope),
+				callable((innerScope, arg, length) => {
+					// Defer resolving setter until invocation, in case there is no setter
+					const forwarded = call(setter, [typeValue(type)], ["Type"], innerScope);
+					if (forwarded.kind === "callable") {
+						return forwarded.call(innerScope, arg, length);
+					}
+					return call(
+						forwarded,
+						setterArgTypes.map((_, i) => arg(i)),
+						setterArgTypes.map((argumentType) => typeValue(argumentType)),
+						innerScope,
+					);
+				}, setterType),
 				term.children.map((child) => translateTermToValue(child, scope, bindingContext)),
 				term.children.map(getTypeValue),
 				term,
