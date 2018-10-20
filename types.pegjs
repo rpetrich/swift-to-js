@@ -73,7 +73,7 @@ NamespacedType "namespaced type"
   = namespace:(Generic / Name) '.' !('Type' / 'Protocol') type:Type { return { kind: "namespaced", namespace: namespace, type: type, location: location() }; }
 
 Modified "modifier"
-  = modifier:("inout" / "@lvalue") " " _ type:Type { return { kind: "modified", modifier: modifier, type: type, location: location() }; }
+  = modifier:("inout" / "@lvalue" / "__owned" / "__shared") " " _ type:Type { return { kind: "modified", modifier: modifier, type: type, location: location() }; }
 
 Name "name"
   = head:[a-zA-Z_] tail:[a-zA-Z0-9_\-]* { return { kind: "name", name: head + tail.join(""), location: location() }; }
