@@ -79,7 +79,7 @@ export function protocol(conformances: ProtocolConformanceMap = emptyConformance
 				const typeArg = arg(0, "Self");
 				const fn = typeFromValue(typeArg, scope).functions(functionName);
 				if (typeof fn !== "function") {
-					throw new TypeError(`Expected a function, got a ${typeof fn}`);
+					throw new TypeError(`Could not find ${functionName} on ${stringifyValue(typeArg)}`);
 				}
 				return fn(scope, arg, name, length);
 			};
