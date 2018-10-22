@@ -2,7 +2,7 @@ Top
   = _ type:Type _ { return type; }
 
 Type "type"
-  = Constrained / GenericFunction / Function / NamespacedType / MetaType / Optional / Generic / Dictionary / Array / Tuple / Modified / Name
+  = Constrained / GenericFunction / Function / NamespacedType / MetaType / Optional / Generic / Dictionary / Array / Tuple / Modified / Void / Name
 
 Types "type list"
   = head:Type tail:CommaType* { return [head].concat(tail) }
@@ -77,6 +77,9 @@ Modified "modifier"
 
 Name "name"
   = head:[a-zA-Z_] tail:[a-zA-Z0-9_\-]* { return { kind: "name", name: head + tail.join(""), location: location() }; }
+
+Void "void"
+  = "Void" { return { kind: "tuple", types: [] } }
 
 _ "whitespace"
   = [ \t\n\r]* { return []; }
