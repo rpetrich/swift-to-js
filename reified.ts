@@ -44,7 +44,7 @@ export interface FunctionMap {
 
 export interface ProtocolConformance {
 	functions: { [functionName: string]: FunctionBuilder };
-	conformances: ProtocolConformanceMap;
+	requirements: string[];
 }
 
 export interface ProtocolConformanceMap {
@@ -75,13 +75,13 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 export function protocol(conformances: ProtocolConformanceMap = emptyConformances): ReifiedType {
 	return {
 		functions(functionName) {
-			return (scope, arg, name, length) => {
+			return (scope, arg, name, argTypes) => {
 				const typeArg = arg(0, "Self");
 				const fn = typeFromValue(typeArg, scope).functions(functionName);
 				if (typeof fn !== "function") {
 					throw new TypeError(`Could not find ${functionName} on ${stringifyValue(typeArg)}`);
 				}
-				return fn(scope, arg, name, length);
+				return fn(scope, arg, name, argTypes);
 			};
 		},
 		conformances,
@@ -245,10 +245,11 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 			return reifyType(type.base, scope, concat(typeArguments, type.arguments.map((innerType) => typeValue(innerType))));
 		case "metatype":
 			const reified = reifyType(type.base, scope, typeArguments);
-			if (!Object.hasOwnProperty.call(reified.innerTypes, type.as)) {
-				throw new TypeError(`${stringifyType(type.base)} does not have a ${type.as} inner type`);
-			}
-			return reified.innerTypes[type.as](scope, typeArgumentsForArray([]));
+			return reified;
+			// if (!Object.hasOwnProperty.call(reified.innerTypes, type.as)) {
+			// 	throw new TypeError(`${stringifyType(type.base)} does not have a ${type.as} inner type`);
+			// }
+			// return reified.innerTypes[type.as](scope, typeArgumentsForArray([]));
 		case "function":
 			return primitive(PossibleRepresentation.Function, undefinedValue);
 		case "namespaced":

@@ -3,11 +3,11 @@ import { parseFunctionType } from "./parse";
 import { TypeMap } from "./reified";
 import { addDeclaration, lookup, mangleName, newScope, rootScope, DeclarationFlags, Scope } from "./scope";
 import { Function, Type } from "./types";
-import { boxed, call, callable, expr, read, stringifyType, typeFromValue, typeValue, ArgGetter, Location, Value } from "./values";
+import { boxed, call, callable, expr, read, reuse, stringifyType, typeFromValue, typeValue, ArgGetter, Location, Value } from "./values";
 
 import { blockStatement, functionDeclaration, identifier, returnStatement, Identifier, Statement } from "@babel/types";
 
-export type FunctionBuilder = (scope: Scope, arg: ArgGetter, name: string, argumentLength: number) => Value;
+export type FunctionBuilder = (scope: Scope, arg: ArgGetter, name: string, argumentTypes: Value[]) => Value;
 
 export function statementsInValue(value: Value, scope: Scope): Statement[] {
 	return value.kind === "statements" ? value.statements : [returnStatement(read(value, scope))];
@@ -59,7 +59,7 @@ export function insertFunction(name: string, scope: Scope, builder: FunctionBuil
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
 	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
-	const [args, statements] = functionize(globalScope, name, (inner, arg) => builder(inner, arg, name, type.arguments.types.length), type, undefined, location);
+	const [args, statements] = functionize(globalScope, name, (inner, arg) => builder(inner, arg, name, type.arguments.types.map((typeArgument) => typeValue(typeArgument))), type, undefined, location);
 	return addDeclaration(globalScope, name, (id) => functionDeclaration(id, args, blockStatement(statements)), shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 }
 
@@ -73,11 +73,28 @@ export function noinline(builder: FunctionBuilder, functionType: string | Functi
 	};
 }
 
-export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, length: number) => Value, functionType: string | Function): FunctionBuilder {
+export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, argTypes: Value[]) => Value, functionType: string | Function): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, name: string): Value => {
 		const typeArgument = arg(0, "Self");
 		const innerType = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
-		return callable((innerScope, innerArg, length) => newScope("wrapped", innerScope, (innerInner) => fn(innerInner, innerArg, typeArgument, length), {
+		return callable((innerScope, innerArg, argTypes) => newScope("wrapped", innerScope, (innerInner) => fn(innerInner, innerArg, typeArgument, argTypes), {
+			Self(innerInner) {
+				return typeFromValue(typeArgument, innerInner);
+			},
+		}), innerType);
+	};
+}
+
+export function wrappedSelf(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, self: Value, argTypes: Value[]) => Value, functionType: string | Function): FunctionBuilder {
+	return (scope: Scope, arg: ArgGetter, name: string): Value => {
+		const typeArgument = arg(0, "Self");
+		const selfArgument = arg(1, "self");
+		const innerType = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
+		return callable((innerScope, innerArg, argTypes) => newScope("wrapped", innerScope, (innerInner) => {
+			return reuse(selfArgument, innerInner, "self", (self) => {
+				return fn(innerInner, innerArg, typeArgument, self, argTypes);
+			});
+		}, {
 			Self(innerInner) {
 				return typeFromValue(typeArgument, innerInner);
 			},
@@ -86,6 +103,7 @@ export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, 
 }
 
 export const abstractMethod: FunctionBuilder = (scope, arg, name) => {
+	return expr(mangleName("abstract:" + name));
 	throw new TypeError(`Abstract method ${name} not overridden`);
 };
 

@@ -1,9 +1,9 @@
-import { abstractMethod, noinline, wrapped } from "./functions";
+import { abstractMethod, noinline, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
 import { expressionSkipsCopy, inheritLayout, primitive, protocol, reifyType, FunctionMap, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
-import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, Scope } from "./scope";
+import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Tuple } from "./types";
-import { cached, concat, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, Value } from "./values";
+import { concat, lookupForMap } from "./utils";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
 
 import { arrayPattern, blockStatement, breakStatement, expressionStatement, forInStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Identifier, Node, Statement } from "@babel/types";
 
@@ -71,7 +71,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
 	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
 	function initExactly(outerScope: Scope, outerArg: ArgGetter): Value {
-		const sourceTypeArg = outerArg(1, "Self");
+		const sourceTypeArg = outerArg(0, "T");
 		return callable((scope: Scope, arg: ArgGetter) => {
 			const sourceIntConformance = conformance(sourceTypeArg, integerTypeName, scope);
 			const source = rangeForNumericType(sourceIntConformance, scope);
@@ -80,7 +80,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
 				return arg(0, "value");
 			}
-			return reuse(arg(0, "value"), scope, "value", (value) => {
+			return reuseArgs(arg, 0, scope, ["value"], (value) => {
 				let check;
 				if (requiresGreaterThanCheck && requiresLessThanCheck) {
 					check = logical(
@@ -109,22 +109,20 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 		functions: {
 			description: wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "self")], ["Self"], scope), "(Self) -> String"),
 		},
-		conformances: {
-		},
+		requirements: [],
 	};
 	const hashableConformance: ProtocolConformance = {
 		functions: {
 			hashValue: wrapped((scope, arg) => arg(0, "self"), "(Self) -> Int"),
 		},
-		conformances: {
-		},
+		requirements: [],
 	};
 	const equatableConformance: ProtocolConformance = {
 		functions: {
 			"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 			"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 		},
-		conformances: Object.create(null),
+		requirements: [],
 	};
 	const numericConformance: ProtocolConformance = {
 		functions: {
@@ -133,17 +131,13 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range)), "(Self, Self) -> Self"),
 			"*": wrapped(binaryBuiltin("*", 0, (value, scope) => integerRangeCheck(scope, value, widerBoth, range)), "(Self, Self) -> Self"),
 		},
-		conformances: {
-			Equatable: equatableConformance,
-		},
+		requirements: [],
 	};
 	const signedNumericConformance: ProtocolConformance = {
 		functions: {
 			"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(Self) -> Self"),
 		},
-		conformances: {
-			Numeric: numericConformance,
-		},
+		requirements: [],
 	};
 	const comparableConformance: ProtocolConformance = {
 		functions: {
@@ -152,9 +146,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"<=": wrapped(binaryBuiltin("<=", 0), "(Self, Self) -> Bool"),
 			">=": wrapped(binaryBuiltin(">=", 0), "(Self, Self) -> Bool"),
 		},
-		conformances: {
-			Equatable: equatableConformance,
-		},
+		requirements: [],
 	};
 	const strideableConformance: ProtocolConformance = {
 		functions: {
@@ -164,10 +156,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				return tuple([arg(0, "start"), arg(1, "end")]);
 			}, "(Self, Self) -> Self"),
 		},
-		conformances: {
-			Equatable: equatableConformance,
-			Comparable: comparableConformance,
-		},
+		requirements: [],
 	};
 	const binaryIntegerConformance: ProtocolConformance = {
 		functions: {
@@ -190,17 +179,15 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"|": wrapped(binaryBuiltin("|", 0), "(Self, Self) -> Self"),
 			"^": wrapped(binaryBuiltin("^", 0), "(Self, Self) -> Self"),
 			"quotientAndRemainder(dividingBy:)": wrapped((scope, arg) => {
-				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
-					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
-						return tuple([
-							binary("|", binary("/", lhs, rhs, scope), literal(0), scope),
-							binary("%", lhs, rhs, scope),
-						]);
-					});
+				return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
+					return tuple([
+						binary("|", binary("/", lhs, rhs, scope), literal(0), scope),
+						binary("%", lhs, rhs, scope),
+					]);
 				});
 			}, "(Self, Self) -> (Self, Self)"),
 			"signum": wrapped((scope, arg) => {
-				return reuse(arg(0, "self"), scope, "self", (int) => {
+				return reuseArgs(arg, 0, scope, ["self"], (int) => {
 					if (min < 0) {
 						return conditional(
 							binary(">", int, literal(0), scope),
@@ -223,13 +210,11 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 					}
 				});
 			}, "(Self) -> Self"),
+			"isSigned": wrapped((scope, arg) => {
+				return literal(min < 0);
+			}, "() -> Bool"),
 		},
-		conformances: {
-			CustomStringConvertible: customStringConvertibleConformance,
-			Numeric: numericConformance,
-			Hashable: hashableConformance,
-			Strideable: strideableConformance,
-		},
+		requirements: [],
 	};
 	const fixedWidthIntegerConformance: ProtocolConformance = {
 		functions: {
@@ -239,10 +224,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"&<<": wrapped(binaryBuiltin("<<", 0, wrap), "(Self, Self) -> Self"),
 			"&>>": wrapped(binaryBuiltin(">>", 0, wrap), "(Self, Self) -> Self"),
 		},
-		conformances: {
-			BinaryInteger: binaryIntegerConformance,
-			// LosslessStringConvertible: losslessStringConvertibleConformance,
-		},
+		requirements: [],
 	};
 	const integerConformance: ProtocolConformance = {
 		functions: {
@@ -253,7 +235,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				return literal(max);
 			}, "() -> Int"),
 			"init(_:)": (outerScope, outerArg, type) => {
-				const sourceTypeArg = outerArg(1, "Self");
+				const sourceTypeArg = outerArg(0, "T");
 				return callable((scope, arg) => {
 					const sourceType = conformance(sourceTypeArg, integerTypeName, scope);
 					return integerRangeCheck(
@@ -267,17 +249,13 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"init(exactly:)": initExactly,
 			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
 		},
-		conformances: {
-			FixedWidthInteger: fixedWidthIntegerConformance,
-			BinaryInteger: binaryIntegerConformance,
-			SignedNumeric: signedNumericConformance,
-		},
+		requirements: [],
 	};
 	const reifiedType: ReifiedType = {
 		functions: lookupForMap({
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
 			"init(clamping:)": (scope: Scope, arg: ArgGetter, name: string) => {
-				const source = rangeForNumericType(conformance(arg(1, "Other"), integerTypeName, scope), scope);
+				const source = rangeForNumericType(conformance(arg(0, "T"), integerTypeName, scope), scope);
 				return callable((innerScope, innerArg) => {
 					const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
 					const requiresLessThanCheck = possiblyLessThan(source, range, scope);
@@ -316,8 +294,8 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 				}, "(Self) -> Self");
 			},
 			"+": wrapped((scope, arg) => integerRangeCheck(scope, binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), widerHigh, range), "(Self, Self) -> Self"),
-			"-": wrapped((scope, arg, type, length) => {
-				if (length === 1) {
+			"-": wrapped((scope, arg, type, argTypes) => {
+				if (argTypes.length === 1) {
 					return integerRangeCheck(scope, unary("-", arg(0, "value"), scope), widerLow, range);
 				}
 				return integerRangeCheck(scope, binary("-", arg(0, "lhs"), arg(1, "rhs"), scope), widerLow, range);
@@ -343,9 +321,18 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"hashValue": wrapped((scope, arg) => {
 				return arg(0, "self");
 			}, "(Self) -> Int"),
+			"min": wrapped(() => {
+				return literal(min);
+			}, "(Type) -> Self"),
+			"max": wrapped(() => {
+				return literal(max);
+			}, "(Type) -> Self"),
 		} as FunctionMap),
 		conformances: applyDefaultConformances({
+			Hashable: hashableConformance,
 			Equatable: equatableConformance,
+			Comparable: comparableConformance,
+			BinaryInteger: binaryIntegerConformance,
 			Numeric: numericConformance,
 			[integerTypeName]: integerConformance,
 			SignedNumeric: signedNumericConformance,
@@ -382,7 +369,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 						]);
 					}, "(String) -> Self?"),
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 		}, globalScope),
 		possibleRepresentations: PossibleRepresentation.Number,
@@ -390,14 +377,6 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			return literal(0);
 		},
 		innerTypes: {
-			Type: cached(() => primitive(PossibleRepresentation.Object, literal({}), {
-				min: wrapped(() => {
-					return literal(min);
-				}, "(Type) -> Self"),
-				max: wrapped(() => {
-					return literal(max);
-				}, "(Type) -> Self"),
-			})),
 		},
 	};
 	return reifiedType;
@@ -410,8 +389,8 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
 			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
 			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
-			"-": wrapped((scope, arg, type, length) => {
-				if (length === 1) {
+			"-": wrapped((scope, arg, type, argTypes) => {
+				if (argTypes.length === 1) {
 					return unary("-", arg(0, "value"), scope);
 				}
 				return binary("-", arg(0, "lhs"), arg(1, "rhs"), scope);
@@ -441,23 +420,23 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 			SignedNumeric: {
 				functions: {
 					"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(Self) -> Self"),
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 			FloatingPoint: {
 				functions: {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 					"squareRoot()": (scope, arg, type) => {
-						return callable(() => call(member("Math", "sqrt", scope), [arg(1, "value")], ["Double"], scope), "() -> Self");
+						return callable(() => call(member("Math", "sqrt", scope), [arg(0, "value")], ["Double"], scope), "() -> Self");
 					},
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 			LosslessStringConvertible: {
 				functions: {
@@ -488,7 +467,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 						]);
 					}, "(String) -> Self?"),
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 		}, globalScope),
 		possibleRepresentations: PossibleRepresentation.Number,
@@ -502,12 +481,20 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 	return reifiedType;
 }
 
-function callSimpleMethod(type: Value, methodName: string, scope: Scope) {
-	const functionBuilder = typeFromValue(type, scope).functions(methodName);
+function resolveMethod(type: Value, name: string, scope: Scope, additionalArgs: Value[] = [], additionalTypes: Value[] = []) {
+	const functionBuilder = typeFromValue(type, scope).functions(name);
 	if (typeof functionBuilder !== "function") {
-		throw new TypeError(`Expected a function as a result of searching for simple method ${methodName}`);
+		throw new TypeError(`Could not find ${name} in ${stringifyValue(type)}`);
 	}
-	return call(functionBuilder(scope, () => type, methodName, 1), [], [], scope);
+	return functionBuilder(scope, (i) => {
+		if (i === 0) {
+			return type;
+		}
+		if (i > additionalArgs.length) {
+			throw new RangeError(`Asked for argument ${i}, but only ${additionalArgs.length} are available (shifted for hidden protocol self value)`);
+		}
+		return additionalArgs[i - 1];
+	}, name, concat([typeValue("Type")], additionalTypes));
 }
 
 interface NumericRange {
@@ -517,8 +504,8 @@ interface NumericRange {
 
 function rangeForNumericType(type: Value, scope: Scope): NumericRange {
 	return {
-		min: callSimpleMethod(type, "min", scope),
-		max: callSimpleMethod(type, "max", scope),
+		min: call(resolveMethod(type, "min", scope), [], [], scope),
+		max: call(resolveMethod(type, "max", scope), [], [], scope),
 	};
 }
 
@@ -639,158 +626,568 @@ function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: S
 		const base = conformances[key];
 		result[key] = {
 			functions: {...reified.conformances[key].functions, ...base.functions},
-			conformances: applyDefaultConformances(base.conformances, scope),
+			requirements: base.requirements,
 		};
 	}
 	return result;
 }
 
+function reuseArgs<T extends string[]>(arg: ArgGetter, offset: number, scope: Scope, names: T, callback: (...values: { [P in keyof T]: ExpressionValue | MappedNameValue }) => Value): Value {
+	if (names.length === 0) {
+		return (callback as () => Value)();
+	}
+	const [name, ...remaining] = names;
+	if (names.length === 1) {
+		return reuse(arg(offset, name), scope, name, callback as unknown as (value: ExpressionValue | MappedNameValue) => Value);
+	}
+	return reuse(arg(offset, name), scope, name, (value) => reuseArgs(arg, offset + 1, scope, remaining, callback.bind(null, value)));
+}
+
 const dummyType = typeValue({ kind: "name", name: "Dummy" });
 
-function defaultTypes(checkedIntegers: boolean): TypeMap {
+export interface BuiltinConfiguration {
+	checkedIntegers: boolean;
+	simpleStrings: boolean;
+}
+
+function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration): TypeMap {
 	const protocolTypes: TypeMap = Object.create(null);
-	function addProtocol(name: string, emptyConformance?: ProtocolConformance) {
+	function addProtocol(name: string, functionMap: { [functionName: string]: FunctionBuilder } = Object.create(null), ...requirements: string[]) {
 		const result = protocol({
-			[name]: typeof emptyConformance !== "undefined" ? emptyConformance : {
-				functions: Object.create(null),
-				conformances: Object.create(null),
-			} as ProtocolConformance,
+			[name]: {
+				functions: functionMap,
+				requirements,
+			},
 		});
 		protocolTypes[name] = () => result;
 	}
 
 	addProtocol("Equatable", {
-		functions: {
-			"==": abstractMethod,
-			"!=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
-			"~=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), "(Self, Self) -> Bool"),
-		},
-		conformances: Object.create(null),
+		"==": abstractMethod,
+		"!=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
+		"~=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), "(Self, Self) -> Bool"),
 	});
 	addProtocol("Comparable", {
-		functions: {
-			"<": abstractMethod,
-			">": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), "(Self, Self) -> Bool"),
-			"<=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
-			">=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
-		},
-		conformances: Object.create(null),
+		"<": abstractMethod,
+		">": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), "(Self, Self) -> Bool"),
+		"<=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
+		">=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
+	}, "Equatable");
+	addProtocol("ExpressibleByIntegerLiteral", {
+		"init(integerLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByFloatLiteral", {
+		"init(floatLiteral:)": abstractMethod,
 	});
 	addProtocol("Numeric", {
-		functions: {
-			"init(exactly:)": abstractMethod,
-			"+": abstractMethod,
-			"+=": updateMethod("+", "Numeric"),
-			"-": abstractMethod,
-			"-=": updateMethod("-", "Numeric"),
-			"*": abstractMethod,
-			"*=": updateMethod("*", "Numeric"),
-		},
-		conformances: Object.create(null),
-	});
+		"init(exactly:)": abstractMethod,
+		"+": abstractMethod,
+		"+=": updateMethod("+", "Numeric"),
+		"-": abstractMethod,
+		"-=": updateMethod("-", "Numeric"),
+		"*": abstractMethod,
+		"*=": updateMethod("*", "Numeric"),
+	}, "Equatable", "ExpressibleByIntegerLiteral");
 	addProtocol("SignedNumeric", {
-		functions: {
-			"-": abstractMethod, // TODO: Implement - in terms of negate
-			"negate": adaptedMethod("-", "SignedNumeric", "(Self) -> Self", (negateMethod, scope, type, arg) => {
-				return set(arg(0, "lhs"), call(negateMethod, [arg(0, "rhs")], [type], scope), scope);
-			}, "(inout Self) -> Void"),
-		},
-		conformances: Object.create(null),
-	});
+		"-": adaptedMethod("-", "Numeric", "(Self, Self) -> Self", (subtractMethod, scope, type, arg) => {
+			// TODO: Call ExpressibleByIntegerLiteral
+			return call(subtractMethod, [literal(0), arg(0, "self")], ["Int", type], scope);
+		}, "(Self) -> Self"),
+		"negate": adaptedMethod("-", "SignedNumeric", "(Self, Self) -> Self", (negateMethod, scope, type, arg) => {
+			return reuseArgs(arg, 0, scope, ["self"], (self) => {
+				return set(self, call(negateMethod, [self], [type], scope), scope);
+			});
+		}, "(inout Self) -> Void"),
+	}, "Numeric");
 	addProtocol("BinaryInteger", {
-		functions: {
-			"init(exactly:)": abstractMethod,
-			"init(truncatingIfNeeded:)": abstractMethod,
-			"init(clamping:)": abstractMethod,
-			"/": abstractMethod,
-			"/=": updateMethod("/", "BinaryInteger"),
-			"%": abstractMethod,
-			"%=": updateMethod("%", "BinaryInteger"),
-			"+": abstractMethod,
-			"+=": updateMethod("+", "BinaryInteger"),
-			"-": abstractMethod,
-			"-=": updateMethod("-", "BinaryInteger"),
-			"*": abstractMethod,
-			"*=": updateMethod("*=", "BinaryInteger"),
-			"~": abstractMethod,
-			"&": abstractMethod,
-			"&=": updateMethod("&", "BinaryInteger"),
-			"|": abstractMethod,
-			"|=": updateMethod("|", "BinaryInteger"),
-			"^": abstractMethod,
-			"^=": updateMethod("^", "BinaryInteger"),
-			">>": abstractMethod,
-			">>=": updateMethod(">>", "BinaryInteger"),
-			"<<": abstractMethod,
-			"<<=": updateMethod("<<", "BinaryInteger"),
-			"quotientAndRemainder(dividingBy:)": abstractMethod,
-			"signum": abstractMethod,
-			"isSigned": abstractMethod,
-		},
-		conformances: Object.create(null),
-	});
-	addProtocol("SignedInteger");
-	addProtocol("UnsignedInteger");
-	addProtocol("FixedWidthInteger");
+		"init(exactly:)": abstractMethod,
+		"init(truncatingIfNeeded:)": abstractMethod,
+		"init(clamping:)": abstractMethod,
+		"/": abstractMethod,
+		"/=": updateMethod("/", "BinaryInteger"),
+		"%": abstractMethod,
+		"%=": updateMethod("%", "BinaryInteger"),
+		"+": abstractMethod,
+		"+=": updateMethod("+", "BinaryInteger"),
+		"-": abstractMethod,
+		"-=": updateMethod("-", "BinaryInteger"),
+		"*": abstractMethod,
+		"*=": updateMethod("*", "BinaryInteger"),
+		"~": abstractMethod,
+		"&": abstractMethod,
+		"&=": updateMethod("&", "BinaryInteger"),
+		"|": abstractMethod,
+		"|=": updateMethod("|", "BinaryInteger"),
+		"^": abstractMethod,
+		"^=": updateMethod("^", "BinaryInteger"),
+		">>": abstractMethod,
+		">>=": updateMethod(">>", "BinaryInteger"),
+		"<<": abstractMethod,
+		"<<=": updateMethod("<<", "BinaryInteger"),
+		"quotientAndRemainder(dividingBy:)": abstractMethod,
+		"signum": abstractMethod,
+		"isSigned": abstractMethod,
+	}, "CustomStringConvertible", "Hashable", "Numeric", "Strideable");
+	addProtocol("SignedInteger", {
+		"max": abstractMethod,
+		"min": abstractMethod,
+		"&+": abstractMethod,
+		"&-": abstractMethod,
+	}, "BinaryInteger", "SignedNumeric");
+	addProtocol("UnsignedInteger", {
+		max: abstractMethod,
+		min: abstractMethod,
+		magnitude: abstractMethod,
+	}, "BinaryInteger", "SignedNumeric");
+	addProtocol("FixedWidthInteger", {
+		"max": abstractMethod,
+		"min": abstractMethod,
+		"init(_:radix)": abstractMethod,
+		"init(bigEndian:)": abstractMethod,
+		"init(littleEndian:)": abstractMethod,
+		"bigEndian": abstractMethod,
+		"byteSwapped": abstractMethod,
+		"leadingZeroBitCount": abstractMethod,
+		"littleEndian": abstractMethod,
+		"nonzeroBitCount": abstractMethod,
+		"bitWidth": abstractMethod,
+		"addingReportingOverflow(_:)": abstractMethod,
+		"dividedReportingOverflow(by:)": abstractMethod,
+		"dividingFullWidth(_:)": abstractMethod,
+		"multipliedFullWidth(by:)": abstractMethod,
+		"multipliedReportingOverflow(by:)": abstractMethod,
+		"remainderReportingOverflow(dividingBy:)": abstractMethod,
+		"subtractingReportingOverflow(_:)": abstractMethod,
+		"&*": abstractMethod,
+		"&*=": abstractMethod,
+		"&+": abstractMethod,
+		"&+=": abstractMethod,
+		"&-": abstractMethod,
+		"&-=": abstractMethod,
+		"&<<": abstractMethod,
+		"&<<=": abstractMethod,
+		"&>>": abstractMethod,
+		"&>>=": abstractMethod,
+	}, "BinaryInteger", "LosslessStringConvertible");
 	addProtocol("FloatingPoint", {
-		functions: {
-			formSquareRoot: abstractMethod,
-			squareRoot: abstractMethod,
-		},
-		conformances: Object.create(null),
+		"init(_:)": abstractMethod,
+		// properties
+		"exponent": abstractMethod,
+		"floatingPointClass": abstractMethod,
+		"isCanonical": abstractMethod,
+		"isFinite": abstractMethod,
+		"isInfinite": abstractMethod,
+		"isNaN": abstractMethod,
+		"isSignalingNaN": abstractMethod,
+		"isSubnormal": abstractMethod,
+		"isZero": abstractMethod,
+		"nextDown": abstractMethod,
+		"nextUp": abstractMethod,
+		"sign": abstractMethod,
+		"significand": abstractMethod,
+		"ulp": abstractMethod,
+		// static properties
+		"greatestFiniteMagnitude": abstractMethod,
+		"infinity": abstractMethod,
+		"leastNonzeroMagnitude": abstractMethod,
+		"leastNormalMagnitude": abstractMethod,
+		"nan": abstractMethod,
+		"pi": abstractMethod,
+		"radix": abstractMethod,
+		"signalingNaN": abstractMethod,
+		"ulpOfOne": abstractMethod,
+		// methods
+		"addProduct(_:_:)": abstractMethod,
+		"addingProduct(_:_:)": abstractMethod,
+		"formRemainder(dividingBy:)": abstractMethod,
+		"formSquareRoot(_:)": abstractMethod,
+		"formTruncatingRemainder(dividingBy:)": abstractMethod,
+		"isEqual(to:)": abstractMethod,
+		"isLess(than:)": abstractMethod,
+		"isLessThanOrEqualTo(_:)": abstractMethod,
+		"isTotallyOrdered(belowOrEqualTo:)": abstractMethod,
+		"negate()": abstractMethod,
+		"remainder(dividingBy:)": abstractMethod,
+		"round()": abstractMethod,
+		"round(_:)": abstractMethod,
+		"rounded()": abstractMethod,
+		"rounded(_:)": abstractMethod,
+		"squareRoot()": abstractMethod,
+		"truncatingRemainder(dividingBy:)": abstractMethod,
+		// static methods
+		"maximum(_:_:)": abstractMethod,
+		"maximumMagnitude(_:_:)": abstractMethod,
+		"minimum(_:_:)": abstractMethod,
+		"minimumMagnitude(_:_:)": abstractMethod,
+		// operators
+		"*": abstractMethod,
+		"*=": abstractMethod,
+		"+": abstractMethod,
+		"+=": abstractMethod,
+		"-": abstractMethod,
+		"-=": abstractMethod,
+		"/": abstractMethod,
+		"/=": abstractMethod,
+		"==": abstractMethod,
+	}, "Hashable", "SignedNumeric", "Strideable");
+	addProtocol("BinaryFloatingPoint", {
+		// initializers
+		"init(_:)": abstractMethod,
+		"init(exactly:)": abstractMethod,
+		"init(sign:exponentBitPattern:significandBitPattern:)": abstractMethod,
+		// properties
+		"binade": abstractMethod,
+		"exponentBitPattern": abstractMethod,
+		"significandBitPattern": abstractMethod,
+		"significandWidth": abstractMethod,
+		// static properties
+		"exponentBitCount": abstractMethod,
+		"significandBitCount": abstractMethod,
+	}, "ExpressibleByFloatLiteral", "FloatingPoint");
+	addProtocol("Sequence", {
+		"makeIterator()": abstractMethod,
+		"contains(_:)": adaptedMethod("contains(where:)", "Sequence", "(Self, (Self.Element) -> Bool) -> Bool", (containsWhere, scope, type, arg) => {
+			return call(
+				containsWhere,
+				[
+					arg(0, "sequence"),
+					callable((innerScope, innerArg) => {
+						// TODO: Check if equal
+						return literal(true);
+					}, "(Self.Element) -> Bool"),
+				],
+				[
+					"Self",
+					"(Self.Element) -> Bool",
+				],
+				scope,
+			);
+		}, "(Self, Self.Element) -> Bool"),
+		"contains(where:)": abstractMethod,
+		"first(where:)": abstractMethod,
+		"min()": abstractMethod,
+		"min(by:)": abstractMethod,
+		"max()": abstractMethod,
+		"max(by:)": abstractMethod,
+		"dropFirst()": abstractMethod,
+		"dropLast()": abstractMethod,
+		"sorted()": abstractMethod,
+		"sorted(by:)": abstractMethod,
+		"reversed()": abstractMethod,
+		"underestimatedCount": abstractMethod,
+		"allSatisfy(_:)": abstractMethod,
 	});
-	addProtocol("Sequence");
 	addProtocol("Collection", {
-		functions: {
-			count: abstractMethod,
-		},
-		conformances: Object.create(null),
-	});
-	addProtocol("BidirectionalCollection");
+		"subscript(_:)": abstractMethod,
+		"startIndex": abstractMethod,
+		"endIndex": abstractMethod,
+		"index(after:)": abstractMethod,
+		"index(_:offsetBy:)": wrappedSelf((scope, arg, type, collection) => {
+			const collectionType = conformance(type, "Collection", scope);
+			const indexType = typeValue("Self.Index");
+			return reuseArgs(arg, 0, scope, ["index", "distance"], (index, distance) => {
+				const current = uniqueName(scope, "current");
+				const i = uniqueName(scope, "i");
+				return statements([
+					addVariable(scope, current, "Self.Index", index),
+					forStatement(
+						addVariable(scope, i, "Int", literal(0)),
+						read(binary("<", lookup(i, scope), distance, scope), scope),
+						read(set(lookup(i, scope), literal(1), scope, "+="), scope),
+						blockStatement(
+							ignore(
+								set(
+									lookup(current, scope),
+									call(
+										resolveMethod(collectionType, "index(after:)", scope, [collection], [type]),
+										[lookup(current, scope)],
+										[indexType],
+										scope,
+									),
+									scope,
+								),
+								scope,
+							),
+						),
+					),
+					returnStatement(read(lookup(current, scope), scope)),
+				]);
+			});
+		}, "(Self, Self.Index, Int) -> Self.Index"),
+		"index(_:offsetBy:limitedBy:)": wrappedSelf((scope, arg, type, collection) => {
+			const collectionType = conformance(type, "Collection", scope);
+			const indexType = typeValue("Self.Index");
+			return reuseArgs(arg, 0, scope, ["index", "distance", "limit"], (index, distance, limit) => {
+				const current = uniqueName(scope, "current");
+				const i = uniqueName(scope, "i");
+				return statements([
+					addVariable(scope, current, "Self.Index", index),
+					forStatement(
+						addVariable(scope, i, "Int", literal(0)),
+						read(logical("&&",
+							binary("<", lookup(i, scope), distance, scope),
+							call(
+								resolveMethod(conformance(indexType, "Equatable", scope), "!=", scope),
+								[lookup(current, scope), limit],
+								[indexType, indexType],
+								scope,
+							),
+							scope,
+						), scope),
+						read(set(lookup(i, scope), literal(1), scope, "+="), scope),
+						blockStatement(
+							ignore(
+								set(
+									lookup(current, scope),
+									call(
+										resolveMethod(collectionType, "index(after:)", scope, [collection], [type]),
+										[lookup(current, scope)],
+										[indexType],
+										scope,
+									),
+									scope,
+								),
+								scope,
+							),
+						),
+					),
+					returnStatement(read(lookup(current, scope), scope)),
+				]);
+			});
+		}, "(Self, Self.Index, Int, Self.Index) -> Self.Index"),
+		"distance(from:to:)": wrappedSelf((scope, arg, type, collection) => {
+			const collectionType = conformance(type, "Collection", scope);
+			const indexType = typeValue("Self.Index");
+			const indexTypeEquatable = conformance(indexType, "Equatable", scope);
+			return reuseArgs(arg, 0, scope, ["start", "end"], (start, end) => {
+				const current = uniqueName(scope, "current");
+				const count = uniqueName(scope, "count");
+				return statements([
+					addVariable(scope, current, "Self.Index", start),
+					addVariable(scope, count, "Int", literal(0)),
+					whileStatement(
+						read(call(
+							resolveMethod(indexTypeEquatable, "!=", scope),
+							[lookup(current, scope), end],
+							[indexType, indexType],
+							scope,
+						), scope),
+						blockStatement(concat(
+							ignore(set(lookup(count, scope), literal(1), scope, "+="), scope),
+							ignore(
+								set(
+									lookup(current, scope),
+									call(
+										resolveMethod(collectionType, "index(after:)", scope, [collection], [type]),
+										[lookup(current, scope)],
+										[indexType],
+										scope,
+									),
+									scope,
+								),
+								scope,
+							),
+						)),
+					),
+					returnStatement(read(lookup(count, scope), scope)),
+				]);
+			});
+		}, "(Self, Self.Index, Self.Index) -> Int"),
+		"count": wrapped((scope, arg, type) => {
+			return reuseArgs(arg, 0, scope, ["collection"], (collection) => {
+				const collectionType = conformance(type, "Collection", scope);
+				const indexType = typeValue("Self.Index");
+				return call(
+					call(
+						functionValue("distance(from:to:)", collectionType, "(Type, Self) -> (Self.Index, Self.Index) -> Self.Index"),
+						[type, collection],
+						["Type", type],
+						scope,
+					),
+					[
+						call(resolveMethod(collectionType, "startIndex", scope), [collection], ["Self"], scope),
+						call(resolveMethod(collectionType, "endIndex", scope), [collection], ["Self"], scope),
+					],
+					[
+						indexType,
+						indexType,
+					],
+					scope,
+				);
+			});
+		}, "(Self) -> Int"),
+		"formIndex(after:)": wrapped((scope, arg, type) => {
+			const indexType = typeValue("Self.Index");
+			const collectionType = conformance(type, "Collection", scope);
+			return reuseArgs(arg, 0, scope, ["collection", "index"], (collection, index) => {
+				return set(
+					index,
+					call(
+						resolveMethod(collectionType, "index(after:)", scope, [collection], [type]),
+						[index],
+						[indexType],
+						scope,
+					),
+					scope,
+				);
+			});
+		}, "(Self, inout Self.Index) -> Void"),
+		"formIndex(_:offsetBy:)": wrapped((scope, arg, type) => {
+			const indexType = typeValue("Self.Index");
+			const collectionType = conformance(type, "Collection", scope);
+			return reuseArgs(arg, 0, scope, ["collection", "index", "distance"], (collection, index, distance) => {
+				return set(
+					index,
+					call(
+						resolveMethod(collectionType, "index(_:offsetBy:)", scope, [collection], [type]),
+						[index, distance],
+						[indexType, "Int"],
+						scope,
+					),
+					scope,
+				);
+			});
+		}, "(Self, inout Self.Index, Int) -> Void"),
+		"formIndex(_:offsetBy:limitedBy:)": wrapped((scope, arg, type) => {
+			const indexType = typeValue("Self.Index");
+			const collectionType = conformance(type, "Collection", scope);
+			return reuseArgs(arg, 0, scope, ["collection", "index", "distance", "limit"], (collection, index, distance, limit) => {
+				return set(
+					index,
+					call(
+						resolveMethod(collectionType, "index(_:offsetBy:limitedBy:)", scope, [collection], [type]),
+						[index, distance, limit],
+						[indexType, "Int", indexType],
+						scope,
+					),
+					scope,
+				);
+			});
+		}, "(Self, inout Self.Index, Int, Self.Index) -> Void"),
+		"lazy": abstractMethod,
+		"first": wrapped((scope, arg, type) => {
+			return reuseArgs(arg, 0, scope, ["collection"], (collection) => {
+				const collectionType = conformance(type, "Collection", scope);
+				const elementType = typeValue("Self.Element");
+				return conditional(
+					call(resolveMethod(collectionType, "isEmpty", scope), [collection], ["Self"], scope),
+					wrapInOptional(
+						call(
+							resolveMethod(collectionType, "subscript(_:)", scope),
+							[collection, call(resolveMethod(collectionType, "startIndex", scope), [collection], ["Self"], scope)],
+							["Self", "Self.Index"],
+							scope,
+						),
+						elementType,
+						scope,
+					),
+					emptyOptional(elementType, scope),
+					scope,
+				);
+			});
+		}, "(Self) -> Self.Element?"),
+		"isEmpty": wrapped((scope, arg, type) => {
+			return reuseArgs(arg, 0, scope, ["collection"], (collection) => {
+				const collectionType = conformance(type, "Collection", scope);
+				const indexType = typeValue("Self.Index");
+				return call(
+					resolveMethod(conformance(indexType, "Equatable", scope), "!=", scope),
+					[
+						call(resolveMethod(collectionType, "endIndex", scope), [collection], ["Self"], scope),
+						call(resolveMethod(collectionType, "startIndex", scope), [collection], ["Self"], scope),
+					],
+					[
+						indexType,
+						indexType,
+					],
+					scope,
+				);
+			});
+		}, "(Self) -> Bool"),
+		"makeIterator()": abstractMethod,
+		"prefix(upTo:)": abstractMethod,
+		"prefix(through:)": wrappedSelf((scope, arg, type, self) => {
+			const collectionType = conformance(type, "Collection", scope);
+			const indexType = typeValue("Self.Index");
+			return reuseArgs(arg, 0, scope, ["position"], (position) => {
+				return call(
+					call(
+						functionValue("prefix(upTo:)", collectionType, "(Collection) -> (Self.Index) -> Self.SubSequence"),
+						[type, self],
+						["Type", type],
+						scope,
+					),
+					[
+						call(
+							resolveMethod(collectionType, "index(after:)", scope, [self], [type]),
+							[position],
+							[indexType],
+							scope,
+						),
+					],
+					[
+						indexType,
+					],
+					scope,
+				);
+			});
+		}, "(Self, Self.Index) -> Self.SubSequence"),
+	}, "Sequence");
+	addProtocol("BidirectionalCollection", {
+		"index(before:)": abstractMethod,
+		"formIndex(before:)": wrapped((scope, arg, type) => {
+			const indexType = typeValue("Self.Index");
+			const collectionType = conformance(type, "BidirectionalCollection", scope);
+			return reuseArgs(arg, 0, scope, ["collection", "index"], (collection, index) => {
+				return set(
+					index,
+					call(
+						resolveMethod(collectionType, "index(before:)", scope, [collection], [type]),
+						[index],
+						[indexType],
+						scope,
+					),
+					scope,
+				);
+			});
+		}, "(Self, inout Self.Index) -> Void"),
+	}, "Collection");
 	addProtocol("Strideable", {
-		functions: {
-			"+": abstractMethod,
-			"-": abstractMethod,
-			"distance(to:)": adaptedMethod("-", "Strideable", "(Self, Self) -> Self", (subtractMethod, scope, type, arg) => {
-				return call(subtractMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope);
-			}, "(Self, Self) -> Bool"),
-			"advanced(by:)": adaptedMethod("+", "Strideable", "(Self, Self) -> Self", (addMethod, scope, type, arg) => {
-				return call(addMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope);
-			}, "(Self, Self) -> Bool"),
-		},
-		conformances: Object.create(null),
-	});
+		"+": abstractMethod,
+		"+=": abstractMethod,
+		"-": abstractMethod,
+		"-=": abstractMethod,
+		"==": abstractMethod,
+		"...": abstractMethod,
+		"distance(to:)": adaptedMethod("-", "Strideable", "(Self, Self) -> Self", (subtractMethod, scope, type, arg) => {
+			return call(subtractMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope);
+		}, "(Self, Self) -> Bool"),
+		"advanced(by:)": adaptedMethod("+", "Strideable", "(Self, Self) -> Self", (addMethod, scope, type, arg) => {
+			return call(addMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope);
+		}, "(Self, Self) -> Bool"),
+	}, "Comparable");
 	addProtocol("Hashable", {
-		functions: {
-			"hashValue": abstractMethod,
-			"hash(into:)": adaptedMethod("hashValue", "Hashable", "(Self, inout Hasher) -> Void", (hashValueMethod, scope, type, arg) => {
-				return reuse(call(hashValueMethod, [arg(0, "self")], ["Self"], scope), scope, "hashValue", (hashValue) => {
-					const hasherType = typeValue("Hasher");
-					const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
-					return call(combine, [arg(1, "hasher"), hashValue], ["Hasher", "Int"], scope);
-				});
-			}, "(Self, Self) -> Bool"),
-		},
-		conformances: Object.create(null),
-	});
+		"hashValue": abstractMethod,
+		"hash(into:)": adaptedMethod("hashValue", "Hashable", "(Self) -> Int", (hashValueMethod, scope, type, arg) => {
+			return reuse(call(hashValueMethod, [arg(0, "self")], ["Self"], scope), scope, "hashValue", (hashValue) => {
+				const hasherType = typeValue("Hasher");
+				const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
+				return call(combine, [arg(1, "hasher"), hashValue], ["Hasher", "Int"], scope);
+			});
+		}, "(Self, inout Hasher) -> Bool"),
+	}, "Equatable");
 	addProtocol("CustomStringConvertible", {
-		functions: {
-			description: abstractMethod,
-		},
-		conformances: Object.create(null),
+		description: abstractMethod,
 	});
 	addProtocol("LosslessStringConvertible", {
-		functions: {
-			"init(_:)": abstractMethod,
-		},
-		conformances: Object.create(null),
-	});
+		"init(_:)": abstractMethod,
+	}, "CustomStringConvertible");
 
 	const BoolType = cachedBuilder((globalScope: Scope) => primitive(PossibleRepresentation.Boolean, literal(false), {
 		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument, "(Bool) -> Bool"),
 		"init(_:)": wrapped((scope, arg) => {
 			// Optional init from string
-			return reuse(arg(0, "string"), scope, "string", (stringValue) => {
+			return reuseArgs(arg, 0, scope, ["string"], (stringValue) => {
 				return logical("||",
 					binary("===",
 						stringValue,
@@ -824,7 +1221,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				"==": wrapped(binaryBuiltin("===", 0), "(Bool, Bool) -> Bool"),
 				"!=": wrapped(binaryBuiltin("!==", 0), "(Bool, Bool) -> Bool"),
 			},
-			conformances: Object.create(null),
+			requirements: [],
 		},
 	}, globalScope), {
 		Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
@@ -881,7 +1278,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				}, "(Self) -> Int"),
 			});
 			const hashValue = wrapped((scope, arg) => {
-				return reuse(arg(0, "string"), scope, "string", (str) => {
+				return reuseArgs(arg, 0, scope, ["string"], (str) => {
 					const hash = uniqueName(scope, "hash");
 					const i = uniqueName(scope, "i");
 					return statements([
@@ -914,39 +1311,135 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					]);
 				});
 			}, "(String) -> Int");
+			const collectionFunctions: FunctionMap = {
+				"startIndex": wrapped((scope, arg) => {
+					return literal(0);
+				}, "(Self) -> Self.Index"),
+				"endIndex": wrapped((scope, arg) => {
+					return member(arg(0, "string"), "length", scope);
+				}, "(Self) -> Self.Index"),
+				"prefix(upTo:)": wrappedSelf((scope, arg, type, self) => {
+					return call(
+						member(self, "substring", scope),
+						[literal(0), arg(0, "end")],
+						["Int", "Int"],
+						scope,
+					);
+				}, "(Self, Self.Index) -> Self.SubSequence"),
+			};
+			if (simpleStrings) {
+				collectionFunctions["subscript(_:)"] = wrapped((scope, arg) => {
+					return stringBoundsCheck(arg(0, "str"), arg(1, "i"), scope, "read");
+				}, "(Self, Self.Index) -> Self.Element");
+				collectionFunctions["index(after:)"] = (scope, arg, name) => {
+					const arg0 = arg(1, "string");
+					return callable((innerScope, innerArg, length) => {
+						return reuse(arg0, innerScope, "string", (str) => {
+							return reuseArgs(innerArg, 0, innerScope, ["index"], (index) => {
+								return conditional(
+									binary(">",
+										member(str, "length", innerScope),
+										index,
+										scope,
+									),
+									binary("+", index, literal(1), innerScope),
+									stringBoundsFailed(innerScope),
+									innerScope,
+								);
+							});
+						});
+					}, "(String, String.Index) -> String.Index");
+				};
+				collectionFunctions.count = wrapped((scope, arg) => {
+					return member(arg(0, "string"), "length", scope);
+				}, "(String) -> Int");
+				collectionFunctions["distance(from:to:)"] = wrappedSelf((scope, arg, type) => {
+					return reuseArgs(arg, 0, scope, ["start"], (start) => {
+						return binary("-", arg(1, "end"), start, scope);
+					});
+				}, "(Self, Self.Index, Self.Index) -> Int");
+				collectionFunctions["index(_:offsetBy:)"] = wrappedSelf((scope, arg, type, collection) => {
+					return reuseArgs(arg, 0, scope, ["index", "distance"], (index, distance) => {
+						return reuse(binary("+", index, distance, scope), scope, "result", (result) => {
+							return conditional(
+								binary(">", result, member(collection, "length", scope), scope),
+								stringBoundsFailed(scope),
+								result,
+								scope,
+							);
+						});
+					});
+				}, "(Self, Self.Index, Int) -> Self.Index");
+				collectionFunctions["index(_:offsetBy:limitedBy:)"] = wrappedSelf((scope, arg, type, collection) => {
+					return reuseArgs(arg, 0, scope, ["index", "distance", "limit"], (index, distance, limit) => {
+						return reuse(binary("+", index, distance, scope), scope, "result", (result) => {
+							return conditional(
+								binary(">", result, limit, scope),
+								limit,
+								conditional(
+									binary(">", result, member(collection, "length", scope), scope),
+									stringBoundsFailed(scope),
+									result,
+									scope,
+								),
+								scope,
+							);
+						});
+					});
+				}, "(Self, Self.Index, Int) -> Self.Index");
+			} else {
+				collectionFunctions["subscript(_:)"] = wrapped((scope, arg) => {
+					return stringBoundsCheck(arg(0, "str"), arg(1, "i"), scope, "read");
+				}, "(Self, Self.Index) -> Self.Element");
+				collectionFunctions["index(after:)"] = (scope, arg, name) => {
+					const arg0 = arg(1, "string");
+					return callable((innerScope, innerArg, length) => {
+						return reuse(arg0, innerScope, "string", (str) => {
+							return reuseArgs(innerArg, 0, innerScope, ["index"], (index) => {
+								return conditional(
+									binary(">",
+										member(str, "length", innerScope),
+										index,
+										scope,
+									),
+									binary("+", index, literal(1), innerScope),
+									stringBoundsFailed(innerScope),
+									innerScope,
+								);
+							});
+						});
+					}, "(String, String.Index) -> String.Index");
+				};
+			}
 			return primitive(PossibleRepresentation.String, literal(""), {
 				"init()": wrapped((scope, arg) => literal(""), "(String) -> String"),
 				"init(_:)": wrapped((scope, arg) => call(expr(identifier("String")), [arg(0, "value")], [typeValue("String")], scope), "(String) -> String"),
 				"init(repeating:count:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "source"), scope, "source", (source) => {
-						return reuse(arg(1, "count"), scope, "count", (count) => {
-							const result = uniqueName(scope, "result");
-							const i = uniqueName(scope, "i");
-							return statements([
-								addVariable(scope, result, "String", literal("")),
-								forStatement(
-									addVariable(scope, i, "Int", literal(0)),
-									read(binary("<",
-										lookup(i, scope),
-										count,
-										scope,
-									), scope),
-									updateExpression("++", read(lookup(i, scope), scope)),
-									blockStatement(
-										ignore(set(lookup(result, scope), source, scope, "+="), scope),
-									),
+					return reuseArgs(arg, 0, scope, ["source", "count"], (source, count) => {
+						const result = uniqueName(scope, "result");
+						const i = uniqueName(scope, "i");
+						return statements([
+							addVariable(scope, result, "String", literal("")),
+							forStatement(
+								addVariable(scope, i, "Int", literal(0)),
+								read(binary("<",
+									lookup(i, scope),
+									count,
+									scope,
+								), scope),
+								updateExpression("++", read(lookup(i, scope), scope)),
+								blockStatement(
+									ignore(set(lookup(result, scope), source, scope, "+="), scope),
 								),
-								returnStatement(read(lookup(result, scope), scope)),
-							]);
-						});
+							),
+							returnStatement(read(lookup(result, scope), scope)),
+						]);
 					});
 				}, "(String, Int) -> String"),
 				"+": wrapped(binaryBuiltin("+", 0), "(String, String) -> String"),
 				"+=": wrapped((scope, arg) => {
 					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
 				}, "(inout String, String) -> Void"),
-				"lowercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toLowerCase", scope), [], [], scope), "(String) -> String"),
-				"uppercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toUpperCase", scope), [], [], scope), "(String) -> String"),
 				"write(_:)": wrapped((scope, arg) => {
 					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
 				}, "(inout String, String) -> Void"),
@@ -954,26 +1447,22 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					return set(arg(0, "lhs"), arg(1, "rhs"), scope, "+=");
 				}, "(inout String, String) -> Void"),
 				"insert(_:at:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
-						return reuse(arg(1, "character"), scope, "character", (character) => {
-							return reuse(arg(2, "index"), scope, "index", (index) => {
-								return set(
-									self,
-									binary(
-										"+",
-										binary(
-											"+",
-											call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
-											character,
-											scope,
-										),
-										call(member(self, "substring", scope), [index], ["Int"], scope),
-										scope,
-									),
+					return reuseArgs(arg, 0, scope, ["string", "character", "index"], (self, character, index) => {
+						return set(
+							self,
+							binary(
+								"+",
+								binary(
+									"+",
+									call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+									character,
 									scope,
-								);
-							});
-						});
+								),
+								call(member(self, "substring", scope), [index], ["Int"], scope),
+								scope,
+							),
+							scope,
+						);
 					});
 				}, "(inout String, Character, Int) -> Void"),
 				// "insert(contentsOf:at:)": wrapped((scope, arg) => {
@@ -981,37 +1470,35 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// "replaceSubrange(_:with:)": wrapped((scope, arg) => {
 				// }, "(inout String, ?, ?) -> Void"),
 				"remove(at:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
-						return reuse(arg(1, "index"), scope, "index", (index) => {
-							const removed = uniqueName(scope, "removed");
-							return statements(concat(
-								[addVariable(scope, removed, "String", member(self, index, scope)) as Statement],
-								ignore(set(
-									self,
-									binary(
-										"+",
-										call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
-										call(member(self, "substring", scope), [index], ["Int"], scope),
-										scope,
-									),
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string", "index"], (self, index) => {
+						const removed = uniqueName(scope, "removed");
+						return statements(concat(
+							[addVariable(scope, removed, "String", member(self, index, scope)) as Statement],
+							ignore(set(
+								self,
+								binary(
+									"+",
+									call(member(self, "substring", scope), [literal(0), index], ["Int", "Int"], scope),
+									call(member(self, "substring", scope), [binary("+", index, literal(1), scope)], ["Int"], scope),
 									scope,
-								), scope),
-								[returnStatement(read(lookup(removed, scope), scope))],
-							));
-						});
+								),
+								scope,
+							), scope),
+							[returnStatement(read(lookup(removed, scope), scope))],
+						));
 					});
 				}, "(inout String, String.Index) -> Character"),
 				"removeAll(keepingCapacity:)": wrapped((scope, arg) => {
 					return set(arg(0, "string"), literal(""), scope);
 				}, "(inout String, Bool) -> Void"),
 				// "removeAll(where:)": wrapped((scope, arg) => {
-				// 	return reuse(arg(0, "string"), "string", scope, (string) => {
-				// 		return reuse(arg(1, "predicate"), "predicate", scope, (predicate) => {
-				// 		});
+				// 	return reuseArgs(arg, 0, scope, ["string", "predicate"], (string, predicate) => {
 				// 	});
 				// }, "(inout String, (Character) throws -> Bool) rethrows -> Void"),
 				"removeFirst()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						const first = uniqueName(scope, "first");
 						return statements(concat(
 							[addVariable(scope, first, "Character", member(self, 0, scope)) as Statement],
@@ -1026,7 +1513,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					});
 				}, "(inout String) -> Character"),
 				"removeFirst(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						return set(
 							self,
 							call(member(self, "substring", scope), [arg(1, "k")], ["Int"], scope),
@@ -1035,7 +1523,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					});
 				}, "(inout String, Int) -> Void"),
 				"removeLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						const index = uniqueName(scope, "index");
 						const last = uniqueName(scope, "last");
 						return statements(concat(
@@ -1059,7 +1548,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					});
 				}, "(inout String) -> Character"),
 				"removeLast(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						return set(
 							self,
 							call(
@@ -1079,14 +1569,16 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// "drop(while:)": wrapped((scope, arg) => {
 				// }, "(String, (Character) -> Bool) -> Substring"),
 				"dropFirst()": wrapped((scope, arg) => {
+					// TODO: Support grapheme clusters
 					return call(
 						member(arg(0, "string"), "substring", scope),
-						[literal(0)],
+						[literal(1)],
 						["Int"],
 						scope,
 					);
 				}, "(String) -> Void"),
 				"dropFirst(_:)": wrapped((scope, arg) => {
+					// TODO: Support grapheme clusters
 					return call(
 						member(arg(0, "string"), "substring", scope),
 						[arg(1, "k")],
@@ -1095,7 +1587,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					);
 				}, "(String, Int) -> Void"),
 				"dropLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						return call(
 							member(self, "substring", scope),
 							[binary("-", member(self, "length", scope), literal(1), scope)],
@@ -1105,7 +1598,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					});
 				}, "(String) -> Void"),
 				"dropLast(_:)": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						return call(
 							member(self, "substring", scope),
 							[binary("-", member(self, "length", scope), arg(1, "k"), scope)],
@@ -1115,7 +1609,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					});
 				}, "(String, Int) -> Void"),
 				"popLast()": wrapped((scope, arg) => {
-					return reuse(arg(0, "string"), scope, "string", (self) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (self) => {
 						const characterType = typeValue("Character");
 						return conditional(
 							binary("!==", member(self, "length", scope), literal(0), scope),
@@ -1144,6 +1639,9 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				// }, "(String, (Character) -> Bool) -> Bool"),
 				// "first(where:)": wrapped((scope, arg) => {
 				// }, "(String, (Character) -> Bool) -> Character?"),
+				"subscript(_:)": wrapped((scope, arg) => {
+					return stringBoundsCheck(arg(0, "str"), arg(1, "i"), scope, "read");
+				}, "(String, String.Index) -> Character"),
 				"firstIndex(of:)": wrapped((scope, arg) => {
 					const index = call(member(arg(0, "string"), "indexOf", scope), [arg(1, "element")], ["Character"], scope);
 					return reuse(index, scope, "index", (reusedIndex) => {
@@ -1158,6 +1656,111 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				}, "(String, Character) -> String.Index?"),
 				// "firstIndex(where:)": wrapped((scope, arg) => {
 				// }, "(String, (Character) throws -> Bool) rethrows -> String.Index?"),
+				"index(after:)": (scope, arg, name) => {
+					const arg1 = arg(0, "string");
+					return callable((innerScope, innerArg, length) => {
+						return reuse(arg1, innerScope, "string", (str) => {
+							return reuseArgs(innerArg, 0, innerScope, ["string"], (index) => {
+								return conditional(
+									binary(">",
+										member(str, "length", innerScope),
+										index,
+										scope,
+									),
+									binary("+", index, literal(1), innerScope),
+									stringBoundsFailed(innerScope),
+									innerScope,
+								);
+							});
+						});
+					}, "(String, String.Index) -> String.Index");
+				},
+				"formIndex(after:)": wrapped((scope, arg) => {
+					// TODO: Use grapheme clusters
+					return set(arg(1, "index"), literal(1), scope, "+=");
+				}, "(String, inout String.Index) -> Void"),
+				"index(before:)": wrapped((scope, arg) => {
+					// TODO: Use grapheme clusters
+					return reuseArgs(arg, 0, scope, ["index"], (index) => {
+						return conditional(
+							index,
+							binary("-", index, literal(1), scope),
+							stringBoundsFailed(scope),
+							scope,
+						);
+					});
+				}, "(String, String.Index) -> String.Index"),
+				"formIndex(before:)": wrapped((scope, arg) => {
+					// TODO: Use grapheme clusters
+					return set(arg(1, "index"), literal(1), scope, "-=");
+				}, "(String, inout String.Index) -> Void"),
+				"index(_:offsetBy:)": wrapped((scope, arg) => {
+					// TODO: Use grapheme clusters
+					return binary("+", arg(1, "index"), arg(2, "distance"), scope);
+				}, "(String, String.Index, String.IndexDistance) -> String.Index"),
+				"index(_:offsetBy:limitedBy:)": wrapped((scope, arg) => {
+					// TODO: Use grapheme clusters
+					return reuseArgs(arg, 1, scope, ["i", "distance"], (i, distance) => {
+						return reuse(binary("+", i, distance, scope), scope, "result", (result) => {
+							const indexType = typeValue("String.Index");
+							return conditional(
+								conditional(
+									binary(">",
+										distance,
+										literal(0),
+										scope,
+									),
+									binary(">",
+										result,
+										arg(3, "limit"),
+										scope,
+									),
+									binary("<",
+										result,
+										arg(3, "limit"),
+										scope,
+									),
+									scope,
+								),
+								emptyOptional(indexType, scope),
+								wrapInOptional(result, indexType, scope),
+								scope,
+							);
+						});
+					});
+				}, "(String, String.Index, String.IndexDistance, String.Index) -> String.Index?"),
+				"distance(from:to:)": wrapped((scope, arg) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 1, scope, ["from"], (from) => {
+						return binary("-", arg(2, "to"), from, scope);
+					});
+				}, "(String, String.Index, String.Index) -> String.IndexDistance"),
+				// "prefix(while:)": wrapped((scope, arg) => {
+				// }, "(String, (Character) -> Bool) -> Substring"),
+				"suffix(from:)": wrapped((scope, arg) => {
+					return call(
+						member(arg(0, "string"), "substring", scope),
+						[arg(1, "start")],
+						["Int"],
+						scope,
+					);
+				}, "(String, String.Index) -> Substring"),
+				"split(separator:maxSplits:omittingEmptySubsequences:)": wrapped((scope, arg) => {
+					return reuseArgs(arg, 0, scope, ["string", "separator", "maxSplits", "omittingEmptySubsequences"], (str, separator, maxSplits, omittingEmptySubsequences) => {
+						const omitting = expressionLiteralValue(read(omittingEmptySubsequences, scope));
+						if (omitting === false) {
+							return call(
+								member(str, "split", scope),
+								[separator, maxSplits],
+								["Character", "Int"],
+								scope,
+							);
+						}
+						throw new Error(`String.split(separator:maxSplits:omittingEmptySubsequences:) with omittingEmptySubsequences !== false not implemented yet`);
+					});
+				}, "(String, Character, Int, Bool) -> [Substring]"),
+				"lowercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toLowerCase", scope), [], [], scope), "(String) -> String"),
+				"uppercased()": (scope, arg, type) => callable(() => call(member(arg(0, "value"), "toUpperCase", scope), [], [], scope), "(String) -> String"),
 				"reserveCapacity(_:)": wrapped((scope, arg) => {
 					return statements([]);
 				}, "(String, String) -> Void"),
@@ -1174,24 +1777,59 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					return binary("===", member(arg(0, "string"), "length", scope), literal(0), scope);
 				}, "(String) -> Bool"),
 				"count": wrapped((scope, arg) => {
+					// TODO: Count grapheme clusters
 					return member(arg(0, "string"), "length", scope);
 				}, "(String) -> Int"),
+				"startIndex": wrapped((scope, arg) => {
+					return literal(0);
+				}, "(String) -> Int"),
+				"endIndex": wrapped((scope, arg) => {
+					return member(arg(0, "string"), "length", scope);
+				}, "(String) -> Int"),
+				"first": wrapped((scope, arg) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (str) => {
+						const characterType = typeValue("Character");
+						return conditional(
+							member(str, "length", scope),
+							wrapInOptional(member(str, literal(0), scope), characterType, scope),
+							emptyOptional(characterType, scope),
+							scope,
+						);
+					});
+				}, "(String) -> Character?"),
+				"last": wrapped((scope, arg) => {
+					// TODO: Support grapheme clusters
+					return reuseArgs(arg, 0, scope, ["string"], (str) => {
+						const characterType = typeValue("Character");
+						return conditional(
+							member(str, "length", scope),
+							wrapInOptional(member(str, binary("-", member(str, "length", scope), literal(1), scope), scope), characterType, scope),
+							emptyOptional(characterType, scope),
+							scope,
+						);
+					});
+				}, "(String) -> Character?"),
 				hashValue,
-			}, {
+			}, applyDefaultConformances({
 				Equatable: {
 					functions: {
 						"==": wrapped(binaryBuiltin("===", 0), "(String, String) -> Bool"),
 						"!=": wrapped(binaryBuiltin("!==", 0), "(String, String) -> Bool"),
 					},
-					conformances: Object.create(null),
+					requirements: [],
 				},
 				Hashable: {
 					functions: {
 						hashValue,
 					},
-					conformances: Object.create(null),
+					requirements: [],
 				},
-			}, {
+				Collection: {
+					functions: collectionFunctions,
+					requirements: [],
+				},
+			}, globalScope), {
 				Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
 				UnicodeScalarView: () => UnicodeScalarView,
 				UTF16View: () => UTF16View,
@@ -1200,6 +1838,19 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		}),
 		StaticString: cachedBuilder(() => primitive(PossibleRepresentation.String, literal(""), {
 		})),
+		Character: cachedBuilder((globalScope) => {
+			return primitive(PossibleRepresentation.String, literal(""), {
+				"init(_:)": wrapped((scope, arg) => {
+					return arg(0, "character");
+				}, "(String) -> Character"),
+				"==": wrapped(binaryBuiltin("===", 0), "(Character, Character) -> Bool"),
+				"!=": wrapped(binaryBuiltin("!==", 0), "(Character, Character) -> Bool"),
+				"<": wrapped(binaryBuiltin("<", 0), "(Character, Character) -> Bool"),
+				"<=": wrapped(binaryBuiltin("<=", 0), "(Character, Character) -> Bool"),
+				">": wrapped(binaryBuiltin(">", 0), "(Character, Character) -> Bool"),
+				">=": wrapped(binaryBuiltin(">=", 0), "(Character, Character) -> Bool"),
+			});
+		}),
 		Optional: (globalScope, typeParameters) => {
 			const [ wrappedType ] = typeParameters("Wrapped");
 			const reified = typeFromValue(wrappedType, globalScope);
@@ -1211,42 +1862,38 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
 			const compareEqual = wrapped(isDirectlyComparable ? binaryBuiltin("===", 0) : (scope: Scope, arg: ArgGetter) => {
 				const equalMethod = call(functionValue("==", conformance(wrappedType, "Equatable", scope), "() -> () -> Bool"), [wrappedType], [typeTypeValue], scope);
-				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
-					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
-						return conditional(
-							optionalIsNone(lhs, wrappedType, scope),
-							optionalIsNone(rhs, wrappedType, scope),
-							logical("&&",
-								optionalIsSome(rhs, wrappedType, scope),
-								call(equalMethod, [
-									unwrapOptional(lhs, wrappedType, scope),
-									unwrapOptional(rhs, wrappedType, scope),
-								], [wrappedType, wrappedType], scope),
-								scope,
-							),
+				return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
+					return conditional(
+						optionalIsNone(lhs, wrappedType, scope),
+						optionalIsNone(rhs, wrappedType, scope),
+						logical("&&",
+							optionalIsSome(rhs, wrappedType, scope),
+							call(equalMethod, [
+								unwrapOptional(lhs, wrappedType, scope),
+								unwrapOptional(rhs, wrappedType, scope),
+							], [wrappedType, wrappedType], scope),
 							scope,
-						);
-					});
+						),
+						scope,
+					);
 				});
 			}, "(Self?, Self?) -> Bool");
 			const compareUnequal = wrapped(isDirectlyComparable ? binaryBuiltin("!==", 0) : (scope: Scope, arg: ArgGetter) => {
 				const unequalMethod = call(functionValue("!=", conformance(wrappedType, "Equatable", scope), "() -> () -> Bool"), [wrappedType], [typeTypeValue], scope);
-				return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
-					return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
-						return conditional(
-							optionalIsNone(lhs, wrappedType, scope),
-							optionalIsSome(rhs, wrappedType, scope),
-							logical("||",
-								optionalIsNone(rhs, wrappedType, scope),
-								call(unequalMethod, [
-									unwrapOptional(lhs, wrappedType, scope),
-									unwrapOptional(rhs, wrappedType, scope),
-								], [wrappedType, wrappedType], scope),
-								scope,
-							),
+				return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
+					return conditional(
+						optionalIsNone(lhs, wrappedType, scope),
+						optionalIsSome(rhs, wrappedType, scope),
+						logical("||",
+							optionalIsNone(rhs, wrappedType, scope),
+							call(unequalMethod, [
+								unwrapOptional(lhs, wrappedType, scope),
+								unwrapOptional(rhs, wrappedType, scope),
+							], [wrappedType, wrappedType], scope),
 							scope,
-						);
-					});
+						),
+						scope,
+					);
 				});
 			}, "(Self?, Self?) -> Bool");
 			return {
@@ -1264,7 +1911,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 							"==": compareEqual,
 							"!=": compareUnequal,
 						},
-						conformances: Object.create(null),
+						requirements: [],
 					},
 				}, globalScope),
 				possibleRepresentations: PossibleRepresentation.All, // TODO: Make possible representations computed at runtime
@@ -1315,73 +1962,71 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 			const optionalValueType = typeValue({ kind: "optional", type: valueType.type });
 			function arrayCompare(comparison: "equal" | "unequal") {
 				return wrapped((scope, arg) => {
-					return reuse(arg(0, "lhs"), scope, "lhs", (lhs) => {
-						return reuse(arg(1, "rhs"), scope, "rhs", (rhs) => {
-							const result = uniqueName(scope, comparison);
-							const i = uniqueName(scope, "i");
-							return statements([
-								addVariable(scope, result, "Bool"),
-								ifStatement(
-									read(binary("!==",
-										member(lhs, "length", scope),
-										member(rhs, "length", scope),
-										scope,
-									), scope),
-									blockStatement(ignore(set(lookup(result, scope), literal(comparison === "unequal"), scope), scope)),
-									blockStatement(concat(
-										[
-											addVariable(scope, i, "Int", literal(0)),
-											whileStatement(
-												read(binary("<",
-													lookup(i, scope),
-													member(lhs, "length", scope),
-													scope,
-												), scope),
-												blockStatement(concat(
-													ignore(
-														transform(
-															call(
-																call(
-																	functionValue("!=", conformance(valueType, "Equatable", scope), "(Type) -> (Self, Self) -> Bool"),
-																	[valueType],
-																	[typeTypeValue],
-																	scope,
-																),
-																[
-																	member(lhs, lookup(i, scope), scope),
-																	member(rhs, lookup(i, scope), scope),
-																],
-																[
-																	valueType,
-																	valueType,
-																],
-																scope,
-															),
-															scope,
-															(expression) => statements([
-																ifStatement(expression, breakStatement()),
-															]),
-														),
-														scope,
-													),
-													ignore(expr(updateExpression("++", read(lookup(i, scope), scope))), scope),
-												)),
-											),
-										],
-										ignore(set(
-											lookup(result, scope),
-											binary(comparison === "unequal" ? "!==" : "===",
+					return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
+						const result = uniqueName(scope, comparison);
+						const i = uniqueName(scope, "i");
+						return statements([
+							addVariable(scope, result, "Bool"),
+							ifStatement(
+								read(binary("!==",
+									member(lhs, "length", scope),
+									member(rhs, "length", scope),
+									scope,
+								), scope),
+								blockStatement(ignore(set(lookup(result, scope), literal(comparison === "unequal"), scope), scope)),
+								blockStatement(concat(
+									[
+										addVariable(scope, i, "Int", literal(0)),
+										whileStatement(
+											read(binary("<",
 												lookup(i, scope),
 												member(lhs, "length", scope),
 												scope,
-											),
+											), scope),
+											blockStatement(concat(
+												ignore(
+													transform(
+														call(
+															call(
+																functionValue("!=", conformance(valueType, "Equatable", scope), "(Type) -> (Self, Self) -> Bool"),
+																[valueType],
+																[typeTypeValue],
+																scope,
+															),
+															[
+																member(lhs, lookup(i, scope), scope),
+																member(rhs, lookup(i, scope), scope),
+															],
+															[
+																valueType,
+																valueType,
+															],
+															scope,
+														),
+														scope,
+														(expression) => statements([
+															ifStatement(expression, breakStatement()),
+														]),
+													),
+													scope,
+												),
+												ignore(expr(updateExpression("++", read(lookup(i, scope), scope))), scope),
+											)),
+										),
+									],
+									ignore(set(
+										lookup(result, scope),
+										binary(comparison === "unequal" ? "!==" : "===",
+											lookup(i, scope),
+											member(lhs, "length", scope),
 											scope,
-										), scope),
-									)),
-								),
-								returnStatement(read(lookup(result, scope), scope)),
-							]);
-						});
+										),
+										scope,
+									), scope),
+								)),
+							),
+							returnStatement(read(lookup(result, scope), scope)),
+						]);
 					});
 				}, "(Self, Self) -> Bool");
 			}
@@ -1462,8 +2107,8 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					}, "(inout Self, Bool) -> Void"),
 					"reserveCapacity()": wrapped((scope, arg) => undefinedValue, "(inout Self, Int) -> Void"),
 					"index(after:)": wrapped((scope, arg) => {
-						const arrayValue = arg(1, "array");
-						return reuse(arg(2, "index"), scope, "index", (index) => {
+						const arrayValue = arg(0, "array");
+						return reuseArgs(arg, 2, scope, ["index"], (index) => {
 							return conditional(
 								binary("<", arrayValue, index, scope),
 								binary("+", index, literal(1), scope),
@@ -1473,7 +2118,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						});
 					}, "(inout Self, Int) -> Int"),
 					"index(before:)": wrapped((scope, arg) => {
-						return reuse(arg(2, "index"), scope, "index", (index) => {
+						return reuseArgs(arg, 2, scope, ["index"], (index) => {
 							return conditional(
 								binary(">", index, literal(0), scope),
 								binary("-", index, literal(1), scope),
@@ -1483,9 +2128,10 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						});
 					}, "(inout Self, Int) -> Int"),
 					"distance(from:to:)": wrapped((scope, arg) => {
-						const start = arg(2, "start");
-						const end = arg(3, "end");
-						return binary("-", end, start, scope);
+						return reuseArgs(arg, 2, scope, ["start"], (start) => {
+							const end = arg(3, "end");
+							return binary("-", end, start, scope);
+						});
 					}, "(inout Self, Int, Int) -> Int"),
 					"joined(separator:)": (scope, arg, type) => {
 						return callable((innerScope, innerArg) => {
@@ -1503,7 +2149,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					"startIndex": startIndexOfZero,
 					"endIndex": readLengthField,
 					"first"(scope: Scope, arg: ArgGetter) {
-						return reuse(arg(0, "self"), scope, "array", (reusableValue) => {
+						return reuseArgs(arg, 0, scope, ["array"], (reusableValue) => {
 							return conditional(
 								member(reusableValue, "length", scope),
 								wrapInOptional(member(reusableValue, 0, scope), optionalValueType, scope),
@@ -1513,7 +2159,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						});
 					},
 					"last"(scope: Scope, arg: ArgGetter) {
-						return reuse(arg(0, "self"), scope, "array", (reusableValue) => {
+						return reuseArgs(arg, 0, scope, ["array"], (reusableValue) => {
 							return conditional(
 								member(reusableValue, "length", scope),
 								wrapInOptional(member(reusableValue, binary("-", member(reusableValue, "length", scope), literal(1), scope), scope), optionalValueType, scope),
@@ -1529,14 +2175,15 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 							"==": arrayCompare("equal"),
 							"!=": arrayCompare("unequal"),
 						},
-						conformances: Object.create(null),
+						requirements: [],
 					},
 					BidirectionalCollection: {
 						functions: {
 							"joined(separator:)": (scope, arg, type) => {
+								const collection = arg(0, "collection");
 								return callable((innerScope, innerArg) => {
 									return call(
-										member(arg(1, "collection"), "join", scope),
+										member(collection, "join", scope),
 										[innerArg(0, "separator")],
 										[dummyType],
 										scope,
@@ -1544,7 +2191,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								}, "(String) -> String");
 							},
 						},
-						conformances: Object.create(null),
+						requirements: [],
 					},
 				}, globalScope),
 				possibleRepresentations: PossibleRepresentation.Array,
@@ -1589,28 +2236,26 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				return {
 					functions: lookupForMap({
 						"subscript(_:)": wrapped((scope, arg, type) => {
-							return reuse(arg(0, "dict"), scope, "dict", (dict) => {
-								return reuse(arg(1, "index"), scope, "index", (index) => {
-									return conditional(
-										call(
+							return reuseArgs(arg, 0, scope, ["dict", "index"], (dict, index) => {
+								return conditional(
+									call(
+										member(
 											member(
-												member(
-													expr(identifier("Object")),
-													"hasOwnProperty",
-													scope,
-												),
-												"call",
+												expr(identifier("Object")),
+												"hasOwnProperty",
 												scope,
 											),
-											[dict, index],
-											["Any", "String"],
+											"call",
 											scope,
 										),
-										wrapInOptional(copy(member(dict, index, scope), valueType), valueType, scope),
-										emptyOptional(valueType, scope),
+										[dict, index],
+										["Any", "String"],
 										scope,
-									);
-								});
+									),
+									wrapInOptional(copy(member(dict, index, scope), valueType), valueType, scope),
+									emptyOptional(valueType, scope),
+									scope,
+								);
 							});
 						}, "(Self, Self.Key) -> Self.Value?"),
 						"subscript(_:)_set": wrapped((scope, arg, type) => {
@@ -1653,41 +2298,58 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 						Equatable: {
 							functions: {
 								"==": wrapped((innerScope, arg) => {
-									return reuse(arg(0, "lhs"), innerScope, "lhs", (lhs) => {
-										return reuse(arg(1, "rhs"), innerScope, "rhs", (rhs) => {
-											const key = uniqueName(innerScope, "key");
-											const equal = uniqueName(innerScope, "equal");
-											return statements([
-												addVariable(innerScope, equal, "Bool", literal(true)),
-												addVariable(innerScope, key, "T"),
+									return reuseArgs(arg, 0, innerScope, ["lhs", "rhs"], (lhs, rhs) => {
+										const key = uniqueName(innerScope, "key");
+										const equal = uniqueName(innerScope, "equal");
+										return statements([
+											addVariable(innerScope, equal, "Bool", literal(true)),
+											addVariable(innerScope, key, "T"),
+											forInStatement(
+												read(lookup(key, innerScope), innerScope) as Node as Identifier,
+												read(lhs, innerScope),
+												blockStatement([
+													ifStatement(
+														read(
+															logical(
+																"||",
+																unary("!", call(member(member("Object", "hasOwnProperty", innerScope), "call", innerScope), [rhs, lookup(key, innerScope)], ["Self", "String"], innerScope), innerScope),
+																call(
+																	call(
+																		functionValue("!=", conformance(valueType, "Equatable", innerScope), "(Type) -> (Self, Self) -> Bool"),
+																		[valueType],
+																		[typeTypeValue],
+																		innerScope,
+																	),
+																	[
+																		member(lhs, lookup(key, innerScope), innerScope),
+																		member(rhs, lookup(key, innerScope), innerScope),
+																	],
+																	[
+																		valueType,
+																		valueType,
+																	],
+																	innerScope,
+																),
+																innerScope,
+															),
+															innerScope,
+														),
+														blockStatement(concat(
+															ignore(set(lookup(equal, innerScope), literal(false), innerScope), innerScope),
+															[breakStatement()],
+														)),
+													),
+												]),
+											),
+											ifStatement(
+												read(lookup(equal, innerScope), innerScope),
 												forInStatement(
 													read(lookup(key, innerScope), innerScope) as Node as Identifier,
-													read(lhs, innerScope),
+													read(rhs, innerScope),
 													blockStatement([
 														ifStatement(
 															read(
-																logical(
-																	"||",
-																	unary("!", call(member(member("Object", "hasOwnProperty", innerScope), "call", innerScope), [rhs, lookup(key, innerScope)], ["Self", "String"], innerScope), innerScope),
-																	call(
-																		call(
-																			functionValue("!=", conformance(valueType, "Equatable", innerScope), "(Type) -> (Self, Self) -> Bool"),
-																			[valueType],
-																			[typeTypeValue],
-																			innerScope,
-																		),
-																		[
-																			member(lhs, lookup(key, innerScope), innerScope),
-																			member(rhs, lookup(key, innerScope), innerScope),
-																		],
-																		[
-																			valueType,
-																			valueType,
-																		],
-																		innerScope,
-																	),
-																	innerScope,
-																),
+																unary("!", call(member(member("Object", "hasOwnProperty", innerScope), "call", innerScope), [lhs, lookup(key, innerScope)], ["Self", "String"], innerScope), innerScope),
 																innerScope,
 															),
 															blockStatement(concat(
@@ -1697,32 +2359,13 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 														),
 													]),
 												),
-												ifStatement(
-													read(lookup(equal, innerScope), innerScope),
-													forInStatement(
-														read(lookup(key, innerScope), innerScope) as Node as Identifier,
-														read(rhs, innerScope),
-														blockStatement([
-															ifStatement(
-																read(
-																	unary("!", call(member(member("Object", "hasOwnProperty", innerScope), "call", innerScope), [lhs, lookup(key, innerScope)], ["Self", "String"], innerScope), innerScope),
-																	innerScope,
-																),
-																blockStatement(concat(
-																	ignore(set(lookup(equal, innerScope), literal(false), innerScope), innerScope),
-																	[breakStatement()],
-																)),
-															),
-														]),
-													),
-												),
-												returnStatement(read(lookup(equal, innerScope), innerScope)),
-											]);
-										});
+											),
+											returnStatement(read(lookup(equal, innerScope), innerScope)),
+										]);
 									});
 								}, "(Self, Self) -> Bool"),
 							},
-							conformances: Object.create(null),
+							requirements: [],
 						},
 					}, globalScope),
 					possibleRepresentations: PossibleRepresentation.Object,
@@ -1752,7 +2395,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 								startIndex: startIndexOfZero,
 								endIndex: readLengthField,
 								first: wrapped((scope, arg) => {
-									return reuse(arg(0, "self"), scope, "keys", (keys) => {
+									return reuseArgs(arg, 0, scope, ["keys"], (keys) => {
 										const stringKey = member(keys, 0, scope);
 										const convertedKey = typeof converter !== "undefined" ? call(converter, [stringKey], ["String"], scope) : stringKey;
 										return conditional(
@@ -1789,7 +2432,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 		})),
 		ClosedRange: cachedBuilder(() => primitive(PossibleRepresentation.Array, tuple([literal(0), literal(0)]), {
 			map: (scope, arg, type) => {
-				const range = arg(2, "range");
+				const range = arg(1, "range");
 				return callable((innerScope, innerArg) => {
 					const mapped = uniqueName(innerScope, "mapped");
 					const callback = innerArg(0, "callback");
@@ -1808,7 +2451,7 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 				}, "((Self) -> V) -> [V]");
 			},
 			reduce: (scope, arg, type) => {
-				const range = arg(2, "range");
+				const range = arg(1, "range");
 				return callable((innerScope, innerArg) => {
 					const result = uniqueName(innerScope, "result");
 					const initialResult = innerArg(0, "initialResult");
@@ -1829,12 +2472,12 @@ function defaultTypes(checkedIntegers: boolean): TypeMap {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 				},
-				conformances: Object.create(null),
+				requirements: [],
 			},
 		})),
 		Hasher: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, array([literal(0)], globalScope), {
 			"combine()": wrapped((scope, arg) => {
-				return reuse(arg(0, "hasher"), scope, "hasher", (hasher) => {
+				return reuseArgs(arg, 0, scope, ["hasher"], (hasher) => {
 					return set(
 						member(hasher, 0, scope),
 						binary("-",
@@ -1966,6 +2609,31 @@ function arrayBoundsCheck(arrayValue: Value, index: Value, scope: Scope, mode: "
 	});
 }
 
+function stringBoundsFailed(scope: Scope) {
+	return call(functionValue("Swift.(swift-to-js).stringBoundsFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] }), [], [], scope);
+}
+
+function stringBoundsCheck(stringValue: Value, index: Value, scope: Scope, mode: "read" | "write") {
+	return reuse(stringValue, scope, "string", (reusableString) => {
+		return reuse(index, scope, "index", (reusableIndex) => {
+			return member(
+				reusableString,
+				conditional(
+					binary(mode === "write" ? ">=" : ">",
+						member(reusableString, "length", scope),
+						reusableIndex,
+						scope,
+					),
+					reusableIndex,
+					stringBoundsFailed(scope),
+					scope,
+				),
+				scope,
+			);
+		});
+	});
+}
+
 function throwHelper(type: "Error" | "TypeError" | "RangeError", text: string) {
 	return noinline((scope, arg) => statements([throwStatement(newExpression(identifier(type), [literal(text).expression]))]), "() throws -> Void");
 }
@@ -1974,6 +2642,7 @@ export const functions: FunctionMap = {
 	"Swift.(swift-to-js).numericRangeFailed()": throwHelper("RangeError", "Not enough bits to represent the given value"),
 	"Swift.(swift-to-js).forceUnwrapFailed()": throwHelper("TypeError", "Unexpectedly found nil while unwrapping an Optional value"),
 	"Swift.(swift-to-js).arrayBoundsFailed()": throwHelper("RangeError", "Array index out of range"),
+	"Swift.(swift-to-js).stringBoundsFailed()": throwHelper("RangeError", "String index out of range"),
 	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {
 		return statements([
 			ifStatement(
@@ -2062,7 +2731,7 @@ export const functions: FunctionMap = {
 		if (typeArg.kind !== "type") {
 			throw new TypeError(`Expected a type, got a ${typeArg.kind}`);
 		}
-		return reuse(arg(1, "lhs"), scope, "lhs", (lhs) => {
+		return reuseArgs(arg, 1, scope, ["lhs"], (lhs) => {
 			return conditional(
 				optionalIsSome(lhs, typeArg, scope),
 				unwrapOptional(lhs, typeArg, scope),
@@ -2131,7 +2800,10 @@ export function newScopeWithBuiltins(): Scope {
 	return {
 		name: "global",
 		declarations: Object.create(null),
-		types: defaultTypes(false),
+		types: defaultTypes({
+			checkedIntegers: false,
+			simpleStrings: true,
+		}),
 		functions: Object.assign(Object.create(null), functions),
 		functionUsage: Object.create(null),
 		mapping: Object.create(null),

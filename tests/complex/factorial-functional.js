@@ -1,4 +1,4 @@
-export function factorial_functional$number$(number) {
+export function factorial$of$(number) {
   let result = 1;
 
   for (let i = 2; i <= number; i++) {
@@ -7,3 +7,4 @@ export function factorial_functional$number$(number) {
 
   return result;
 }
+console.log(factorial$of$(20));

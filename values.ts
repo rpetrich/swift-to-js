@@ -1,11 +1,11 @@
 import generate from "@babel/generator";
-import { isFunction, isReturnStatement, arrayExpression, assignmentExpression, binaryExpression, blockStatement, functionDeclaration, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionExpression, identifier, ifStatement, isExpression as isExpression_, isLiteral, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, updateExpression,unaryExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
+import { arrayExpression, assignmentExpression, binaryExpression, blockStatement, booleanLiteral, callExpression, conditionalExpression, expressionStatement, functionDeclaration, functionExpression, identifier, ifStatement, isExpression as isExpression_, isFunction, isLiteral, isReturnStatement, logicalExpression, memberExpression, nullLiteral, numericLiteral, objectExpression, objectMethod, objectProperty, returnStatement, sequenceExpression, stringLiteral, traverse, unaryExpression, updateExpression, variableDeclaration, variableDeclarator, Expression, Identifier, MemberExpression, Node, ObjectMethod, ObjectProperty, PatternLike, SpreadElement, Statement, ThisExpression } from "@babel/types";
 
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { reifyType, PossibleRepresentation, ProtocolConformance, ReifiedType, TypeMap } from "./reified";
-import { addVariable, lookup, mangleName, mappedValueForName, MappedNameValue, rootScope, uniqueName, DeclarationFlags, Scope } from "./scope";
+import { reifyType, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
 
@@ -72,7 +72,7 @@ export function expr(expression: Expression, location?: LocationSource): Express
 	if (expression.type === "Identifier" || expression.type === "ThisExpression" || (expression.type === "MemberExpression" && isPure(expression.object) && (!expression.computed || isPure(expression.property)))) {
 		return variable(expression, location);
 	}
-	return { kind: "expression", expression: simplifyExpression(expression), location: readLocation(location) };
+	return { kind: "expression", expression: simplifyExpression(expression), location: expression.loc || readLocation(location) };
 }
 
 
@@ -101,12 +101,12 @@ export function statements(body: Statement[], location?: LocationSource): Statem
 
 export interface CallableValue {
 	kind: "callable";
-	call: (scope: Scope, arg: ArgGetter, length: number) => Value;
+	call: (scope: Scope, arg: ArgGetter, argTypes: Value[]) => Value;
 	type: Function;
 	location?: Location;
 }
 
-export function callable(callback: (scope: Scope, arg: ArgGetter, length: number) => Value, functionType: Function | string, location?: LocationSource): CallableValue {
+export function callable(callback: (scope: Scope, arg: ArgGetter, argTypes: Value[]) => Value, functionType: Function | string, location?: LocationSource): CallableValue {
 	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
 	return { kind: "callable", call: callback, type, location: readLocation(location) };
 }
@@ -119,7 +119,7 @@ export interface VariableValue {
 }
 
 export function variable(expression: Identifier | MemberExpression | ThisExpression, location?: LocationSource): VariableValue {
-	return { kind: "direct", expression, location: readLocation(location) };
+	return { kind: "direct", expression, location: expression.loc || readLocation(location) };
 }
 
 
@@ -260,11 +260,12 @@ export function copy(value: Value, type: Value): CopiedValue {
 export interface TypeValue {
 	kind: "type";
 	type: Type;
+	runtimeValue?: Value;
 	location?: Location;
 }
 
-export function typeValue(typeOrString: Type | string, location?: LocationSource): TypeValue {
-	return { kind: "type", type: typeof typeOrString === "string" ? parseType(typeOrString) : typeOrString, location: readLocation(location) };
+export function typeValue(typeOrString: Type | string, location?: LocationSource, runtimeValue?: Value): TypeValue {
+	return { kind: "type", type: typeof typeOrString === "string" ? parseType(typeOrString) : typeOrString, runtimeValue, location: readLocation(location) };
 }
 
 export interface ConformanceValue {
@@ -289,30 +290,65 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 			const reified = typeFromValue(value.type, scope);
 			const conformanceName = value.conformance;
 			if (Object.hasOwnProperty.call(reified.conformances, conformanceName)) {
-				// throw new TypeError(`${stringifyValue(value.type)} does not conform to ${value.conformance}`);
+				const conformanceMap: ProtocolConformanceMap = Object.create(null);
+				conformanceMap[conformanceName] = reified.conformances[conformanceName];
+				for (const requirement of reified.conformances[conformanceName].requirements) {
+					if (!Object.hasOwnProperty.call(reified.conformances, requirement)) {
+						throw new TypeError(`Missing ${requirement} conformance in ${stringifyValue(value.type)}`);
+					}
+					conformanceMap[requirement] = reified.conformances[requirement];
+				}
 				return {
 					functions: lookupForMap<FunctionBuilder | undefined>(reified.conformances[conformanceName].functions),
-					conformances: {
-						[conformanceName]: reified.conformances[conformanceName],
-						...reified.conformances[conformanceName].conformances,
-					},
+					conformances: conformanceMap,
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.All,
 				};
 			} else {
 				return {
 					conformances: {},
-					functions: (functionName) => (innerScope) => member(member(value.type, conformanceName, innerScope), mangleName(functionName).name, innerScope),
+					functions(functionName) {
+						return (innerScope, arg, name, types) => {
+							const result = member(member(value.type, conformanceName, innerScope), mangleName(functionName).name, innerScope);
+							if (types.length <= 0) {
+								return result;
+							}
+							const args: Value[] = [];
+							for (let i = 0; i < types.length; i++) {
+								args.push(arg(i));
+							}
+							return callable((innerMostScope, innerArg, argTypes) => {
+								return call(
+									result,
+									concat(args, argTypes.map((_, i) => innerArg(i))),
+									concat(types, argTypes),
+									innerMostScope,
+								);
+								// TODO: Find proper return and argument types
+							}, "() -> Void");
+						};
+					},
 					innerTypes: {},
 					possibleRepresentations: PossibleRepresentation.Object,
 				};
 			}
 		}
 		default: {
+			// TODO: Support metatypes here
+			const metaType: ReifiedType = {
+				conformances: {},
+				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
+				innerTypes: {
+					Type: () => metaType,
+				},
+				possibleRepresentations: PossibleRepresentation.Object,
+			};
 			return {
 				conformances: {},
 				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
-				innerTypes: {},
+				innerTypes: {
+					Type: () => metaType,
+				},
 				possibleRepresentations: PossibleRepresentation.Object,
 			};
 		}
@@ -364,62 +400,63 @@ export const updateOperatorForBinaryOperator: Mapped<"+" | "-" | "*" | "/" | "|"
 };
 
 export function set(dest: Value, source: Value, scope: Scope, operator: UpdateOperator = "=", location?: LocationSource): Value {
-	let result: Value;
-	switch (dest.kind) {
-		case "boxed":
-			result = conditional(
-				typeRequiresBox(dest.type, scope),
-				set(extractContentOfBox(dest, scope), source, scope, operator, location),
-				set(dest.contents, source, scope, operator, location),
-				scope,
-				location,
-			);
-			break;
-		case "direct": {
-			if (dest.expression.type === "ThisExpression") {
-				throw new Error("Cannot assign to a this expression!");
-			}
-			const sourceExpression = read(source, scope);
-			if (expressionLiteralValue(sourceExpression) === 1) {
-				if (operator === "+=") {
-					result = expr(updateExpression("++", dest.expression), location);
-					break;
+	return transform(source, scope, (sourceExpression: Expression) => {
+		let result: Value;
+		switch (dest.kind) {
+			case "boxed":
+				result = conditional(
+					typeRequiresBox(dest.type, scope),
+					set(extractContentOfBox(dest, scope), expr(sourceExpression), scope, operator, location),
+					set(dest.contents, expr(sourceExpression), scope, operator, location),
+					scope,
+					location,
+				);
+				break;
+			case "direct": {
+				if (dest.expression.type === "ThisExpression") {
+					throw new Error("Cannot assign to a this expression!");
 				}
-				if (operator === "-=") {
-					result = expr(updateExpression("--", dest.expression), location);
-					break;
+				if (expressionLiteralValue(sourceExpression) === 1) {
+					if (operator === "+=") {
+						result = expr(updateExpression("++", dest.expression), location);
+						break;
+					}
+					if (operator === "-=") {
+						result = expr(updateExpression("--", dest.expression), location);
+						break;
+					}
 				}
+				result = expr(assignmentExpression(operator, dest.expression, sourceExpression), location);
+				break;
 			}
-			result = expr(assignmentExpression(operator, dest.expression, sourceExpression), location);
-			break;
-		}
-		case "subscript": {
-			if (operator !== "=") {
-				result = update(dest, scope, (value) => {
-					return binary(binaryOperatorForUpdateOperator[operator], value, source, scope);
-				}, location);
-			} else {
-				// TODO: Populate with correct type
-				result = call(dest.setter, concat(dest.args, [source]), concat(dest.types, [typeValue("Any")]), scope, location);
+			case "subscript": {
+				if (operator !== "=") {
+					result = update(dest, scope, (value) => {
+						return binary(binaryOperatorForUpdateOperator[operator], value, expr(sourceExpression), scope);
+					}, location);
+				} else {
+					// TODO: Populate with correct type
+					result = call(dest.setter, concat(dest.args, [expr(sourceExpression)]), concat(dest.types, [typeValue("Any")]), scope, location);
+				}
+				break;
 			}
-			break;
-		}
-		case "expression": {
-			switch (dest.expression.type) {
-				case "Identifier":
-				case "MemberExpression":
-					result = expr(assignmentExpression(operator, dest.expression, read(source, scope)));
-					break;
-				default:
-					throw new TypeError(`Unable to set an expression with a ${dest.expression.type} value`);
+			case "expression": {
+				switch (dest.expression.type) {
+					case "Identifier":
+					case "MemberExpression":
+						result = expr(assignmentExpression(operator, dest.expression, sourceExpression));
+						break;
+					default:
+						throw new TypeError(`Unable to set an expression with a ${dest.expression.type} value`);
+				}
+				break;
 			}
-			break;
+			default: {
+				throw new TypeError(`Unable to set a ${dest.kind} value`);
+			}
 		}
-		default: {
-			throw new TypeError(`Unable to set a ${dest.kind} value`);
-		}
-	}
-	return statements(ignore(result, scope), location);
+		return statements(ignore(result, scope), location);
+	});
 }
 
 export function update(dest: Value, scope: Scope, updater: (value: Value) => Value, location?: LocationSource): Value {
@@ -518,37 +555,38 @@ export function array(values: Value[], scope: Scope, location?: LocationSource) 
 				continue;
 			}
 		}
-		const expression = read(value, scope);
-		if (prefixStatements.length !== 0 && !isPure(expression)) {
+		const innerExpression = read(value, scope);
+		if (prefixStatements.length !== 0 && !isPure(innerExpression)) {
 			const temp = uniqueName(scope, "element");
-			prefixStatements.push(addVariable(scope, temp, dummyType, expr(expression), DeclarationFlags.Const));
+			prefixStatements.push(addVariable(scope, temp, dummyType, expr(innerExpression), DeclarationFlags.Const));
 			elements.unshift(read(lookup(temp, scope), scope));
 		} else {
-			elements.unshift(expression);
+			elements.unshift(innerExpression);
 		}
 	}
+	const expression = annotate(arrayExpression(elements), location);
 	if (prefixStatements.length === 0) {
-		return expr(arrayExpression(elements));
+		return expr(expression);
 	}
-	prefixStatements.push(returnStatement(arrayExpression(elements)));
-	return statements(prefixStatements);
+	prefixStatements.push(annotate(returnStatement(expression), location));
+	return statements(prefixStatements, location);
 }
 
 
 export function annotate<T extends Node>(node: T, location?: LocationSource): T {
-	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(node, "loc")) {
-		return Object.assign(Object.create(Object.getPrototypeOf(node)), {
+	if (typeof location !== "undefined" && (!Object.hasOwnProperty.call(node, "loc") || typeof node.loc === "undefined")) {
+		return Object.assign(Object.create(Object.getPrototypeOf(node)), node, {
 			loc: readLocation(location),
-		}, node);
+		});
 	}
 	return node;
 }
 
 export function annotateValue<T extends Value>(value: T, location?: LocationSource): T {
-	if (typeof location !== "undefined" && !Object.hasOwnProperty.call(value, "location")) {
-		return Object.assign(Object.create(Object.getPrototypeOf(value)), {
+	if (typeof location !== "undefined" && (!Object.hasOwnProperty.call(value, "location") || typeof value.location === "undefined")) {
+		return Object.assign(Object.create(Object.getPrototypeOf(value)), value, {
 			location: readLocation(location),
-		}, value);
+		});
 	}
 	return value;
 }
@@ -618,6 +656,167 @@ function containsNoReturnStatements(node: Node): boolean {
 	return state.result;
 }
 
+const possibleRepresentationKey = "$rep";
+
+function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
+	// Deep-remap types, replacing with a placeholder so that similar type patterns are specialized and a standardized name is generated
+	const substitutionNames: string[] = [];
+	const substitutions: Value[] = [];
+	const stringified = stringifyType(type, (innerType) => {
+		if (innerType.kind === "name") {
+			const result = mappedValueForName(innerType.name, scope);
+			if (typeof result !== "undefined") {
+				substitutionNames.push(innerType.name);
+				substitutions.push(result);
+				return {
+					kind: "name",
+					name: "_",
+				};
+			}
+		}
+		return innerType;
+	});
+	const name: string = `:${stringified}.Type`;
+	const mangled = mangleName(name);
+	const globalScope = rootScope(scope);
+	// Emit a type table if one doesn't exist
+	if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
+		const reified = typeFromValue(value, scope);
+		function typeConformancesObject(innerScope: Scope) {
+			const desiredConformances = Object.keys(reified.conformances);
+			// Find all desired conformances
+			// tslint:disable-next-line:prefer-for-of
+			for (let i = 0; i < desiredConformances.length; i++) {
+				const key = desiredConformances[i];
+				if (Object.hasOwnProperty.call(reified.conformances, key)) {
+					const current = reified.conformances[key];
+					for (const requirement of Object.keys(current.requirements)) {
+						if (desiredConformances.indexOf(requirement) === -1) {
+							desiredConformances.push(requirement);
+						}
+					}
+				} else {
+					throw new TypeError(`Missing ${key} conformance in ${stringified}`);
+				}
+			}
+			desiredConformances.sort();
+			// Create a property for each conformance
+			const properties: Array<ObjectMethod | ObjectProperty | SpreadElement> = [
+				objectProperty(identifier(possibleRepresentationKey), literal(reified.possibleRepresentations as number).expression),
+			];
+			for (const conformanceName of desiredConformances) {
+				const current = reified.conformances[conformanceName];
+				properties.push(objectProperty(mangleName(conformanceName), objectExpression(Object.keys(current.functions).sort().map((key) => {
+					const scopeName = `${stringified}.${key}`;
+					let requiredArgumentCount: number = 0;
+					const result = current.functions[key](innerScope, (index, argumentName) => {
+						if (index >= requiredArgumentCount) {
+							requiredArgumentCount = index + 1;
+						}
+						return value;
+					}, scopeName, [typeValue("Type")]);
+					if (requiredArgumentCount > 0) {
+						let argumentTypes: Type[] = [];
+						for (let i = 0; i < requiredArgumentCount; i++) {
+							argumentTypes.push({ kind: "name", name: "Any" });
+						}
+						let resultType: Type;
+						if (result.kind === "callable") {
+							argumentTypes = concat(argumentTypes, result.type.arguments.types);
+							resultType = result.type.return;
+						} else {
+							resultType = {
+								kind: "tuple",
+								types: [],
+							};
+						}
+						const [args, methodBody] = functionize(innerScope, scopeName, (innerMostScope, arg) => {
+							const repeatedResult = current.functions[key](innerMostScope, (index, argumentName) => {
+								if (index === 0) {
+									return typeValue(type, value.location, arg(0, "Self"));
+								}
+								return arg(index, argumentName);
+							}, scopeName, argumentTypes.map((argumentType) => typeValue(argumentType)));
+							arg(0, "Self");
+							if (result.kind === "callable") {
+								if (repeatedResult.kind !== "callable") {
+									throw new TypeError(`Expected function to return a callable, instead got a ${result.kind}`);
+								}
+								return repeatedResult.call(innerScope, (index, argumentName) => {
+									return arg(requiredArgumentCount + index, argumentName);
+								}, repeatedResult.type.arguments.types.map((argType) => typeValue(argType)));
+							}
+							return repeatedResult;
+						}, {
+							kind: "function",
+							arguments: {
+								kind: "tuple",
+								types: argumentTypes,
+							},
+							return: resultType,
+							attributes: [],
+							throws: false,
+							rethrows: false,
+						});
+						return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
+					} else if (result.kind === "callable") {
+						const argTypes = result.type.arguments.types.map((argType) => typeValue(argType));
+						const [args, methodBody] = functionize(innerScope, scopeName, (innerMostScope, arg) => result.call(innerMostScope, arg, argTypes), result.type);
+						return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
+					} else {
+						return objectProperty(mangleName(key), read(result, innerScope));
+					}
+				}))));
+			}
+			return objectExpression(properties);
+		}
+		// Placeholder to avoid infinite recursion in tables that are self-referential
+		globalScope.declarations[name] = {
+			flags: DeclarationFlags.Const,
+			declaration: variableDeclaration("const", [variableDeclarator(mangled)]),
+		};
+		if (substitutions.length === 0) {
+			// Emit direct able
+			globalScope.declarations[name] = {
+				flags: DeclarationFlags.Const,
+				declaration: variableDeclaration("const", [variableDeclarator(mangled, typeConformancesObject(globalScope))]),
+			};
+		} else {
+			// Emit function that returns a table based on parameters
+			const typeMapping: TypeMap = Object.create(null);
+			const functionized = functionize(globalScope, stringified, (innerScope) => {
+				substitutionNames.forEach((key, i) => {
+					typeMapping[key] = (innerMostScope) => typeFromValue(substitutions[i], innerMostScope);
+					innerScope.mapping[key] = variable(mangleName(key));
+				});
+				return expr(typeConformancesObject(innerScope));
+			}, {
+				kind: "function",
+				arguments: {
+					kind: "tuple",
+					types: substitutions.map(() => typeType),
+				},
+				return: typeType,
+				throws: false,
+				rethrows: false,
+				attributes: [],
+			}, typeMapping);
+			globalScope.declarations[name] = {
+				flags: DeclarationFlags.Const,
+				declaration: functionDeclaration(mangled, substitutionNames.map(mangleName), blockStatement(functionized[1])),
+			};
+		}
+	}
+	// Emit reference to table
+	if (substitutions.length === 0) {
+		// Directly as there are no substitutions
+		return mangled;
+	} else {
+		// Parameterized by substitutions
+		return callExpression(mangled, substitutions.map((substitution) => read(substitution, scope)));
+	}
+}
+
 export function read(value: VariableValue, scope: Scope): Identifier | MemberExpression;
 export function read(value: Value, scope: Scope): Expression;
 export function read(value: Value, scope: Scope): Expression {
@@ -653,7 +852,7 @@ export function read(value: Value, scope: Scope): Expression {
 			} else {
 				func = unbound;
 			}
-			return read(func, scope);
+			return annotate(read(func, scope), value.location);
 		}
 		case "tuple": {
 			switch (value.values.length) {
@@ -670,7 +869,8 @@ export function read(value: Value, scope: Scope): Expression {
 		}
 		case "callable": {
 			// TODO: Include length to value.call
-			const [args, body] = functionize(scope, "anonymous", (innerScope, arg) => value.call(innerScope, arg, 0), value.type, undefined, value.location);
+			const argTypes = value.type.arguments.types.map((argType) => typeValue(argType));
+			const [args, body] = functionize(scope, "anonymous", (innerScope, arg) => value.call(innerScope, arg, argTypes), value.type, undefined, value.location);
 			return annotate(functionExpression(undefined, args, annotate(blockStatement(body), value.location)), value.location);
 		}
 		case "direct": {
@@ -683,128 +883,41 @@ export function read(value: Value, scope: Scope): Expression {
 			}
 			const result = typeof parsed.value !== "undefined" ? parsed.value : undefinedLiteral;
 			if (parsed.statements.length === 0) {
-				return result;
+				return annotate(result, value.location);
 			}
-			return sequenceExpression(concat(parsed.statements.map(expressionFromStatement), [result]));
+			return annotate(sequenceExpression(concat(parsed.statements.map(expressionFromStatement), [result])), value.location);
 		}
 		case "subscript": {
 			return annotate(read(call(value.getter, value.args, value.types, scope, value.location), scope), value.location);
 		}
 		case "boxed": {
-			return read(conditional(
+			return annotate(read(conditional(
 				typeRequiresBox(value.type, scope),
 				extractContentOfBox(value, scope),
 				value.contents,
 				scope,
 				value.location,
-			), scope);
+			), scope), value.location);
 		}
-		case "conformance":
+		case "conformance": {
+			return annotate(read(value.type, scope), value.location);
+		}
 		case "type": {
-			const type = value.kind === "conformance" ? value.type : value;
-			if (type.kind !== "type") {
-				throw new TypeError(`Expected a type, got a ${type.kind}`);
-			}
 			// Direct remapping
-			if (type.type.kind === "name") {
-				const result = mappedValueForName(type.type.name, scope);
+			if (typeof value.runtimeValue !== "undefined") {
+				return read(value.runtimeValue, scope);
+			}
+			let type = value.type;
+			while (type.kind === "metatype") {
+				type = type.base;
+			}
+			if (type.kind === "name") {
+				const result = mappedValueForName(type.name, scope);
 				if (typeof result !== "undefined") {
-					return read(result, scope);
+					return annotate(read(result, scope), value.location);
 				}
 			}
-			// Deep-remap types, replacing with a placeholder so that similar type patterns are specialized and a standardized name is generated
-			const substitutionNames: string[] = [];
-			const substitutions: Value[] = [];
-			const stringified = stringifyType(type.type, (innerType) => {
-				if (innerType.kind === "name") {
-					const result = mappedValueForName(innerType.name, scope);
-					if (typeof result !== "undefined") {
-						substitutionNames.push(innerType.name);
-						substitutions.push(result);
-						return {
-							kind: "name",
-							name: "_",
-						};
-					}
-				}
-				return innerType;
-			});
-			const name: string = `:${stringified}.Type`;
-			const mangled = mangleName(name);
-			const globalScope = rootScope(scope);
-			// Emit a type table if one doesn't exist
-			if (!Object.hasOwnProperty.call(globalScope.declarations, name)) {
-				function returnValue() {
-					return value;
-				}
-				const reified = typeFromValue(value, scope);
-				function typeConformancesObject(innerScope: Scope) {
-					function witnessTableForConformance(current: ProtocolConformance) {
-						const properties = Object.keys(current.functions).map((key) => {
-							const scopeName = `${stringified}.${key}`;
-							const result = current!.functions[key](innerScope, returnValue, scopeName, 1);
-							if (result.kind === "callable") {
-								// TODO: Pass real argument count
-								const [args, methodBody] = functionize(innerScope, scopeName, (innerMostScope, arg) => result.call(innerMostScope, arg, 0), result.type);
-								return objectMethod("method", mangleName(key), args, blockStatement(methodBody));
-							} else {
-								return objectProperty(mangleName(key), read(result, innerScope));
-							}
-						});
-						for (const key of Object.keys(current.conformances)) {
-							properties.push(objectProperty(mangleName(key), witnessTableForConformance(current.conformances[key])));
-						}
-						return objectExpression(properties);
-					}
-					return objectExpression(Object.keys(reified.conformances).map((key) => {
-						return objectProperty(mangleName(key), witnessTableForConformance(reified.conformances[key]));
-					}))
-				}
-				// Placeholder to avoid infinite recursion in tables that are self-referential
-				globalScope.declarations[name] = {
-					flags: DeclarationFlags.Const,
-					declaration: variableDeclaration("const", [variableDeclarator(mangled)]),
-				};
-				if (substitutions.length === 0) {
-					// Emit direct able
-					globalScope.declarations[name] = {
-						flags: DeclarationFlags.Const,
-						declaration: variableDeclaration("const", [variableDeclarator(mangled, typeConformancesObject(globalScope))]),
-					};
-				} else {
-					// Emit function that returns a table based on parameters
-					const typeMapping: TypeMap = Object.create(null);
-					const functionized = functionize(globalScope, stringified, (innerScope) => {
-						substitutionNames.forEach((key, i) => {
-							typeMapping[key] = (innerMostScope) => typeFromValue(substitutions[i], innerMostScope);
-							innerScope.mapping[key] = variable(mangleName(key));
-						});
-						return expr(typeConformancesObject(innerScope));
-					}, {
-						kind: "function",
-						arguments: {
-							kind: "tuple",
-							types: substitutions.map(() => typeType),
-						},
-						return: typeType,
-						throws: false,
-						rethrows: false,
-						attributes: [],
-					}, typeMapping);
-					globalScope.declarations[name] = {
-						flags: DeclarationFlags.Const,
-						declaration: functionDeclaration(mangled, substitutionNames.map(mangleName), blockStatement(functionized[1])),
-					};
-				}
-			}
-			// Emit reference to table
-			if (substitutions.length === 0) {
-				// Directly as there are no substitutions
-				return annotate(mangled, value.location);
-			} else {
-				// Parameterized by substitutions
-				return annotate(callExpression(mangled, substitutions.map((substitution) => read(substitution, scope))), value.location);
-			}
+			return annotate(buildRuntimeTypeReference(type, value, scope), value.location);
 		}
 		default: {
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
@@ -816,15 +929,12 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 	outer:
 	switch (expression.type) {
 		case "Identifier":
-			if (expression.name === "undefined") {
-				return [];
-			}
-			break;
+			return [];
 		case "SequenceExpression": {
 			let body: Statement[] = [];
 			for (const ignoredExpression of expression.expressions) {
 				if (!isPure(ignoredExpression)) {
-					body = concat(body, ignore(expr(ignoredExpression), scope));
+					body = concat(body, ignore(expr(ignoredExpression, expression.loc), scope));
 				}
 			}
 			return body;
@@ -832,10 +942,10 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 		case "BinaryExpression": {
 			let body: Statement[] = [];
 			if (!isPure(expression.left)) {
-				body = concat(body, ignore(expr(expression.left), scope));
+				body = concat(body, ignore(expr(expression.left, expression.loc), scope));
 			}
 			if (!isPure(expression.right)) {
-				body = concat(body, ignore(expr(expression.right), scope));
+				body = concat(body, ignore(expr(expression.right, expression.loc), scope));
 			}
 			return body;
 		}
@@ -849,7 +959,7 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 					if (isPure(expression.argument)) {
 						return [];
 					} else {
-						return ignore(expr(expression.argument), scope);
+						return ignore(expr(expression.argument, expression.loc), scope);
 					}
 					break;
 				default:
@@ -863,7 +973,7 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 				if (ignoredExpression === null || ignoredExpression.type != null) {
 					break outer;
 				}
-				body = concat(body, ignore(expr(ignoredExpression), scope));
+				body = concat(body, ignore(expr(ignoredExpression, expression.loc), scope));
 			}
 			return body;
 		}
@@ -874,11 +984,11 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 					break outer;
 				}
 				if (prop.computed && !isPure(prop.key)) {
-					body = concat(body, ignore(expr(prop.key), scope));
+					body = concat(body, ignore(expr(prop.key, expression.loc), scope));
 				}
 				if (!isPure(prop.value)) {
 					if (isExpression(prop.value)) {
-						body = concat(body, ignore(expr(prop.value), scope));
+						body = concat(body, ignore(expr(prop.value, expression.loc), scope));
 					} else {
 						break outer;
 					}
@@ -887,11 +997,11 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 			return body;
 		}
 		case "ConditionalExpression": {
-			return [ifStatement(
+			return [annotate(ifStatement(
 				expression.test,
 				blockStatement(ignoreExpression(expression.consequent, scope)),
 				blockStatement(ignoreExpression(expression.alternate, scope)),
-			)];
+			), expression.loc)];
 		}
 		default:
 			if (isLiteral(expression)) {
@@ -899,7 +1009,7 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 			}
 			break;
 	}
-	return [expressionStatement(expression)];
+	return [annotate(expressionStatement(expression), expression.loc)];
 }
 
 export function ignore(value: Value, scope: Scope): Statement[] {
@@ -908,20 +1018,29 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 		case "statements":
 			const parsed = parseStatementsValue(transformed, containsNoReturnStatements);
 			if (typeof parsed !== "undefined") {
+				const head = parsed.statements.map((statement) => annotate(statement, value.location));
 				if (typeof parsed.value !== "undefined" && !isPure(parsed.value)) {
-					return concat(parsed.statements, [expressionStatement(parsed.value)]);
+					return concat(head, [annotate(expressionStatement(parsed.value), value.location)]);
 				} else {
-					return parsed.statements;
+					return head;
 				}
 			}
 			break;
 		case "expression":
-			return ignoreExpression(transformed.expression, scope);
+			return ignoreExpression(annotate(transformed.expression, value.location), scope);
+		case "direct":
+			return [];
 		default:
 			break;
 	}
-	return ignoreExpression(read(value, scope), scope);
+	return ignoreExpression(annotate(read(transformed, scope), value.location), scope);
 }
+
+export const undefinedLiteral = identifier("undefined");
+export const undefinedValue = expr(undefinedLiteral);
+
+export const typeType: Type = { kind: "name", name: "Type" };
+export const typeTypeValue = typeValue(typeType);
 
 export function transform(value: Value, scope: Scope, callback: (expression: Expression) => Value): Value {
 	for (;;) {
@@ -937,21 +1056,31 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 		// TODO: Disallow return statements nested inside other statements
 		const parsed = parseStatementsValue(value, containsNoReturnStatements);
 		if (typeof parsed !== "undefined") {
-			const tail = callback(typeof parsed.value !== "undefined" ? parsed.value : undefinedLiteral);
+			const tail = annotateValue(callback(typeof parsed.value !== "undefined" ? parsed.value : annotate(undefinedLiteral, value.location)), value.location);
+			if (tail.kind === "statements") {
+				const parsedTail = parseStatementsValue(tail, containsNoReturnStatements);
+				if (typeof parsedTail !== "undefined" && typeof parsedTail.value !== "undefined" && parsedTail.value.type === "Identifier" && parsedTail.value.name === "undefined") {
+					return statements(concat(
+						parsed.statements,
+						parsedTail.statements,
+					), tail.location || value.location);
+				}
+				return statements(concat(
+					parsed.statements,
+					tail.statements,
+				), tail.location || value.location);
+			}
+			if (tail.kind === "direct" && tail.expression.type === "Identifier" && tail.expression.name === "undefined") {
+				return statements(parsed.statements, tail.location || value.location);
+			}
 			return statements(concat(
 				parsed.statements,
-				tail.kind === "statements" ? tail.statements : [returnStatement(simplifyExpression(read(tail, scope)))],
-			), tail.location);
+				[annotate(returnStatement(simplifyExpression(read(tail, scope))), tail.location || value.location)],
+			), tail.location || value.location);
 		}
 	}
-	return callback(simplifyExpression(read(value, scope)));
+	return annotateValue(callback(simplifyExpression(read(value, scope))), value.location);
 }
-
-export const undefinedLiteral = identifier("undefined");
-export const undefinedValue = expr(undefinedLiteral);
-
-export const typeType: Type = { kind: "name", name: "Type" };
-export const typeTypeValue = typeValue(typeType);
 
 export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<Value | string>, scope: Scope, location?: LocationSource): Value {
 	const getter: ArgGetter = (i) => {
@@ -959,7 +1088,7 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 			throw new RangeError(`Asked for a negative argument index`);
 		}
 		if (i >= args.length) {
-			throw new RangeError(`${target.kind === "function" ? target.name : "Callable"} asked for argument ${i + 1}, but only ${args.length} arguments provided`);
+			throw new RangeError(`${stringifyValue(target)} asked for argument ${i + 1}, but only ${args.length} arguments provided`);
 		}
 		return args[i];
 	};
@@ -993,11 +1122,11 @@ export function call(target: Value, args: ReadonlyArray<Value>, argTypes: Array<
 				const func = memberExpression(read(target.parentType, scope), mangleName(target.name));
 				return call(expr(func, target.location), args, argTypes, scope, location);
 			}
-			return annotateValue(fn(scope, getter, target.name, args.length), location);
+			return annotateValue(fn(scope, getter, target.name, argTypes.map((argumentType) => typeof argumentType === "string" ? typeValue(argumentType) : argumentType)), location);
 		case "callable":
 			// Inlining is responsible for making the codegen even remotely sane
 			// return call(expr(read(target, scope)), args, scope, location);
-			return annotateValue(target.call(scope, getter, args.length), location);
+			return annotateValue(target.call(scope, getter, argTypes.map((argumentType) => typeof argumentType === "string" ? typeValue(argumentType) : argumentType)), location);
 		default:
 			break;
 	}
@@ -1401,17 +1530,43 @@ export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, call
 		return callback(value);
 	}
 	return transform(value, scope, (expression) => {
-		if (isPure(expression)) {
-			return callback(expr(expression));
+		if (isPure(expression) || expression.type === "Identifier") {
+			return callback(expr(expression, value.location));
 		}
-		const tempName = uniqueName(scope, uniqueNamePrefix);
-		const head = addVariable(scope, tempName, "Any", expr(expression), DeclarationFlags.Const);
-		const temp = annotateValue(lookup(tempName, scope), expression.loc);
-		const tail = callback(temp);
-		if (tail.kind === "statements") {
-			return statements(concat([head], tail.statements));
+		let head: Statement[];
+		let temp: ExpressionValue | MappedNameValue;
+		if (expression.type === "MemberExpression") {
+			head = [];
+			let object: Expression = expression.object;
+			if (!isPure(object) && object.type !== "Identifier") {
+				const tempName = uniqueName(scope, uniqueNamePrefix);
+				head.push(annotate(addVariable(scope, tempName, "Any", expr(object), DeclarationFlags.Const), value.location));
+				object = mangleName(tempName);
+			}
+			if (expression.computed) {
+				let property: Expression = expression.property;
+				if (!isPure(property) && property.type !== "Identifier") {
+					const tempName = uniqueName(scope, uniqueNamePrefix);
+					head.push(annotate(addVariable(scope, tempName, "Any", expr(property), DeclarationFlags.Const), value.location));
+					property = mangleName(tempName);
+				}
+				temp = variable(memberExpression(object, property, true));
+			} else {
+				temp = variable(memberExpression(object, expression.property, false));
+			}
 		} else {
-			return statements([head, returnStatement(read(tail, scope))]);
+			const tempName = uniqueName(scope, uniqueNamePrefix);
+			head = [annotate(addVariable(scope, tempName, "Any", expr(expression), DeclarationFlags.Const), value.location)];
+			temp = lookup(tempName, scope);
+		}
+		const tail = callback(annotateValue(temp, value.location));
+		if (head.length === 0) {
+			return tail;
+		}
+		if (tail.kind === "statements") {
+			return statements(concat(head, tail.statements));
+		} else {
+			return statements(concat(head, [annotate(returnStatement(read(tail, scope)), tail.location)]));
 		}
 	});
 }
@@ -1427,15 +1582,15 @@ export function stringifyType(type: Type, replacer: (type: Type) => Type = passt
 			return stringifyType(type.type, replacer) + "?";
 		case "generic":
 			if (type.base.kind === "function") {
-				return "<" + type.arguments.map((innerType) => stringifyType(type, replacer)).join(", ") + "> " + stringifyType(type.base, replacer);
+				return "<" + type.arguments.map((innerType) => stringifyType(innerType, replacer)).join(", ") + "> " + stringifyType(type.base, replacer);
 			} else {
-				return stringifyType(type.base, replacer) + "<" + type.arguments.map((innerType) => stringifyType(type, replacer)).join(", ") + ">";
+				return stringifyType(type.base, replacer) + "<" + type.arguments.map((innerType) => stringifyType(innerType, replacer)).join(", ") + ">";
 			}
 		case "function":
 			// TODO: Handle attributes
 			return stringifyType(type.arguments, replacer) + (type.throws ? " throws" : "") + (type.rethrows ? " rethrows" : "") + " -> " + stringifyType(type.return, replacer);
 		case "tuple":
-			return "(" + type.types.map((innerType) => stringifyType(type, replacer)).join(", ") + ")";
+			return "(" + type.types.map((innerType) => stringifyType(innerType, replacer)).join(", ") + ")";
 		case "array":
 			return "[" + stringifyType(type.type, replacer) + "]";
 		case "dictionary":
@@ -1504,7 +1659,7 @@ function representationsForTypeValue(type: Value, scope: Scope): Value {
 	if (type.kind === "type") {
 		return literal(typeFromValue(type, scope).possibleRepresentations);
 	} else {
-		return member(type, "$rep", scope);
+		return member(type, possibleRepresentationKey, scope);
 	}
 }
 
