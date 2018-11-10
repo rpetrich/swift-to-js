@@ -2740,7 +2740,11 @@ export const functions: FunctionMap = {
 			);
 		});
 	},
-	"~=": (scope, arg) => binary("===", arg(1, "pattern"), arg(2, "value"), scope),
+	"~=": (scope, arg) => {
+		const T = arg(0, "T");
+		const result = call(functionValue("~=", conformance(T, "Equatable", scope), "(T.Type, T, T) -> () -> Bool"), [T, arg(1, "pattern"), arg(2, "value")], [typeValue("Type"), T, T], scope);
+		return call(result, [], [], scope);
+	},
 	"print(_:separator:terminator:)": (scope, arg, type) => call(member("console", "log", scope), [arg(0, "items")], [dummyType], scope),
 	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
 		ifStatement(
