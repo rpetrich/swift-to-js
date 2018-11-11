@@ -155,6 +155,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 			"...": wrapped((scope, arg) => {
 				return tuple([arg(0, "start"), arg(1, "end")]);
 			}, "(Self, Self) -> Self"),
+			"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 		},
 		requirements: [],
 	};
