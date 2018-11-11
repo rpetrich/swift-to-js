@@ -64,7 +64,7 @@ function cachedBuilder(fn: (scope: Scope) => ReifiedType): (scope: Scope) => Rei
 	};
 }
 
-function buildIntegerType(globalScope: Scope, min: number, max: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
+function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth: number, checked: boolean, wrap: (value: Value, scope: Scope) => Value): ReifiedType {
 	const range: NumericRange = { min: literal(min), max: literal(max) };
 	const widerHigh: NumericRange = checked ? { min: literal(min), max: literal(max + 1) } : range;
 	const widerLow: NumericRange = checked ? { min: literal(min - 1), max: literal(max) } : range;
@@ -219,11 +219,43 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, checked:
 	};
 	const fixedWidthIntegerConformance: ProtocolConformance = {
 		functions: {
+			"min": wrapped((scope, arg) => literal(min), "() -> Self"),
+			"max": wrapped((scope, arg) => literal(max), "() -> Self"),
+			"littleEndian": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"),
+			"bigEndian": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"), // TODO
+			"byteSwapped": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"), // TODO
+			"bitWidth": wrapped((scope, arg) => literal(bitWidth), "() -> Self"),
 			"&+": wrapped(binaryBuiltin("+", 0, wrap), "(Self, Self) -> Self"),
 			"&*": wrapped(binaryBuiltin("*", 0, wrap), "(Self, Self) -> Self"),
 			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
 			"&<<": wrapped(binaryBuiltin("<<", 0, wrap), "(Self, Self) -> Self"),
 			"&>>": wrapped(binaryBuiltin(">>", 0, wrap), "(Self, Self) -> Self"),
+			"addingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
+				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
+					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+				});
+			}), "(Self, Self) -> (Self, Bool)"),
+			"subtractingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("-", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
+				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
+					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+				});
+			}), "(Self, Self) -> (Self, Bool)"),
+			"multipliedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
+				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
+					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+				});
+			}), "(Self, Self) -> (Self, Bool)"),
+			"dividedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("|", binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), literal(0), scope), scope, "unwrapped", (unwrapped) => {
+				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
+					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+				});
+			}), "(Self, Self) -> (Self, Bool)"),
+			"remainderReportingOverflow(dividingBy:)": wrapped((scope, arg) => reuse(binary("%", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
+				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
+					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+				});
+			}), "(Self, Self) -> (Self, Bool)"),
+			"nonzeroBitCount": wrapped((scope, arg) => literal(0), "(Self) -> Self"),
 		},
 		requirements: [],
 	};
@@ -1232,16 +1264,16 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		...protocolTypes,
 		Bool: BoolType,
 		Int1: BoolType,
-		UInt: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, checkedIntegers, (value, scope) => binary(">>>", value, literal(0), scope))),
-		Int: cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, checkedIntegers, (value, scope) => binary("|", value, literal(0), scope))),
-		UInt8: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 255, checkedIntegers, (value, scope) => binary("&", value, literal(0xFF), scope))),
-		Int8: cachedBuilder((globalScope) => buildIntegerType(globalScope, -128, 127, checkedIntegers, (value, scope) => binary(">>", binary("<<", value, literal(24), scope), literal(24), scope))),
-		UInt16: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 65535, checkedIntegers, (value, scope) => binary("&", value, literal(0xFFFF), scope))),
-		Int16: cachedBuilder((globalScope) => buildIntegerType(globalScope, -32768, 32767, checkedIntegers, (value, scope) => binary(">>", binary("<<", value, literal(16), scope), literal(16), scope))),
-		UInt32: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, checkedIntegers, (value, scope) => binary(">>>", value, literal(0), scope))),
-		Int32: cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, checkedIntegers, (value, scope) => binary("|", value, literal(0), scope))),
-		UInt64: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 52-bit integers
-		Int64: cachedBuilder((globalScope) => buildIntegerType(globalScope, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, checkedIntegers, (value) => value)), // 53-bit integers
+		UInt: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, 32, checkedIntegers, (value, scope) => binary(">>>", value, literal(0), scope))),
+		Int: cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, 32, checkedIntegers, (value, scope) => binary("|", value, literal(0), scope))),
+		UInt8: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 255, 8, checkedIntegers, (value, scope) => binary("&", value, literal(0xFF), scope))),
+		Int8: cachedBuilder((globalScope) => buildIntegerType(globalScope, -128, 127, 8, checkedIntegers, (value, scope) => binary(">>", binary("<<", value, literal(24), scope), literal(24), scope))),
+		UInt16: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 65535, 16, checkedIntegers, (value, scope) => binary("&", value, literal(0xFFFF), scope))),
+		Int16: cachedBuilder((globalScope) => buildIntegerType(globalScope, -32768, 32767, 16, checkedIntegers, (value, scope) => binary(">>", binary("<<", value, literal(16), scope), literal(16), scope))),
+		UInt32: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, 4294967295, 32, checkedIntegers, (value, scope) => binary(">>>", value, literal(0), scope))),
+		Int32: cachedBuilder((globalScope) => buildIntegerType(globalScope, -2147483648, 2147483647, 32, checkedIntegers, (value, scope) => binary("|", value, literal(0), scope))),
+		UInt64: cachedBuilder((globalScope) => buildIntegerType(globalScope, 0, Number.MAX_SAFE_INTEGER, 53, checkedIntegers, (value) => value)), // 53-bit integers
+		Int64: cachedBuilder((globalScope) => buildIntegerType(globalScope, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 53, checkedIntegers, (value) => value)), // 53-bit integers
 		Float: cachedBuilder(buildFloatingType),
 		Double: cachedBuilder(buildFloatingType),
 		String: cachedBuilder((globalScope) => {
