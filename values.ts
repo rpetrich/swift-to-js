@@ -1283,6 +1283,46 @@ function simplifyExpression(expression: Expression | PatternLike | SpreadElement
 			if (typeof value !== "undefined") {
 				return literal(value, expression.loc).expression;
 			}
+			switch (expression.argument.type) {
+				case "LogicalExpression":
+					switch (expression.argument.operator) {
+						case "||":
+							return simplifyExpression(annotate(logicalExpression(
+								"&&",
+								annotate(unaryExpression("!", expression.argument.left), expression.loc),
+								annotate(unaryExpression("!", expression.argument.right), expression.loc),
+							), expression.loc));
+						case "&&":
+							return simplifyExpression(annotate(logicalExpression(
+								"||",
+								annotate(unaryExpression("!", expression.argument.left), expression.loc),
+								annotate(unaryExpression("!", expression.argument.right), expression.loc),
+							), expression.loc));
+					}
+					break;
+				case "BinaryExpression": {
+					let newOperator: "==" | "!=" | "===" | "!==" | undefined;
+					// Comparison operators can't be inverted because of NaN values
+					switch (expression.argument.operator) {
+						case "==":
+							newOperator = "!=";
+							break;
+						case "!=":
+							newOperator = "==";
+							break;
+						case "===":
+							newOperator = "!==";
+							break;
+						case "!==":
+							newOperator = "===";
+							break;
+					}
+					if (typeof newOperator !== "undefined") {
+						return simplifyExpression(annotate(binaryExpression(newOperator, expression.argument.left, expression.argument.right), expression.loc));
+					}
+					break;
+				}
+			}
 			return annotate(unaryExpression(expression.operator, simplifyExpression(expression.argument)), expression.loc);
 		}
 		case "MemberExpression": {
