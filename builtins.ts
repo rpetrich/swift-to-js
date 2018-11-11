@@ -466,7 +466,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
 					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 					"squareRoot()": (scope, arg, type) => {
-						return callable(() => call(member("Math", "sqrt", scope), [arg(0, "value")], ["Double"], scope), "() -> Self");
+						return callable(() => call(member("Math", "sqrt", scope), [arg(1, "value")], ["Double"], scope), "() -> Self");
 					},
 				},
 				requirements: [],
