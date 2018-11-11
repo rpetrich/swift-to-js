@@ -2212,6 +2212,9 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					},
 					BidirectionalCollection: {
 						functions: {
+							"index(before:)": wrapped((scope, arg) => {
+								return binary("-", arg(0, "index"), literal(1), scope);
+							}, "(String, String.Index) -> String.Index"),
 							"joined(separator:)": (scope, arg, type) => {
 								const collection = arg(0, "collection");
 								return callable((innerScope, innerArg) => {
