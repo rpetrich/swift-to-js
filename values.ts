@@ -1565,13 +1565,13 @@ export function literal(value: LiteralValue, location?: LocationSource): Express
 	}
 }
 
-export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, callback: (reusableValue: ExpressionValue | MappedNameValue) => Value): Value {
+export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, callback: (reusableValue: ExpressionValue | MappedNameValue, literalValue: LiteralValue | undefined) => Value): Value {
 	if (value.kind === "direct") {
-		return callback(value);
+		return callback(value, expressionLiteralValue(value.expression));
 	}
 	return transform(value, scope, (expression) => {
 		if (isPure(expression) || expression.type === "Identifier") {
-			return callback(expr(expression, value.location));
+			return callback(expr(expression, value.location), expressionLiteralValue(expression));
 		}
 		let head: Statement[];
 		let temp: ExpressionValue | MappedNameValue;
@@ -1599,7 +1599,7 @@ export function reuse(value: Value, scope: Scope, uniqueNamePrefix: string, call
 			head = [annotate(addVariable(scope, tempName, "Any", expr(expression), DeclarationFlags.Const), value.location)];
 			temp = lookup(tempName, scope);
 		}
-		const tail = callback(annotateValue(temp, value.location));
+		const tail = callback(annotateValue(temp, value.location), undefined);
 		if (head.length === 0) {
 			return tail;
 		}

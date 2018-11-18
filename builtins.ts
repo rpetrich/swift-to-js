@@ -273,7 +273,83 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
-			"nonzeroBitCount": wrapped((scope, arg) => literal(0), "(Self) -> Self"),
+			"nonzeroBitCount": wrapped((scope, arg) => reuse(arg(0, "value"), scope, "value", (value, literalValue) => {
+				if (typeof literalValue === "number") {
+					// Population count of a literal
+					let count: number = 0;
+					let current = literalValue;
+					while (current) {
+						count += current & 1;
+						current = current >>> 1;
+					}
+					return literal(count);
+				}
+				// Population count at runtime
+				const currentName = uniqueName(scope, "current");
+				const currentDeclaration = addVariable(scope, currentName, "Self", value);
+				const countName = uniqueName(scope, "count");
+				const countDeclaration = addVariable(scope, countName, "Self", literal(0));
+				return statements([
+					currentDeclaration,
+					countDeclaration,
+					whileStatement(
+						identifier(currentName),
+						blockStatement(concat(
+							ignore(set(
+								lookup(countName, scope),
+								binary("&", lookup(currentName, scope), literal(1), scope),
+								scope,
+								"+="
+							), scope),
+							ignore(set(
+								lookup(currentName, scope),
+								binary(">>>", lookup(currentName, scope), literal(1), scope),
+								scope
+							), scope),
+						))
+					),
+					returnStatement(identifier(countName)),
+				]);
+			}), "(Self) -> Self"),
+			"leadingZeroBitCount": wrapped((scope, arg) => reuse(arg(0, "value"), scope, "value", (value, literalValue) => {
+				if (typeof literalValue === "number") {
+					// Count leading zero bits of literal
+					let shift = bitWidth;
+					while (literalValue >> --shift === 0 && shift >= 0) {
+					}
+					return literal(bitWidth - 1 - shift);
+				}
+				// Count leading zero bits at runtime
+				const shiftName = uniqueName(scope, "shift");
+				const shiftDeclaration = addVariable(scope, shiftName, "Self", literal(bitWidth));
+				return statements([
+					shiftDeclaration,
+					whileStatement(
+						read(
+							logical("&&",
+								binary("===",
+									binary(">>",
+										value,
+										expr(updateExpression("--", identifier(shiftName), true)),
+										scope
+									),
+									literal(0),
+									scope
+								),
+								binary(">=",
+									lookup(shiftName, scope),
+									literal(0),
+									scope
+								),
+								scope
+							),
+							scope
+						),
+						blockStatement([]),
+					),
+					returnStatement(read(binary("-", literal(bitWidth - 1), lookup(shiftName, scope), scope), scope)),
+				]);
+			}), "(Self) -> Self"),
 		},
 		requirements: [],
 	};
