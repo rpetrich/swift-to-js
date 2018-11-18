@@ -151,6 +151,8 @@ const mangledSymbols: { [symbol: string]: string } = {
 	"-=": "$subtracted$",
 	"*=": "$multiplied$",
 	"/=": "$divided$",
+	"<<": "$leftshift$",
+	">>": "$rightshift$",
 };
 
 function mangleSymbol(symbol: string): string {
@@ -164,7 +166,7 @@ function mangleSymbol(symbol: string): string {
 }
 
 export function mangleName(name: string) {
-	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(\[.*\])|(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|\(\)|\W)/g, mangleSymbol));
+	return identifier(name.replace(/\b_:/g, mangleSymbol).replace(/(\[.*\])|(Swift\.\((file|swift-to-js)\).|[=!~<>+\-*/]=|<<|>>|\(\)|\W)/g, mangleSymbol));
 }
 
 export function mappedValueForName(name: string, scope: Scope): MappedNameValue | undefined {

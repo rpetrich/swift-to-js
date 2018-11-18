@@ -62,11 +62,11 @@ const $Int$Type = {
       return lhs < rhs;
     },
 
-    $less$$less$(Self, lhs, rhs) {
+    $leftshift$(Self, lhs, rhs) {
       return lhs << rhs;
     },
 
-    $less$$lessequal$(Self, lhs, rhs) {
+    $leftshift$$equal$(Self, lhs, rhs) {
       lhs[0] = lhs[0] << rhs;
     },
 
@@ -82,11 +82,11 @@ const $Int$Type = {
       return lhs >= rhs;
     },
 
-    $greater$$greater$(Self, lhs, rhs) {
+    $rightshift$(Self, lhs, rhs) {
       return lhs >> rhs;
     },
 
-    $greater$$greaterequal$(Self, lhs, rhs) {
+    $rightshift$$equal$(Self, lhs, rhs) {
       lhs[0] = lhs[0] >> rhs;
     },
 
