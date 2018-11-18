@@ -372,6 +372,33 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 					returnStatement(read(binary("-", literal(bitWidth - 1), lookup(shiftName, scope), scope), scope)),
 				]);
 			}), "(Self) -> Self"),
+			"multipliedFullWidth(by:)": wrapped((scope, arg) => {
+				const magnitudeBitWidth = min < 0 ? bitWidth - 1 : bitWidth;
+				if (bitWidth <= 16) {
+					return reuse(binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "multiplied", (multiplied) => {
+						return tuple([
+							binary(">>", multiplied, literal(magnitudeBitWidth), scope),
+							binary("&", multiplied, literal((1 << magnitudeBitWidth) - 1), scope),
+						]);
+					});
+				}
+				return reuse(arg(0, "lhs"), scope, "lhs", (lhs, lhsLiteral) => {
+					return reuse(arg(1, "rhs"), scope, "rhs", (rhs, rhsLiteral) => {
+						return tuple([
+							binary("|", binary("/", binary("*", lhs, rhs, scope), literal(Math.pow(2, 32)), scope), literal(0), scope),
+							typeof lhsLiteral === "number" && typeof rhsLiteral === "number" ?
+								literal(Math.imul(lhsLiteral, rhsLiteral)) :
+								call(member(expr(identifier("Math")), "imul", scope), [
+									lhs,
+									rhs,
+								], ["String", "Int"], scope)
+						]);
+					});
+				});
+			}, "(Self, Self) -> Self"),
+			"dividingFullWidth(_:)": wrapped((scope) => {
+				return call(functionValue("Swift.(swift-to-js).notImplemented()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] }), [], [], scope);
+			}, "((Self, Self)) -> (Self, Self)"),
 		},
 		requirements: [],
 	};
@@ -2799,6 +2826,7 @@ export const functions: FunctionMap = {
 	"Swift.(swift-to-js).forceUnwrapFailed()": throwHelper("TypeError", "Unexpectedly found nil while unwrapping an Optional value"),
 	"Swift.(swift-to-js).arrayBoundsFailed()": throwHelper("RangeError", "Array index out of range"),
 	"Swift.(swift-to-js).stringBoundsFailed()": throwHelper("RangeError", "String index out of range"),
+	"Swift.(swift-to-js).notImplemented()": throwHelper("Error", "Not implemented!"),
 	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {
 		return statements([
 			ifStatement(
