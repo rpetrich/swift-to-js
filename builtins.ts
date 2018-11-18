@@ -1993,6 +1993,23 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				Hashable: {
 					functions: {
 						hashValue,
+						"hash(into:)": wrapped((scope, arg) => {
+							return reuseArgs(arg, 0, scope, ["string", "hasher"], (str, hasher) => {
+								const hasherType = typeValue("Hasher");
+								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
+								const i = uniqueName(scope, "i");
+								return statements([
+									forStatement(
+										addVariable(scope, i, "Int", literal(0)),
+										read(binary("<", lookup(i, scope), member(str, "length", scope), scope), scope),
+										updateExpression("++", mangleName(i)),
+										blockStatement(
+											ignore(call(combine, [arg(1, "hasher"), call(member(str, "charCodeAt", scope), [lookup(i, scope)], ["Int"], scope)], ["Hasher", "Int"], scope), scope)
+										),
+									),
+								]);
+							});
+						}, "(Self, inout Hasher) -> Bool"),
 					},
 					requirements: [],
 				},
@@ -2345,6 +2362,90 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						functions: {
 							"==": arrayCompare("equal"),
 							"!=": arrayCompare("unequal"),
+						},
+						requirements: [],
+					},
+					Hashable: {
+						functions: {
+							hashValue: wrapped((scope, arg) => {
+								const hashValue = call(functionValue("hashValue", conformance(valueType, "Hashable", scope), "(Type) -> (Self) -> Int"), [valueType], [typeTypeValue], scope);
+								const hasherType = typeValue("Hasher");
+								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
+								return reuseArgs(arg, 0, scope, ["array"], (array) => {
+									const result = uniqueName(scope, "hash");
+									const i = uniqueName(scope, "i");
+									return statements([
+										addVariable(scope, result, "Int", literal(0)),
+										forStatement(
+											addVariable(scope, i, "Int", literal(0)),
+											read(binary("<",
+												lookup(i, scope),
+												member(array, "length", scope),
+												scope,
+											), scope),
+											updateExpression("++", read(lookup(i, scope), scope)),
+											blockStatement(
+												ignore(call(
+													combine, 
+													[
+														lookup(result, scope),
+														call(
+															hashValue, 
+															[member(array, lookup(i, scope), scope)],
+															["Self"],
+															scope
+														)
+													],
+													[
+														"Hasher",
+														"Int"
+													],
+													scope
+												), scope),
+											),
+										),
+										returnStatement(read(binary("|", lookup(result, scope), literal(0), scope), scope)),
+									]);
+								});
+							}, "(Self) -> Int"),
+							"hash(into:)": wrapped((scope, arg) => {
+								const hashValue = call(functionValue("hashValue", conformance(valueType, "Hashable", scope), "(Type) -> (Self) -> Int"), [valueType], [typeTypeValue], scope);
+								const hasherType = typeValue("Hasher");
+								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
+								return reuseArgs(arg, 0, scope, ["array", "hasher"], (array, hasher) => {
+									const i = uniqueName(scope, "i");
+									return statements([
+										forStatement(
+											addVariable(scope, i, "Int", literal(0)),
+											read(binary("<",
+												lookup(i, scope),
+												member(array, "length", scope),
+												scope,
+											), scope),
+											updateExpression("++", read(lookup(i, scope), scope)),
+											blockStatement(
+												ignore(call(
+													combine, 
+													[
+														hasher,
+														call(
+															hashValue, 
+															[member(array, lookup(i, scope), scope)],
+															["Self"],
+															scope
+														)
+													],
+													[
+														"inout Hasher",
+														"Int"
+													],
+													scope
+												), scope),
+											),
+										),
+									]);
+								});
+							}, "(Self, inout Hasher) -> Void"),
 						},
 						requirements: [],
 					},
