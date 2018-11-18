@@ -410,6 +410,18 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 			"max": wrapped(() => {
 				return literal(max);
 			}, "() -> Int"),
+			"init(_:)": (outerScope, outerArg, type) => {
+				const sourceTypeArg = outerArg(0, "T");
+				return callable((scope, arg) => {
+					const sourceType = conformance(sourceTypeArg, integerTypeName, scope);
+					return integerRangeCheck(
+						scope,
+						arg(0, "value"),
+						rangeForNumericType(sourceType, scope),
+						range,
+					);
+				}, "(Self) -> Self");
+			},
 		},
 		requirements: [],
 	};
