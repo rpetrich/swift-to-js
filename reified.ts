@@ -3,7 +3,7 @@ import { parseType } from "./parse";
 import { lookup, Scope } from "./scope";
 import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, conditional, expr, extractContentOfBox, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
+import { array, call, conditional, conformance, expr, extractContentOfBox, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
 
 import { isLiteral, Expression } from "@babel/types";
 
@@ -72,11 +72,11 @@ export function primitive(possibleRepresentations: PossibleRepresentation, defau
 	};
 }
 
-export function protocol(conformances: ProtocolConformanceMap = emptyConformances): ReifiedType {
+export function protocol(protocolName: string, conformances: ProtocolConformanceMap = emptyConformances): ReifiedType {
 	return {
 		functions(functionName) {
 			return (scope, arg, name, argTypes) => {
-				const typeArg = arg(0, "Self");
+				const typeArg = conformance(arg(0, "Self"), protocolName, scope);
 				const fn = typeFromValue(typeArg, scope).functions(functionName);
 				if (typeof fn !== "function") {
 					throw new TypeError(`Could not find ${functionName} on ${stringifyValue(typeArg)}`);

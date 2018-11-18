@@ -71,7 +71,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 	const widerBoth: NumericRange = checked ? { min: literal(min - 1), max: literal(max + 1) } : range;
 	const integerTypeName = min < 0 ? "SignedInteger" : "UnsignedInteger";
 	function initExactly(outerScope: Scope, outerArg: ArgGetter): Value {
-		const sourceTypeArg = outerArg(0, "T");
+		const sourceTypeArg = outerArg(1, "T");
 		return callable((scope: Scope, arg: ArgGetter) => {
 			const sourceIntConformance = conformance(sourceTypeArg, integerTypeName, scope);
 			const source = rangeForNumericType(sourceIntConformance, scope);
@@ -834,7 +834,7 @@ export interface BuiltinConfiguration {
 function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration): TypeMap {
 	const protocolTypes: TypeMap = Object.create(null);
 	function addProtocol(name: string, functionMap: { [functionName: string]: FunctionBuilder } = Object.create(null), ...requirements: string[]) {
-		const result = protocol({
+		const result = protocol(name, {
 			[name]: {
 				functions: functionMap,
 				requirements,
@@ -1082,6 +1082,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"reversed()": abstractMethod,
 		"underestimatedCount": abstractMethod,
 		"allSatisfy(_:)": abstractMethod,
+		"reduce": abstractMethod,
 	});
 	addProtocol("Collection", {
 		"subscript(_:)": abstractMethod,
@@ -2371,7 +2372,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					"joined(separator:)": (scope, arg, type) => {
 						return callable((innerScope, innerArg) => {
 							return call(
-								member(arg(1, "collection"), "join", scope),
+								member(arg(2, "collection"), "join", scope),
 								[innerArg(0, "separator")],
 								[dummyType],
 								scope,
@@ -2524,7 +2525,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 								return binary("-", arg(0, "index"), literal(1), scope);
 							}, "(String, String.Index) -> String.Index"),
 							"joined(separator:)": (scope, arg, type) => {
-								const collection = arg(0, "collection");
+								const collection = arg(1, "collection");
 								return callable((innerScope, innerArg) => {
 									return call(
 										member(collection, "join", scope),
@@ -2774,51 +2775,60 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				return arg(0, "self");
 			},
 		})),
-		ClosedRange: cachedBuilder(() => primitive(PossibleRepresentation.Array, tuple([literal(0), literal(0)]), {
-			map: (scope, arg, type) => {
-				const range = arg(1, "range");
-				return callable((innerScope, innerArg) => {
-					const mapped = uniqueName(innerScope, "mapped");
-					const callback = innerArg(0, "callback");
-					return statements(concat(
-						[addVariable(innerScope, mapped, dummyType, literal([]), DeclarationFlags.Const)],
-						closedRangeIterate(range, innerScope, (i) => blockStatement(
-							ignore(call(
-								member(lookup(mapped, scope), "push", scope),
-								[call(callback, [i], [dummyType], scope)],
-								[dummyType],
-								scope,
-							), scope),
-						)),
-						[returnStatement(read(lookup(mapped, scope), scope))],
-					));
-				}, "((Self) -> V) -> [V]");
-			},
-			reduce: (scope, arg, type) => {
-				const range = arg(1, "range");
-				return callable((innerScope, innerArg) => {
-					const result = uniqueName(innerScope, "result");
-					const initialResult = innerArg(0, "initialResult");
-					const next = innerArg(1, "next");
-					return statements(concat(
-						[addVariable(innerScope, result, dummyType, initialResult)],
-						closedRangeIterate(range, innerScope, (i) => blockStatement(
-							ignore(set(lookup(result, scope), call(next, [lookup(result, scope), i], [dummyType, dummyType], scope), scope), scope),
-						)),
-						[returnStatement(read(lookup(result, scope), scope))],
-					));
-				}, "(Result, (Result, Self.Element) -> Result) -> Result");
-			},
-		}, {
+		ClosedRange: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, tuple([literal(0), literal(0)]), {
+		}, applyDefaultConformances({
 			// TODO: Implement Equatable
 			Equatable: {
 				functions: {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
 				},
 				requirements: [],
 			},
-		})),
+			Sequence: {
+				functions: {
+					reduce: (scope, arg, type) => {
+						const range = arg(2, "range");
+						return callable((innerScope, innerArg) => {
+							const result = uniqueName(innerScope, "result");
+							const initialResult = innerArg(0, "initialResult");
+							const next = innerArg(1, "next");
+							return statements(concat(
+								[addVariable(innerScope, result, dummyType, initialResult)],
+								closedRangeIterate(range, innerScope, (i) => blockStatement(
+									ignore(set(lookup(result, scope), call(next, [lookup(result, scope), i], [dummyType, dummyType], scope), scope), scope),
+								)),
+								[returnStatement(read(lookup(result, scope), scope))],
+							));
+						}, "(Result, (Result, Self.Element) -> Result) -> Result");
+					},
+				},
+				requirements: [],
+			},
+			Collection: {
+				functions: {
+					map: (scope, arg, type) => {
+						const range = arg(2, "range");
+						return callable((innerScope, innerArg) => {
+							const mapped = uniqueName(innerScope, "mapped");
+							const callback = innerArg(0, "callback");
+							return statements(concat(
+								[addVariable(innerScope, mapped, dummyType, literal([]), DeclarationFlags.Const)],
+								closedRangeIterate(range, innerScope, (i) => blockStatement(
+									ignore(call(
+										member(lookup(mapped, scope), "push", scope),
+										[call(callback, [i], [dummyType], scope)],
+										[dummyType],
+										scope,
+									), scope),
+								)),
+								[returnStatement(read(lookup(mapped, scope), scope))],
+							));
+						}, "((Self) -> V) -> [V]");
+					},
+				},
+				requirements: [],
+			},
+		}, globalScope))),
 		Hasher: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, array([literal(0)], globalScope), {
 			"combine()": wrapped((scope, arg) => {
 				return reuseArgs(arg, 0, scope, ["hasher"], (hasher) => {

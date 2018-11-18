@@ -6,7 +6,7 @@ import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reify
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import generate from "@babel/generator";
 import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement } from "@babel/types";
@@ -113,23 +113,25 @@ function extractReference(term: Term, scope: Scope, type?: Function, suffix: str
 		} else if (!Object.hasOwnProperty.call(scope.functions, declaration.member)) {
 			return annotateValue(lookup(declaration.member, scope), term);
 		}
-		let substitutionValues: Value[];
+		const functionType = type || getFunctionType(term);
+		const substitutionValues: Value[] = [];
 		if (typeof declaration.substitutions !== "undefined") {
-			substitutionValues = declaration.substitutions.map((substitution) => {
-				let result: Value = typeValue(parseType(substitution.to));
-				if (typeof declaration.signature !== "undefined") {
-					for (const element of declaration.signature.slice().reverse()) {
-						if (typeof element !== "undefined" && element.name === substitution.from && typeof element.protocol !== "undefined") {
-							result = conformance(result, element.protocol, scope);
-						}
+			const functionArgs = functionType.arguments.types;
+			let argIndex: number = 0;
+			for (const substitution of declaration.substitutions) {
+				const arg: Type | undefined = functionArgs[argIndex];
+				if (typeof arg !== "undefined") {
+					if (arg.kind === "metatype") {
+						argIndex++;
+						continue;
+					} else {
+						argIndex = functionArgs.length;
 					}
 				}
-				return result;
-			});
-		} else {
-			substitutionValues = [];
+				substitutionValues.push(typeValue(parseType(substitution.to)));
+			}
 		}
-		return functionValue(`${declaration.member}${suffix}`, parentType, type || getFunctionType(term), substitutionValues, term);
+		return functionValue(`${declaration.member}${suffix}`, parentType, functionType, substitutionValues, term);
 	}
 	throw new TypeError(`Unable to parse and locate declaration: ${decl} (got ${JSON.stringify(declaration)})`);
 }
