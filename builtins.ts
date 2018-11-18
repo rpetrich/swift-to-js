@@ -237,6 +237,28 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 	}, "(Self) -> Self");
 	const fixedWidthIntegerConformance: ProtocolConformance = {
 		functions: {
+			"init(_:radix:)": wrapped((scope, arg) => {
+				const input = read(arg(0, "text"), scope);
+				const result = uniqueName(scope, "integer");
+				return statements([
+					addVariable(scope, result, "Int", call(expr(identifier("parseInt")), [
+						expr(input),
+						arg(1, "radix"),
+					], ["String", "Int"], scope), DeclarationFlags.Const),
+					returnStatement(
+						read(conditional(
+							binary("!==",
+								lookup(result, scope),
+								lookup(result, scope),
+								scope,
+							),
+							literal(null),
+							lookup(result, scope),
+							scope,
+						), scope),
+					),
+				]);
+			}, "(String, Int) -> Self?"),
 			"min": wrapped((scope, arg) => literal(min), "() -> Self"),
 			"max": wrapped((scope, arg) => literal(max), "() -> Self"),
 			"littleEndian": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"),
