@@ -794,8 +794,12 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"max": abstractMethod,
 		"min": abstractMethod,
 		"init(_:radix)": abstractMethod,
-		"init(bigEndian:)": abstractMethod,
-		"init(littleEndian:)": abstractMethod,
+		"init(bigEndian:)": adaptedMethod("byteSwapped", "FixedWidthInteger", "(Self) -> Self", (targetMethod, scope, type, arg) => {
+			return call(targetMethod, [arg(0, "value")], ["Self"], scope);
+		}, "(Self) -> Self"),
+		"init(littleEndian:)": wrapped((scope, arg) => {
+			return arg(0, "value");
+		}, "(Self) -> Self"),
 		"bigEndian": abstractMethod,
 		"byteSwapped": abstractMethod,
 		"leadingZeroBitCount": abstractMethod,
