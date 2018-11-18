@@ -2425,40 +2425,47 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 								const hashValue = call(functionValue("hashValue", conformance(valueType, "Hashable", scope), "(Type) -> (Self) -> Int"), [valueType], [typeTypeValue], scope);
 								const hasherType = typeValue("Hasher");
 								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
-								return reuseArgs(arg, 0, scope, ["array"], (array) => {
+								return reuseArgs(arg, 0, scope, ["array"], (arrayValue) => {
 									const result = uniqueName(scope, "hash");
 									const i = uniqueName(scope, "i");
 									return statements([
-										addVariable(scope, result, "Int", literal(0)),
+										addVariable(scope, result, "Int", array([literal(0)], scope)),
 										forStatement(
 											addVariable(scope, i, "Int", literal(0)),
 											read(binary("<",
 												lookup(i, scope),
-												member(array, "length", scope),
+												member(arrayValue, "length", scope),
 												scope,
 											), scope),
 											updateExpression("++", read(lookup(i, scope), scope)),
 											blockStatement(
-												ignore(call(
-													combine, 
-													[
-														lookup(result, scope),
+												ignore(
+													transform(
 														call(
 															hashValue, 
-															[member(array, lookup(i, scope), scope)],
+															[member(arrayValue, lookup(i, scope), scope)],
 															["Self"],
 															scope
+														),
+														scope,
+														(elementHashValue) => call(
+															combine, 
+															[
+																lookup(result, scope),
+																expr(elementHashValue)
+															],
+															[
+																"Hasher",
+																"Int"
+															],
+															scope
 														)
-													],
-													[
-														"Hasher",
-														"Int"
-													],
+													),
 													scope
-												), scope),
+												)
 											),
 										),
-										returnStatement(read(binary("|", lookup(result, scope), literal(0), scope), scope)),
+										returnStatement(read(binary("|", member(lookup(result, scope), 0, scope), literal(0), scope), scope)),
 									]);
 								});
 							}, "(Self) -> Int"),
@@ -2466,35 +2473,42 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 								const hashValue = call(functionValue("hashValue", conformance(valueType, "Hashable", scope), "(Type) -> (Self) -> Int"), [valueType], [typeTypeValue], scope);
 								const hasherType = typeValue("Hasher");
 								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
-								return reuseArgs(arg, 0, scope, ["array", "hasher"], (array, hasher) => {
+								return reuseArgs(arg, 0, scope, ["array", "hasher"], (arrayValue, hasher) => {
 									const i = uniqueName(scope, "i");
 									return statements([
 										forStatement(
 											addVariable(scope, i, "Int", literal(0)),
 											read(binary("<",
 												lookup(i, scope),
-												member(array, "length", scope),
+												member(arrayValue, "length", scope),
 												scope,
 											), scope),
 											updateExpression("++", read(lookup(i, scope), scope)),
 											blockStatement(
-												ignore(call(
-													combine, 
-													[
-														hasher,
+												ignore(
+													transform(
 														call(
 															hashValue, 
-															[member(array, lookup(i, scope), scope)],
+															[member(arrayValue, lookup(i, scope), scope)],
 															["Self"],
 															scope
+														),
+														scope,
+														(elementHashValue) => call(
+															combine, 
+															[
+																hasher,
+																expr(elementHashValue)
+															],
+															[
+																"inout Hasher",
+																"Int"
+															],
+															scope
 														)
-													],
-													[
-														"inout Hasher",
-														"Int"
-													],
+													),
 													scope
-												), scope),
+												)
 											),
 										),
 									]);
