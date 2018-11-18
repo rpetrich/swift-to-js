@@ -1325,9 +1325,9 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 	}, "Collection");
 	addProtocol("Strideable", {
 		"+": abstractMethod,
-		"+=": abstractMethod,
+		"+=": updateMethod("+", "Strideable"),
 		"-": abstractMethod,
-		"-=": abstractMethod,
+		"-=": updateMethod("-", "Strideable"),
 		"==": abstractMethod,
 		"...": abstractMethod,
 		"distance(to:)": adaptedMethod("-", "Strideable", "(Self, Self) -> Self", (subtractMethod, scope, type, arg) => {
