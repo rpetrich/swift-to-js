@@ -301,8 +301,8 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 					let count: number = 0;
 					let current = literalValue;
 					while (current) {
-						count += current & 1;
-						current = current >>> 1;
+						count++;
+						current &= current - 1;
 					}
 					return literal(count);
 				}
@@ -319,14 +319,15 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 						blockStatement(concat(
 							ignore(set(
 								lookup(countName, scope),
-								binary("&", lookup(currentName, scope), literal(1), scope),
+								literal(1),
 								scope,
 								"+="
 							), scope),
 							ignore(set(
 								lookup(currentName, scope),
-								binary(">>>", lookup(currentName, scope), literal(1), scope),
-								scope
+								binary("-", lookup(currentName, scope), literal(1), scope),
+								scope,
+								"&="
 							), scope),
 						))
 					),
