@@ -410,28 +410,19 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 			"max": wrapped(() => {
 				return literal(max);
 			}, "() -> Int"),
-			"init(_:)": (outerScope, outerArg, type) => {
-				const sourceTypeArg = outerArg(0, "T");
-				return callable((scope, arg) => {
-					const sourceType = conformance(sourceTypeArg, integerTypeName, scope);
-					return integerRangeCheck(
-						scope,
-						arg(0, "value"),
-						rangeForNumericType(sourceType, scope),
-						range,
-					);
-				}, "(Self) -> Self");
-			},
-			"init(exactly:)": initExactly,
-			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
 		},
 		requirements: [],
 	};
+	if (min < 0) {
+		// Only SignedInteger has these methods
+		integerConformance.functions["&+"] = wrapped(binaryBuiltin("+", 0, wrap), "(Self, Self) -> Self");
+		integerConformance.functions["&-"] = wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self");
+	}
 	const reifiedType: ReifiedType = {
 		functions: lookupForMap({
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
 			"init(clamping:)": (scope: Scope, arg: ArgGetter, name: string) => {
-				const source = rangeForNumericType(conformance(arg(0, "T"), integerTypeName, scope), scope);
+				const source = rangeForNumericType(conformance(arg(1, "T"), integerTypeName, scope), scope);
 				return callable((innerScope, innerArg) => {
 					const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
 					const requiresLessThanCheck = possiblyLessThan(source, range, scope);
@@ -918,7 +909,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 	addProtocol("FixedWidthInteger", {
 		"max": abstractMethod,
 		"min": abstractMethod,
-		"init(_:radix)": abstractMethod,
+		"init(_:radix:)": abstractMethod,
 		"init(bigEndian:)": adaptedMethod("byteSwapped", "FixedWidthInteger", "(Self) -> Self", (targetMethod, scope, type, arg) => {
 			return call(targetMethod, [arg(0, "value")], ["Self"], scope);
 		}, "(Self) -> Self"),
