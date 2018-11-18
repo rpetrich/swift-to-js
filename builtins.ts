@@ -219,7 +219,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 	};
 	const byteSwapped = wrapped((scope, arg) => {
 		if (bitWidth <= 8) {
-			return arg(0, "value")
+			return arg(0, "value");
 		}
 		return reuseArgs(arg, 0, scope, ["value"], (self) => {
 			let result: Value = literal(0);
@@ -228,8 +228,8 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 				const shifted = binary(shiftAmount > 0 ? ">>" : "<<", self, literal(shiftAmount > 0 ? shiftAmount : -shiftAmount), scope);
 				result = binary("|",
 					result,
-					shiftAmount != -24 ? binary("&", shifted, literal(0xFF << i), scope) : shifted,
-					scope
+					shiftAmount !== -24 ? binary("&", shifted, literal(0xFF << i), scope) : shifted,
+					scope,
 				);
 			}
 			return result;
@@ -270,29 +270,29 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 			"&-": wrapped(binaryBuiltin("-", 0, wrap), "(Self, Self) -> Self"),
 			"&<<": wrapped(binaryBuiltin("<<", 0, wrap), "(Self, Self) -> Self"),
 			"&>>": wrapped(binaryBuiltin(">>", 0, wrap), "(Self, Self) -> Self"),
-			"addingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
-				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
-					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+			"addingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "full", (full) => {
+				return reuse(wrap(full, scope), scope, "truncated", (truncated) => {
+					return tuple([truncated, binary("!==", truncated, full, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
-			"subtractingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("-", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
-				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
-					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+			"subtractingReportingOverflow(_:)": wrapped((scope, arg) => reuse(binary("-", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "full", (full) => {
+				return reuse(wrap(full, scope), scope, "truncated", (truncated) => {
+					return tuple([truncated, binary("!==", truncated, full, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
-			"multipliedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
-				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
-					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+			"multipliedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "full", (full) => {
+				return reuse(wrap(full, scope), scope, "truncated", (truncated) => {
+					return tuple([truncated, binary("!==", truncated, full, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
-			"dividedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("|", binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), literal(0), scope), scope, "unwrapped", (unwrapped) => {
-				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
-					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+			"dividedReportingOverflow(by:)": wrapped((scope, arg) => reuse(binary("|", binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), literal(0), scope), scope, "full", (full) => {
+				return reuse(wrap(full, scope), scope, "truncated", (truncated) => {
+					return tuple([truncated, binary("!==", truncated, full, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
-			"remainderReportingOverflow(dividingBy:)": wrapped((scope, arg) => reuse(binary("%", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "unwrapped", (unwrapped) => {
-				return reuse(wrap(unwrapped, scope), scope, "wrapped", (wrapped) => {
-					return tuple([wrapped, binary("!==", wrapped, unwrapped, scope)]);
+			"remainderReportingOverflow(dividingBy:)": wrapped((scope, arg) => reuse(binary("%", arg(0, "lhs"), arg(1, "rhs"), scope), scope, "full", (full) => {
+				return reuse(wrap(full, scope), scope, "truncated", (truncated) => {
+					return tuple([truncated, binary("!==", truncated, full, scope)]);
 				});
 			}), "(Self, Self) -> (Self, Bool)"),
 			"nonzeroBitCount": wrapped((scope, arg) => reuse(arg(0, "value"), scope, "value", (value, literalValue) => {
@@ -321,15 +321,15 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 								lookup(countName, scope),
 								literal(1),
 								scope,
-								"+="
+								"+=",
 							), scope),
 							ignore(set(
 								lookup(currentName, scope),
 								binary("-", lookup(currentName, scope), literal(1), scope),
 								scope,
-								"&="
+								"&=",
 							), scope),
-						))
+						)),
 					),
 					returnStatement(identifier(countName)),
 				]);
@@ -338,6 +338,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 				if (typeof literalValue === "number") {
 					// Count leading zero bits of literal
 					let shift = bitWidth;
+					// tslint:disable-next-line:no-empty
 					while (literalValue >> --shift === 0 && shift >= 0) {
 					}
 					return literal(bitWidth - 1 - shift);
@@ -354,19 +355,19 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 									binary(">>",
 										value,
 										expr(updateExpression("--", identifier(shiftName), true)),
-										scope
+										scope,
 									),
 									literal(0),
-									scope
+									scope,
 								),
 								binary(">=",
 									lookup(shiftName, scope),
 									literal(0),
-									scope
+									scope,
 								),
-								scope
+								scope,
 							),
-							scope
+							scope,
 						),
 						blockStatement([]),
 					),
@@ -392,7 +393,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 								call(member(expr(identifier("Math")), "imul", scope), [
 									lhs,
 									rhs,
-								], ["String", "Int"], scope)
+								], ["String", "Int"], scope),
 						]);
 					});
 				});
@@ -2046,7 +2047,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 										read(binary("<", lookup(i, scope), member(str, "length", scope), scope), scope),
 										updateExpression("++", mangleName(i)),
 										blockStatement(
-											ignore(call(combine, [arg(1, "hasher"), call(member(str, "charCodeAt", scope), [lookup(i, scope)], ["Int"], scope)], ["Hasher", "Int"], scope), scope)
+											ignore(call(combine, [arg(1, "hasher"), call(member(str, "charCodeAt", scope), [lookup(i, scope)], ["Int"], scope)], ["Hasher", "Int"], scope), scope),
 										),
 									),
 								]);
@@ -2423,7 +2424,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					},
 					Hashable: {
 						functions: {
-							hashValue: wrapped((scope, arg) => {
+							"hashValue": wrapped((scope, arg) => {
 								const hashValue = call(functionValue("hashValue", conformance(valueType, "Hashable", scope), "(Type) -> (Self) -> Int"), [valueType], [typeTypeValue], scope);
 								const hasherType = typeValue("Hasher");
 								const combine = call(functionValue("combine()", hasherType, "(Type) -> (inout Hasher, Int) -> Void"), [hasherType], [typeTypeValue], scope);
@@ -2444,27 +2445,27 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 												ignore(
 													transform(
 														call(
-															hashValue, 
+															hashValue,
 															[member(arrayValue, lookup(i, scope), scope)],
 															["Self"],
-															scope
+															scope,
 														),
 														scope,
 														(elementHashValue) => call(
-															combine, 
+															combine,
 															[
 																lookup(result, scope),
-																expr(elementHashValue)
+																expr(elementHashValue),
 															],
 															[
 																"Hasher",
-																"Int"
+																"Int",
 															],
-															scope
-														)
+															scope,
+														),
 													),
-													scope
-												)
+													scope,
+												),
 											),
 										),
 										returnStatement(read(binary("|", member(lookup(result, scope), 0, scope), literal(0), scope), scope)),
@@ -2490,27 +2491,27 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 												ignore(
 													transform(
 														call(
-															hashValue, 
+															hashValue,
 															[member(arrayValue, lookup(i, scope), scope)],
 															["Self"],
-															scope
+															scope,
 														),
 														scope,
 														(elementHashValue) => call(
-															combine, 
+															combine,
 															[
 																hasher,
-																expr(elementHashValue)
+																expr(elementHashValue),
 															],
 															[
 																"inout Hasher",
-																"Int"
+																"Int",
 															],
-															scope
-														)
+															scope,
+														),
 													),
-													scope
-												)
+													scope,
+												),
 											),
 										),
 									]);
