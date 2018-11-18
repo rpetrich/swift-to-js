@@ -217,13 +217,31 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 		},
 		requirements: [],
 	};
+	const byteSwapped = wrapped((scope, arg) => {
+		if (bitWidth <= 8) {
+			return arg(0, "value")
+		}
+		return reuseArgs(arg, 0, scope, ["value"], (self) => {
+			let result: Value = literal(0);
+			for (let i = 0; i < bitWidth; i += 8) {
+				const shiftAmount = bitWidth - 8 - i * 2;
+				const shifted = binary(shiftAmount > 0 ? ">>" : "<<", self, literal(shiftAmount > 0 ? shiftAmount : -shiftAmount), scope);
+				result = binary("|",
+					result,
+					shiftAmount != -24 ? binary("&", shifted, literal(0xFF << i), scope) : shifted,
+					scope
+				);
+			}
+			return result;
+		});
+	}, "(Self) -> Self");
 	const fixedWidthIntegerConformance: ProtocolConformance = {
 		functions: {
 			"min": wrapped((scope, arg) => literal(min), "() -> Self"),
 			"max": wrapped((scope, arg) => literal(max), "() -> Self"),
 			"littleEndian": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"),
-			"bigEndian": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"), // TODO
-			"byteSwapped": wrapped((scope, arg) => arg(0, "self"), "(Self) -> Self"), // TODO
+			"bigEndian": byteSwapped,
+			"byteSwapped": byteSwapped,
 			"bitWidth": wrapped((scope, arg) => literal(bitWidth), "() -> Self"),
 			"&+": wrapped(binaryBuiltin("+", 0, wrap), "(Self, Self) -> Self"),
 			"&*": wrapped(binaryBuiltin("*", 0, wrap), "(Self, Self) -> Self"),
