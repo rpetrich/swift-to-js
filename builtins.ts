@@ -422,6 +422,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 					);
 				}, "(Self) -> Self");
 			},
+			"init(exactly:)": initExactly,
 		},
 		requirements: [],
 	};
@@ -852,11 +853,32 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"<=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
 		">=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self, Self) -> Bool"),
 	}, "Equatable");
+	addProtocol("ExpressibleByNilLiteral", {
+		"init(nilLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByBooleanLiteral", {
+		"init(booleanLiteral:)": abstractMethod,
+	});
 	addProtocol("ExpressibleByIntegerLiteral", {
 		"init(integerLiteral:)": abstractMethod,
 	});
 	addProtocol("ExpressibleByFloatLiteral", {
 		"init(floatLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByUnicodeScalarLiteral", {
+		"init(unicodeScalarLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByExtendedGraphemeClusterLiteral", {
+		"init(extendedGraphemeClusterLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByStringLiteral", {
+		"init(stringLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByArrayLiteral", {
+		"init(arrayLiteral:)": abstractMethod,
+	});
+	addProtocol("ExpressibleByDictionaryLiteral", {
+		"init(dictionaryLiteral:)": abstractMethod,
 	});
 	addProtocol("Numeric", {
 		"init(exactly:)": abstractMethod,
@@ -1403,6 +1425,12 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 			functions: {
 				"==": wrapped(binaryBuiltin("===", 0), "(Bool, Bool) -> Bool"),
 				"!=": wrapped(binaryBuiltin("!==", 0), "(Bool, Bool) -> Bool"),
+			},
+			requirements: [],
+		},
+		ExpressibleByBooleanLiteral: {
+			functions: {
+				"init(booleanLiteral:)": wrapped(returnOnlyArgument, "(Bool) -> Bool"),
 			},
 			requirements: [],
 		},
@@ -2106,6 +2134,12 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					"flatMap": returnTodo,
 				} as FunctionMap),
 				conformances: applyDefaultConformances({
+					ExpressibleByNilLiteral: {
+						functions: {
+							"init(nilLiteral:)": (scope) => emptyOptional(wrappedType, scope),
+						},
+						requirements: [],
+					},
 					Equatable: {
 						functions: {
 							"==": compareEqual,
@@ -2370,6 +2404,14 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					},
 				} as FunctionMap),
 				conformances: applyDefaultConformances({
+					ExpressibleByArrayLiteral: {
+						functions: {
+							"init(arrayLiteral:)": wrapped((scope, arg) => {
+								return arg(0, "array");
+							}, "(Self.ArrayLiteralElement...) -> Self"),
+						},
+						requirements: [],
+					},
 					Equatable: {
 						functions: {
 							"==": arrayCompare("equal"),
