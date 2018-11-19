@@ -2139,7 +2139,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				conformances: applyDefaultConformances({
 					ExpressibleByNilLiteral: {
 						functions: {
-							"init(nilLiteral:)": (scope) => emptyOptional(wrappedType, scope),
+							"init(nilLiteral:)": wrapped((scope) => emptyOptional(wrappedType, scope), "() -> Self"),
 						},
 						requirements: [],
 					},
