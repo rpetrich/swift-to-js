@@ -163,7 +163,45 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 		functions: {
 			"init(exactly:)": initExactly,
 			"init(truncatingIfNeeded:)": abstractMethod,
-			"init(clamping:)": abstractMethod,
+			"init(clamping:)": (scope: Scope, arg: ArgGetter, name: string) => {
+				const source = rangeForNumericType(conformance(arg(0, "T"), integerTypeName, scope), scope);
+				return callable((innerScope, innerArg) => {
+					const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
+					const requiresLessThanCheck = possiblyLessThan(source, range, scope);
+					if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
+						return innerArg(0, "value");
+					}
+					return reuse(innerArg(0, "value"), innerScope, "value", (value) => {
+						if (requiresGreaterThanCheck && requiresLessThanCheck) {
+							return conditional(
+								binary(">", value, range.max, innerScope),
+								range.max,
+								conditional(
+									binary("<", value, range.min, innerScope),
+									range.min,
+									value,
+									innerScope,
+								),
+								innerScope,
+							);
+						} else if (requiresGreaterThanCheck) {
+							return conditional(
+								binary(">", value, range.max, innerScope),
+								range.max,
+								value,
+								innerScope,
+							);
+						} else {
+							return conditional(
+								binary("<", value, range.min, innerScope),
+								range.min,
+								value,
+								innerScope,
+							);
+						}
+					});
+				}, "(Self) -> Self");
+			},
 			"/": wrapped((scope, arg) => binary("|", binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), literal(0), scope), "(Self, Self) -> Self"),
 			"%": wrapped((scope, arg) => binary("%", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
 			"+": wrapped((scope, arg) => integerRangeCheck(scope, binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), widerHigh, range), "(Self, Self) -> Self"),
@@ -436,45 +474,6 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 	const reifiedType: ReifiedType = {
 		functions: lookupForMap({
 			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
-			"init(clamping:)": (scope: Scope, arg: ArgGetter, name: string) => {
-				const source = rangeForNumericType(conformance(arg(1, "T"), integerTypeName, scope), scope);
-				return callable((innerScope, innerArg) => {
-					const requiresGreaterThanCheck = possiblyGreaterThan(source, range, scope);
-					const requiresLessThanCheck = possiblyLessThan(source, range, scope);
-					if (!requiresGreaterThanCheck && !requiresLessThanCheck) {
-						return innerArg(0, "value");
-					}
-					return reuse(innerArg(0, "value"), innerScope, "value", (value) => {
-						if (requiresGreaterThanCheck && requiresLessThanCheck) {
-							return conditional(
-								binary(">", value, range.max, innerScope),
-								range.max,
-								conditional(
-									binary("<", value, range.min, innerScope),
-									range.min,
-									value,
-									innerScope,
-								),
-								innerScope,
-							);
-						} else if (requiresGreaterThanCheck) {
-							return conditional(
-								binary(">", value, range.max, innerScope),
-								range.max,
-								value,
-								innerScope,
-							);
-						} else {
-							return conditional(
-								binary("<", value, range.min, innerScope),
-								range.min,
-								value,
-								innerScope,
-							);
-						}
-					});
-				}, "(Self) -> Self");
-			},
 			"+": wrapped((scope, arg) => integerRangeCheck(scope, binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), widerHigh, range), "(Self, Self) -> Self"),
 			"-": wrapped((scope, arg, type, argTypes) => {
 				if (argTypes.length === 1) {
@@ -946,6 +945,9 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"max": abstractMethod,
 		"min": abstractMethod,
 		"init(_:radix:)": abstractMethod,
+		"init(clamping:)": adaptedMethod("init(clamping:)", "BinaryInteger", "(T) -> T", (targetMethod, scope, type, arg) => {
+			return call(targetMethod, [arg(0, "value")], ["T"], scope);
+		}, "(T) -> Self"),
 		"init(bigEndian:)": adaptedMethod("byteSwapped", "FixedWidthInteger", "(Self) -> Self", (targetMethod, scope, type, arg) => {
 			return call(targetMethod, [arg(0, "value")], ["Self"], scope);
 		}, "(Self) -> Self"),
