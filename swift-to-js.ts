@@ -1941,16 +1941,15 @@ export async function compile(path: string): Promise<CompilerOutput> {
 		});
 	});
 	const file = readFile(path);
-	let ast = await stderr;
+	let ast = (await stderr).trim() + (await stdout).trim();
 	if (ast[0] !== "(") {
-		const lines = (await stderr).split(/\r\n|\r|\n/g);
+		const lines = ast.split(/\r\n|\r|\n/g);
 		const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
 		console.error(lines.slice(0, bracketIndex).join("\n"));
 		ast = lines.slice(bracketIndex).join("\n");
 	}
 	// console.log(ast);
 	const rootTerm = parseAST(ast);
-	await stdout;
 	const convertedProgram = compileTermToProgram(rootTerm);
 	const result = generate(convertedProgram, {
 		filename: path,
