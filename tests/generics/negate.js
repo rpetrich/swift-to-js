@@ -8,48 +8,24 @@ const $Int$Type = {
       return lhs % rhs;
     },
 
-    $mod$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] % rhs;
-    },
-
     $and$(Self, lhs, rhs) {
       return lhs & rhs;
-    },
-
-    $and$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] & rhs;
     },
 
     $multiply$(Self, lhs, rhs) {
       return lhs * rhs;
     },
 
-    $multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs;
-    },
-
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
-    },
-
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
     },
 
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
     },
 
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
-    },
-
     $divide$(Self, lhs, rhs) {
       return lhs / rhs | 0;
-    },
-
-    $divided$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] / rhs | 0;
     },
 
     $less$(Self, lhs, rhs) {
@@ -58,10 +34,6 @@ const $Int$Type = {
 
     $leftshift$(Self, lhs, rhs) {
       return lhs << rhs;
-    },
-
-    $leftshift$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] << rhs;
     },
 
     $lessequal$(Self, lhs, rhs) {
@@ -80,16 +52,8 @@ const $Int$Type = {
       return lhs >> rhs;
     },
 
-    $rightshift$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] >> rhs;
-    },
-
     $xor$(Self, lhs, rhs) {
       return lhs ^ rhs;
-    },
-
-    $xor$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] ^ rhs;
     },
 
     init$clamping$(Self, T, value) {
@@ -118,10 +82,6 @@ const $Int$Type = {
 
     $or$(Self, lhs, rhs) {
       return lhs | rhs;
-    },
-
-    $or$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] | rhs;
     },
 
     $tilde$(Self, self) {
@@ -160,10 +120,6 @@ const $Int$Type = {
 
     $equals$(Self, lhs, rhs) {
       return lhs === rhs;
-    },
-
-    $match$(Self, lhs, rhs) {
-      return lhs === rhs;
     }
 
   },
@@ -172,24 +128,12 @@ const $Int$Type = {
       return lhs * rhs | 0;
     },
 
-    $and$$multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs | 0;
-    },
-
     $and$$plus$(Self, lhs, rhs) {
       return lhs + rhs | 0;
     },
 
-    $and$$added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs | 0;
-    },
-
     $and$$minus$(Self, lhs, rhs) {
       return lhs - rhs | 0;
-    },
-
-    $and$$subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs | 0;
     },
 
     $and$$leftshift$(Self, lhs, rhs) {
@@ -330,24 +274,12 @@ const $Int$Type = {
       return lhs * rhs;
     },
 
-    $multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs;
-    },
-
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
     },
 
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
-    },
-
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
-    },
-
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
     },
 
     init$exactly$(Self, T, value) {
@@ -396,16 +328,8 @@ const $Int$Type = {
       return lhs + rhs;
     },
 
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
-    },
-
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
-    },
-
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
     },
 
     $$$(Self, start, end) {
@@ -447,10 +371,6 @@ const $Double$Type = {
 
     $equals$(Self, lhs, rhs) {
       return lhs === rhs;
-    },
-
-    $match$(Self, lhs, rhs) {
-      return lhs === rhs;
     }
 
   },
@@ -460,13 +380,9 @@ const $Double$Type = {
     },
 
     $multiply$: abstract$Double$$multiply$,
-    $multiplied$: abstract$Double$$multiplied$,
     $plus$: abstract$Double$$plus$,
-    $added$: abstract$Double$$added$,
     $minus$: abstract$Double$$minus$,
-    $subtracted$: abstract$Double$$subtracted$,
     $divide$: abstract$Double$$divide$,
-    $divided$: abstract$Double$$divided$,
 
     $equals$(Self, lhs, rhs) {
       return lhs === rhs;

@@ -2,7 +2,7 @@ export function equal$lhs$rhs$(T, lhs, rhs) {
   return T.Equatable.$equals$(T, lhs, rhs);
 }
 export function match$lhs$rhs$(T, lhs, rhs) {
-  return T.Equatable.$match$(T, lhs, rhs);
+  return T.Equatable.$equals$(T, lhs, rhs);
 }
 const $Int$Type = {
   $rep: 4,
@@ -11,48 +11,24 @@ const $Int$Type = {
       return lhs % rhs;
     },
 
-    $mod$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] % rhs;
-    },
-
     $and$(Self, lhs, rhs) {
       return lhs & rhs;
-    },
-
-    $and$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] & rhs;
     },
 
     $multiply$(Self, lhs, rhs) {
       return lhs * rhs;
     },
 
-    $multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs;
-    },
-
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
-    },
-
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
     },
 
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
     },
 
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
-    },
-
     $divide$(Self, lhs, rhs) {
       return lhs / rhs | 0;
-    },
-
-    $divided$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] / rhs | 0;
     },
 
     $less$(Self, lhs, rhs) {
@@ -61,10 +37,6 @@ const $Int$Type = {
 
     $leftshift$(Self, lhs, rhs) {
       return lhs << rhs;
-    },
-
-    $leftshift$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] << rhs;
     },
 
     $lessequal$(Self, lhs, rhs) {
@@ -83,16 +55,8 @@ const $Int$Type = {
       return lhs >> rhs;
     },
 
-    $rightshift$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] >> rhs;
-    },
-
     $xor$(Self, lhs, rhs) {
       return lhs ^ rhs;
-    },
-
-    $xor$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] ^ rhs;
     },
 
     init$clamping$(Self, T, value) {
@@ -121,10 +85,6 @@ const $Int$Type = {
 
     $or$(Self, lhs, rhs) {
       return lhs | rhs;
-    },
-
-    $or$$equal$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] | rhs;
     },
 
     $tilde$(Self, self) {
@@ -163,10 +123,6 @@ const $Int$Type = {
 
     $equals$(Self, lhs, rhs) {
       return lhs === rhs;
-    },
-
-    $match$(Self, lhs, rhs) {
-      return lhs === rhs;
     }
 
   },
@@ -175,24 +131,12 @@ const $Int$Type = {
       return lhs * rhs | 0;
     },
 
-    $and$$multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs | 0;
-    },
-
     $and$$plus$(Self, lhs, rhs) {
       return lhs + rhs | 0;
     },
 
-    $and$$added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs | 0;
-    },
-
     $and$$minus$(Self, lhs, rhs) {
       return lhs - rhs | 0;
-    },
-
-    $and$$subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs | 0;
     },
 
     $and$$leftshift$(Self, lhs, rhs) {
@@ -333,24 +277,12 @@ const $Int$Type = {
       return lhs * rhs;
     },
 
-    $multiplied$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] * rhs;
-    },
-
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
     },
 
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
-    },
-
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
-    },
-
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
     },
 
     init$exactly$(Self, T, value) {
@@ -399,16 +331,8 @@ const $Int$Type = {
       return lhs + rhs;
     },
 
-    $added$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] + rhs;
-    },
-
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
-    },
-
-    $subtracted$(Self, lhs, rhs) {
-      lhs[0] = lhs[0] - rhs;
     },
 
     $$$(Self, start, end) {
@@ -449,10 +373,6 @@ const $Double$question$$Type = {
     },
 
     $equals$(Self, lhs, rhs) {
-      return lhs === rhs;
-    },
-
-    $match$(Self, lhs, rhs) {
       return lhs === rhs;
     }
 
@@ -504,25 +424,6 @@ const $$String$$Type = {
     },
 
     $equals$(Self, lhs, rhs) {
-      let equal;
-
-      if (lhs.length !== rhs.length) {
-        equal = false;
-      } else {
-        let i = 0;
-
-        while (i < lhs.length) {
-          if (lhs[i] !== rhs[i]) break;
-          i++;
-        }
-
-        equal = i === lhs.length;
-      }
-
-      return equal;
-    },
-
-    $match$(Self, lhs, rhs) {
       let equal;
 
       if (lhs.length !== rhs.length) {
@@ -591,10 +492,6 @@ const $Point$Type = {
 
     $equals$(Self, lhs, rhs) {
       return lhs.x === rhs.x && lhs.y === rhs.y;
-    },
-
-    $match$(Self, lhs, rhs) {
-      return lhs.x === rhs.x && lhs.y === rhs.y;
     }
 
   }
@@ -647,27 +544,6 @@ const $$Point$$Type = {
     },
 
     $equals$(Self, lhs, rhs) {
-      let equal;
-
-      if (lhs.length !== rhs.length) {
-        equal = false;
-      } else {
-        let i = 0;
-
-        while (i < lhs.length) {
-          const lhs = lhs[i];
-          const rhs = rhs[i];
-          if (lhs.x !== rhs.x || lhs.y !== rhs.y) break;
-          i++;
-        }
-
-        equal = i === lhs.length;
-      }
-
-      return equal;
-    },
-
-    $match$(Self, lhs, rhs) {
       let equal;
 
       if (lhs.length !== rhs.length) {
@@ -756,25 +632,6 @@ function $$_$$Type(T) {
       },
 
       $equals$(Self, lhs, rhs) {
-        let equal;
-
-        if (lhs.length !== rhs.length) {
-          equal = false;
-        } else {
-          let i = 0;
-
-          while (i < lhs.length) {
-            if (T.Equatable.$notequals$(T, lhs[i], rhs[i])) break;
-            i++;
-          }
-
-          equal = i === lhs.length;
-        }
-
-        return equal;
-      },
-
-      $match$(Self, lhs, rhs) {
         let equal;
 
         if (lhs.length !== rhs.length) {

@@ -4,7 +4,7 @@ import { arrayExpression, assignmentExpression, binaryExpression, blockStatement
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { reifyType, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { reifyType, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
@@ -309,7 +309,9 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 					conformances: {},
 					functions(functionName) {
 						return (innerScope, arg, name, types) => {
-							const result = member(member(value.type, conformanceName, innerScope), mangleName(functionName).name, innerScope);
+							const targetConformance = reifyType(conformanceName, scope).conformances[conformanceName];
+							const alternate = alternateMethodForKeyInConformance(name, targetConformance);
+							const result = member(member(value.type, conformanceName, innerScope), mangleName(alternate !== undefined ? alternate.name : functionName).name, innerScope);
 							if (types.length <= 0) {
 								return result;
 							}
@@ -318,12 +320,21 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 								args.push(arg(i));
 							}
 							return callable((innerMostScope, innerArg, argTypes) => {
-								return call(
+								const calledMethod = call(
 									result,
 									concat(args, argTypes.map((_, i) => innerArg(i))),
 									concat(types, argTypes),
 									innerMostScope,
 								);
+								if (alternate !== undefined && alternate.reassign) {
+									// TODO: Store into runtime box
+									return set(
+										innerArg(0),
+										calledMethod,
+										scope,
+									);
+								}
+								return calledMethod;
 								// TODO: Find proper return and argument types
 							}, "() -> Void");
 						};
@@ -656,6 +667,24 @@ function containsNoReturnStatements(node: Node): boolean {
 	return state.result;
 }
 
+function alternateMethodForKeyInConformance(key: string, target: ProtocolConformance): { name: string, reassign: boolean } | undefined {
+	// Maps += to + and ~= to == when protocol conforms to both
+	const match = key.match(/^(&?[%^&|*+/\-^]|<<|>>)=$/);
+	let name: string;
+	if (match !== null) {
+		name = match[1];
+	} else if (key === "~=") {
+		name = "==";
+	} else {
+		return undefined;
+	}
+	return Object.hasOwnProperty.call(target.functions, name) ? { name, reassign: key !== "~=" } : undefined;
+}
+
+function validWitnessTableKeysForConformance(target: ProtocolConformance) {
+	return Object.keys(target.functions).filter((key) => alternateMethodForKeyInConformance(key, target) === undefined).sort();
+}
+
 const possibleRepresentationKey = "$rep";
 
 function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
@@ -706,7 +735,7 @@ function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
 			];
 			for (const conformanceName of desiredConformances) {
 				const current = reified.conformances[conformanceName];
-				properties.push(objectProperty(mangleName(conformanceName), objectExpression(Object.keys(current.functions).sort().map((key) => {
+				properties.push(objectProperty(mangleName(conformanceName), objectExpression(validWitnessTableKeysForConformance(current).map((key) => {
 					const scopeName = `${stringified}.${key}`;
 					let requiredArgumentCount: number = 0;
 					const result = current.functions[key](innerScope, (index, argumentName) => {
