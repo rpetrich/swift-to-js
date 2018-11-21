@@ -6,7 +6,7 @@ export const parseDeclaration = parse(declaration, "declaration");
 export const parseType = parse(type, "type", "Bool", "Int", "String", "Hashable", "Hasher", "Equatable", "Comparable", "BinaryInteger", "Numeric", "SignedInteger", "SignedNumeric", "FixedWidthInteger", "Strideable", "CustomStringConvertible", "LosslessStringConvertible", "Collection", "BidirectionalCollection", "Type", "T", "T.Type", "() -> Void", "(Self, Self) -> Self", "(inout Self, Self) -> Void", "(Self, Self) -> Bool", "(Self, inout Hasher) -> Bool", "(Self) -> Int");
 export const parseAST = parse(ast, "ast");
 
-export function parseFunctionType(text: string): Function {
+export function parseFunctionType(text: string | Function): Function {
 	const result = parseType(text);
 	if (result.kind !== "function") {
 		throw new TypeError(`Expected a function, got a ${result.kind} from ${text}`);
@@ -14,9 +14,12 @@ export function parseFunctionType(text: string): Function {
 	return result;
 }
 
-function parse<T>(parser: (text: string) => T, description: string, ...precomputedKeys: string[]): (text: string) => T {
+function parse<T>(parser: (text: string) => T, description: string, ...precomputedKeys: string[]): (text: string | T) => T {
 	if (precomputedKeys.length === 0) {
-		return (text: string): T => {
+		return (text: string | T): T => {
+			if (typeof text !== "string") {
+				return text;
+			}
 			try {
 				return parser(text);
 			} catch (e) {
@@ -29,9 +32,12 @@ function parse<T>(parser: (text: string) => T, description: string, ...precomput
 	for (const key of precomputedKeys) {
 		precomputed[key] = parser(key);
 	}
-	return (text: string): T => {
+	return (text: string | T): T => {
+		if (typeof text !== "string") {
+			return text;
+		}
 		if (Object.hasOwnProperty.call(precomputed, text)) {
-			return precomputed[text];
+			return precomputed[text as string];
 		}
 		try {
 			return parser(text);

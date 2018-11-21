@@ -14,7 +14,7 @@ export function statementsInValue(value: Value, scope: Scope): Statement[] {
 }
 
 export function functionize(scope: Scope, name: string, expression: (scope: Scope, arg: ArgGetter) => Value, functionType: Function | string, types?: TypeMap, location?: Location | Term): [Identifier[], Statement[]] {
-	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
+	const type = parseFunctionType(functionType);
 	const args: Identifier[] = [];
 	return [args, statementsInValue(newScope(name, scope, (inner) => {
 		let usedCount = 0;
@@ -58,13 +58,13 @@ export function insertFunction(name: string, scope: Scope, builder: FunctionBuil
 	}
 	scope.functionUsage[name] = true;
 	const globalScope = rootScope(scope);
-	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
+	const type = parseFunctionType(functionType);
 	const [args, statements] = functionize(globalScope, name, (inner, arg) => builder(inner, arg, name, type.arguments.types.map((typeArgument) => typeValue(typeArgument))), type, undefined, location);
 	return addDeclaration(globalScope, name, (id) => functionDeclaration(id, args, blockStatement(statements)), shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 }
 
 export function noinline(builder: FunctionBuilder, functionType: string | Function): FunctionBuilder {
-	const type = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
+	const type = parseFunctionType(functionType);
 	return (scope: Scope, arg: ArgGetter, name: string) => {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
@@ -73,11 +73,11 @@ export function noinline(builder: FunctionBuilder, functionType: string | Functi
 	};
 }
 
-export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, argTypes: Value[]) => Value, functionType: string | Function): FunctionBuilder {
+export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, argTypes: Value[], outerArg: ArgGetter) => Value, functionType: string | Function): FunctionBuilder {
 	return (scope: Scope, arg: ArgGetter, name: string): Value => {
 		const typeArgument = arg(0, "Self");
-		const innerType = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
-		return callable((innerScope, innerArg, argTypes) => newScope("wrapped", innerScope, (innerInner) => fn(innerInner, innerArg, typeArgument, argTypes), {
+		const innerType = parseFunctionType(functionType);
+		return callable((innerScope, innerArg, argTypes) => newScope("wrapped", innerScope, (innerInner) => fn(innerInner, innerArg, typeArgument, argTypes, arg), {
 			Self(innerInner) {
 				return typeFromValue(typeArgument, innerInner);
 			},
@@ -89,7 +89,7 @@ export function wrappedSelf(fn: (scope: Scope, arg: ArgGetter, typeArgument: Val
 	return (scope: Scope, arg: ArgGetter, name: string): Value => {
 		const typeArgument = arg(0, "Self");
 		const selfArgument = arg(1, "self");
-		const innerType = typeof functionType === "string" ? parseFunctionType(functionType) : functionType;
+		const innerType = parseFunctionType(functionType);
 		return callable((innerScope, innerArg, argTypes) => newScope("wrapped", innerScope, (innerInner) => {
 			return reuse(selfArgument, innerInner, "self", (self) => {
 				return fn(innerInner, innerArg, typeArgument, self, argTypes);
