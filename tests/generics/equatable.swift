@@ -2,6 +2,10 @@ public func equal<T: Equatable>(lhs: T, rhs: T) -> Bool {
 	return lhs == rhs
 }
 
+public func match<T: Equatable>(lhs: T, rhs: T) -> Bool {
+	return lhs ~= rhs
+}
+
 public func integerEqual(lhs: Int, rhs: Int) -> Bool {
 	return equal(lhs: lhs, rhs: rhs)
 }

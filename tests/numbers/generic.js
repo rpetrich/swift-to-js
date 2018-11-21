@@ -98,13 +98,17 @@ const $Int$Type = {
       lhs[0] = lhs[0] ^ rhs;
     },
 
-    init$clamping$: abstract$Int$init$clamping$,
-
-    init$exactly$(Self, value) {
-      return value;
+    init$clamping$(Self, T, value) {
+      return value > T.SignedInteger.max(T) ? T.SignedInteger.max(T) : value < T.SignedInteger.min(T) ? T.SignedInteger.min(T) : value;
     },
 
-    init$truncatingIfNeeded$: abstract$Int$init$truncatingIfNeeded$,
+    init$exactly$(Self, T, value) {
+      return value > T.SignedInteger.min(T) || value < T.SignedInteger.max(T) ? null : value;
+    },
+
+    init$truncatingIfNeeded$(Self, source) {
+      return source | 0;
+    },
 
     isSigned(Self) {
       return true;
@@ -174,49 +178,141 @@ const $Int$Type = {
       return lhs * rhs | 0;
     },
 
-    $and$$multiplied$: abstract$Int$$and$$multiplied$,
+    $and$$multiplied$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] * rhs | 0;
+    },
 
     $and$$plus$(Self, lhs, rhs) {
       return lhs + rhs | 0;
     },
 
-    $and$$added$: abstract$Int$$and$$added$,
+    $and$$added$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] + rhs | 0;
+    },
 
     $and$$minus$(Self, lhs, rhs) {
       return lhs - rhs | 0;
     },
 
-    $and$$subtracted$: abstract$Int$$and$$subtracted$,
+    $and$$subtracted$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] - rhs | 0;
+    },
 
-    $and$$less$$less$(Self, lhs, rhs) {
+    $and$$leftshift$(Self, lhs, rhs) {
       return lhs << rhs;
     },
 
-    $and$$less$$lessequal$: abstract$Int$$and$$less$$lessequal$,
+    $and$$leftshift$$equal$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] << rhs;
+    },
 
-    $and$$greater$$greater$(Self, lhs, rhs) {
+    $and$$rightshift$(Self, lhs, rhs) {
       return lhs >> rhs;
     },
 
-    $and$$greater$$greaterequal$: abstract$Int$$and$$greater$$greaterequal$,
-    addingReportingOverflow: abstract$Int$addingReportingOverflow,
-    bigEndian: abstract$Int$bigEndian,
-    bitWidth: abstract$Int$bitWidth,
-    byteSwapped: abstract$Int$byteSwapped,
-    dividedReportingOverflow$by$: abstract$Int$dividedReportingOverflow$by$,
-    dividingFullWidth: abstract$Int$dividingFullWidth,
-    init$radix: abstract$Int$init$radix,
-    init$bigEndian$: abstract$Int$init$bigEndian$,
-    init$littleEndian$: abstract$Int$init$littleEndian$,
-    leadingZeroBitCount: abstract$Int$leadingZeroBitCount,
-    littleEndian: abstract$Int$littleEndian,
-    max: abstract$Int$max,
-    min: abstract$Int$min,
-    multipliedFullWidth$by$: abstract$Int$multipliedFullWidth$by$,
-    multipliedReportingOverflow$by$: abstract$Int$multipliedReportingOverflow$by$,
-    nonzeroBitCount: abstract$Int$nonzeroBitCount,
-    remainderReportingOverflow$dividingBy$: abstract$Int$remainderReportingOverflow$dividingBy$,
-    subtractingReportingOverflow: abstract$Int$subtractingReportingOverflow
+    $and$$rightshift$$equal$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] >> rhs;
+    },
+
+    addingReportingOverflow(Self, lhs, rhs) {
+      const full = lhs + rhs;
+      const truncated = full | 0;
+      return [truncated, truncated !== full];
+    },
+
+    bigEndian(Self, value) {
+      return value >> 24 & 255 | value >> 8 & 65280 | value << 8 & 16711680 | value << 24;
+    },
+
+    bitWidth(Self) {
+      return 32;
+    },
+
+    byteSwapped(Self, value) {
+      return value >> 24 & 255 | value >> 8 & 65280 | value << 8 & 16711680 | value << 24;
+    },
+
+    dividedReportingOverflow$by$(Self, lhs, rhs) {
+      const full = lhs / rhs | 0;
+      const truncated = full | 0;
+      return [truncated, truncated !== full];
+    },
+
+    dividingFullWidth(Self) {
+      return $$notImplemented();
+    },
+
+    init$radix$(Self, text, radix) {
+      const integer = parseInt(text, radix);
+      return integer !== integer ? null : integer;
+    },
+
+    init$bigEndian$(Self, value) {
+      return value >> 24 & 255 | value >> 8 & 65280 | value << 8 & 16711680 | value << 24;
+    },
+
+    init$clamping$(Self, $1) {
+      return $1 > $1.SignedInteger.max($1) ? $1.SignedInteger.max($1) : $1 < $1.SignedInteger.min($1) ? $1.SignedInteger.min($1) : $1;
+    },
+
+    init$littleEndian$(Self, value) {
+      return value;
+    },
+
+    leadingZeroBitCount(Self, value) {
+      let shift = 32;
+
+      while (value >> --shift === 0 && shift >= 0) {}
+
+      return 31 - shift;
+    },
+
+    littleEndian(Self, self) {
+      return self;
+    },
+
+    max(Self) {
+      return 2147483647;
+    },
+
+    min(Self) {
+      return -2147483648;
+    },
+
+    multipliedFullWidth$by$(Self, lhs, rhs) {
+      return [lhs * rhs / 4294967296 | 0, Math.imul(lhs, rhs)];
+    },
+
+    multipliedReportingOverflow$by$(Self, lhs, rhs) {
+      const full = lhs * rhs;
+      const truncated = full | 0;
+      return [truncated, truncated !== full];
+    },
+
+    nonzeroBitCount(Self, value) {
+      let current = value;
+      let count = 0;
+
+      while (current) {
+        count++;
+        current &= current - 1;
+      }
+
+      return count;
+    },
+
+    remainderReportingOverflow$dividingBy$(Self, lhs, rhs) {
+      const full = lhs % rhs;
+      const truncated = full | 0;
+      return [truncated, truncated !== full];
+    },
+
+    subtractingReportingOverflow(Self, lhs, rhs) {
+      const full = lhs - rhs;
+      const truncated = full | 0;
+      return [truncated, truncated !== full];
+    }
+
   },
   Hashable: {
     hash$into$(Self, self, hasher) {
@@ -260,24 +356,26 @@ const $Int$Type = {
       lhs[0] = lhs[0] - rhs;
     },
 
-    init$exactly$(Self, value) {
-      return value;
+    init$exactly$(Self, T, value) {
+      return value > T.SignedInteger.min(T) || value < T.SignedInteger.max(T) ? null : value;
     }
 
   },
   SignedInteger: {
-    $and$$plus$: abstract$Int$$and$$plus$,
+    $and$$plus$(Self, lhs, rhs) {
+      return lhs + rhs | 0;
+    },
 
     $and$$minus$(Self, lhs, rhs) {
       return lhs - rhs | 0;
     },
 
-    init(Self, value) {
-      return value;
+    init(Self, T, value) {
+      return value < T.SignedInteger.min(T) || value > T.SignedInteger.max(T) ? $$numericRangeFailed() : value;
     },
 
-    init$exactly$(Self, value) {
-      return value;
+    init$exactly$(Self, T, value) {
+      return value > T.SignedInteger.min(T) || value < T.SignedInteger.max(T) ? null : value;
     },
 
     max(Self) {
@@ -304,19 +402,25 @@ const $Int$Type = {
       return lhs + rhs;
     },
 
-    $added$: abstract$Int$$added$,
+    $added$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] + rhs;
+    },
 
     $minus$(Self, lhs, rhs) {
       return lhs - rhs;
     },
 
-    $subtracted$: abstract$Int$$subtracted$,
+    $subtracted$(Self, lhs, rhs) {
+      lhs[0] = lhs[0] - rhs;
+    },
 
     $$$(Self, start, end) {
       return [start, end];
     },
 
-    $equals$: abstract$Int$$equals$,
+    $equals$(Self, lhs, rhs) {
+      return lhs === rhs;
+    },
 
     advanced$by$(Self, lhs, rhs) {
       return lhs + rhs;
@@ -328,6 +432,15 @@ const $Int$Type = {
 
   }
 };
+
+function $$notImplemented() {
+  throw new Error("Not implemented!");
+}
+
+function $$numericRangeFailed() {
+  throw new RangeError("Not enough bits to represent the given value");
+}
+
 export function addInts$lhs$rhs$(lhs, rhs) {
   return add$lhs$rhs$($Int$Type, lhs, rhs);
 }
