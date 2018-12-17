@@ -6,10 +6,10 @@ import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reify
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeTypeValue, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import generate from "@babel/generator";
-import { blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement, TemplateElement } from "@babel/types";
+import { assignmentExpression, blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, forStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement } from "@babel/types";
 import { spawn } from "child_process";
 import { readdirSync, readFile as readFile_ } from "fs";
 import { argv } from "process";
@@ -275,7 +275,7 @@ export function convertToPattern(value: Value): PatternOutput {
 		};
 	}
 	let prefix: Statement[] = emptyStatements;
-	if (value.kind === "statements") {
+	if (value.kind === "statements" && value.statements.length > 0) {
 		const returningIndex = value.statements.findIndex((statement) => statement.type === "ReturnStatement");
 		if (returningIndex === value.statements.length - 1) {
 			prefix = value.statements.slice(0, value.statements.length - 1);
@@ -311,14 +311,14 @@ function unwrapCopies(value: Value): Value {
 	return value;
 }
 
-function translatePattern(term: Term, value: Value, scope: Scope, declarationFlags: DeclarationFlags = DeclarationFlags.None): PatternOutput {
+function translatePattern(term: Term, value: Value, scope: Scope, functions: FunctionMap, declarationFlags: DeclarationFlags = DeclarationFlags.None): PatternOutput {
 	switch (term.name) {
 		case "pattern_optional_some": {
 			expectLength(term.children, 1);
 			const type = getTypeValue(term.children[0]);
 			let next: PatternOutput | undefined;
 			const test = annotateValue(reuse(annotateValue(value, term), scope, "optional", (reusableValue) => {
-				next = translatePattern(term.children[0], unwrapOptional(reusableValue, type, scope), scope, declarationFlags);
+				next = translatePattern(term.children[0], unwrapOptional(reusableValue, type, scope), scope, functions, declarationFlags);
 				return annotateValue(optionalIsSome(reusableValue, type, scope), term);
 			}), term);
 			return {
@@ -329,27 +329,27 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 		}
 		case "case_label_item": {
 			expectLength(term.children, 1);
-			return translatePattern(term.children[0], annotateValue(value, term), scope, declarationFlags);
+			return translatePattern(term.children[0], annotateValue(value, term), scope, functions, declarationFlags);
 		}
 		case "pattern_let": {
 			expectLength(term.children, 1);
 			// TODO: Figure out how to avoid the copy here since it should only be necessary on var patterns
-			return translatePattern(term.children[0], copy(annotateValue(value, term), getTypeValue(term)), scope, declarationFlags | DeclarationFlags.Const);
+			return translatePattern(term.children[0], copy(annotateValue(value, term), getTypeValue(term)), scope, functions, declarationFlags | DeclarationFlags.Const);
 		}
 		case "pattern_var": {
 			expectLength(term.children, 1);
-			return translatePattern(term.children[0], copy(annotateValue(value, term), getTypeValue(term)), scope, declarationFlags & ~DeclarationFlags.Const);
+			return translatePattern(term.children[0], copy(annotateValue(value, term), getTypeValue(term)), scope, functions, declarationFlags & ~DeclarationFlags.Const);
 		}
 		case "pattern_expr": {
 			expectLength(term.children, 1);
 			return {
 				prefix: emptyStatements,
-				test: annotateValue(translateTermToValue(term.children[0], scope), term),
+				test: annotateValue(translateTermToValue(term.children[0], scope, functions), term),
 			};
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
-			return translatePattern(term.children[0], annotateValue(value, term), scope, declarationFlags);
+			return translatePattern(term.children[0], annotateValue(value, term), scope, functions, declarationFlags);
 		}
 		case "pattern_named": {
 			expectLength(term.children, 0);
@@ -392,7 +392,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 					if (innerValue.values.length <= i) {
 						expectLength(innerValue.values, i);
 					}
-					const childPattern = translatePattern(child, annotateValue(innerValue.values[i], term), scope, declarationFlags);
+					const childPattern = translatePattern(child, annotateValue(innerValue.values[i], term), scope, functions, declarationFlags);
 					return mergePatterns(existing, childPattern, scope, term);
 				}, emptyPattern);
 			}
@@ -400,7 +400,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 			let next: PatternOutput | undefined;
 			const test = reuse(annotateValue(value, term), scope, "tuple", (reusableValue) => {
 				return term.children.reduce((partialTest, child, i) => {
-					const childPattern = translatePattern(child, member(reusableValue, i, scope, term), scope, declarationFlags);
+					const childPattern = translatePattern(child, member(reusableValue, i, scope, term), scope, functions, declarationFlags);
 					const merged = mergePatterns({ prefix, test: partialTest, next }, childPattern, scope, term);
 					prefix = merged.prefix;
 					next = merged.next;
@@ -444,7 +444,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 						patternValue = member(reusableValue, 1, scope, term);
 						// Special-case pattern matching using pattern_paren on a enum case with one field
 						if (child.name === "pattern_paren") {
-							next = translatePattern(child.children[0], patternValue, scope, declarationFlags);
+							next = translatePattern(child.children[0], patternValue, scope, functions, declarationFlags);
 							return result;
 						}
 						break;
@@ -453,7 +453,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 						if (child.name === "pattern_tuple") {
 							next = child.children.reduce((existing, tupleChild, i) => {
 								// Offset by 1 to account for the discriminant
-								const childPattern = translatePattern(tupleChild, member(reusableValue, i + 1, scope, term), scope, declarationFlags);
+								const childPattern = translatePattern(tupleChild, member(reusableValue, i + 1, scope, term), scope, functions, declarationFlags);
 								return mergePatterns(existing, childPattern, scope, term);
 							}, emptyPattern);
 							return result;
@@ -463,7 +463,7 @@ function translatePattern(term: Term, value: Value, scope: Scope, declarationFla
 						break;
 				}
 				// General case pattern matching on an enum
-				next = translatePattern(child, patternValue, scope, declarationFlags);
+				next = translatePattern(child, patternValue, scope, functions, declarationFlags);
 				return result;
 			});
 			return {
@@ -528,7 +528,7 @@ function flattenPattern(pattern: PatternOutput, scope: Scope, term: Term): { pre
 	};
 }
 
-function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value: Value, optionalType: Value) => Value): Value {
+function translateTermToValue(term: Term, scope: Scope, functions: FunctionMap, bindingContext?: (value: Value, optionalType: Value) => Value): Value {
 	switch (term.name) {
 		case "member_ref_expr": {
 			expectLength(term.children, 1);
@@ -545,7 +545,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				throw new TypeError(`Could not find ${memberName} in ${stringifyValue(type)}`);
 			}
 			const setter = reified.functions(memberName + "_set");
-			const childValue = translateTermToValue(term.children[0], scope, bindingContext);
+			const childValue = translateTermToValue(term.children[0], scope, functions, bindingContext);
 			return subscript(
 				getter(scope, () => type, decl, [type]),
 				typeof setter !== "undefined" ? setter(scope, () => type, decl, [type]) : callable(() => {
@@ -563,10 +563,10 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				throw new TypeError(`Expected a tuple, got a ${stringifyType(tupleType)}`);
 			}
 			if (tupleType.types.length === 1) {
-				return annotateValue(translateTermToValue(child, scope, bindingContext), term);
+				return annotateValue(translateTermToValue(child, scope, functions, bindingContext), term);
 			}
 			return member(
-				translateTermToValue(child, scope, bindingContext),
+				translateTermToValue(child, scope, functions, bindingContext),
 				literal(+getProperty(term, "field", isString)),
 				scope,
 				term,
@@ -574,7 +574,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "pattern_typed": {
 			expectLength(term.children, 2);
-			return translateTermToValue(term.children[0], scope, bindingContext);
+			return translateTermToValue(term.children[0], scope, functions, bindingContext);
 		}
 		case "declref_expr": {
 			expectLength(term.children, 0);
@@ -628,7 +628,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 						term,
 					);
 				}, setterType, term),
-				term.children.map((child) => translateTermToValue(child, scope, bindingContext)),
+				term.children.map((child) => translateTermToValue(child, scope, functions, bindingContext)),
 				term.children.map(getTypeValue),
 				term,
 			);
@@ -641,9 +641,9 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			expectLength(term.children, 2);
 			const target = term.children[0];
 			const args = term.children[1];
-			const targetValue = translateTermToValue(target, scope, bindingContext);
+			const targetValue = translateTermToValue(target, scope, functions, bindingContext);
 			const type = getType(args);
-			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, bindingContext) : tuple([translateTermToValue(args, scope, bindingContext)]);
+			const argsValue = type.kind === "tuple" && type.types.length !== 1 ? translateTermToValue(args, scope, functions, bindingContext) : tuple([translateTermToValue(args, scope, functions, bindingContext)]);
 			const argTypes = type.kind === "tuple" ? type.types.map((innerType) => typeValue(innerType)) : [typeValue(type)];
 			if (argsValue.kind === "tuple") {
 				return call(targetValue, argsValue.values, argTypes, scope, term);
@@ -670,9 +670,9 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "tuple_expr": {
 			if (term.children.length === 1) {
-				return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+				return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 			}
-			return tuple(term.children.map((child) => translateTermToValue(child, scope, bindingContext)), term);
+			return tuple(term.children.map((child) => translateTermToValue(child, scope, functions, bindingContext)), term);
 		}
 		case "type_expr": {
 			expectLength(term.children, 0);
@@ -727,29 +727,15 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			throw new TypeError(`Playground literals are not supported`);
 		}
 		case "interpolated_string_literal_expr": {
-			const elements: TemplateElement[] = [];
-			const expressions: Expression[] = [];
-			for (const child of term.children) {
-				switch (child.name) {
-					case "string_literal_expr":
-						const value = getProperty(child, "value", isString);
-						elements.push(templateElement({ cooked: value, raw: value }));
-						break;
-					case "semantic_expr":
-						break;
-					default:
-						expressions.push(read(translateTermToValue(child, scope, bindingContext), scope));
-						break;
-				}
-			}
-			return expr(templateLiteral(elements, expressions), term);
+			expectLength(term.children, 2);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "array_expr": {
 			const type = getType(term);
 			if (type.kind !== "array") {
 				throw new TypeError(`Expected an array type, got a ${stringifyType(type)}`);
 			}
-			return array(term.children.filter(noSemanticExpressions).map((child) => translateTermToValue(child, scope, bindingContext)), scope, term);
+			return array(term.children.filter(noSemanticExpressions).map((child) => translateTermToValue(child, scope, functions, bindingContext)), scope, term);
 		}
 		case "dictionary_expr": {
 			const type = getType(term);
@@ -765,44 +751,44 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 				expectLength(child.children, 2);
 				const keyChild = child.children[0];
 				const valueChild = child.children[1];
-				properties.push(objectProperty(read(translateTermToValue(keyChild, scope, bindingContext), scope), read(translateTermToValue(valueChild, scope, bindingContext), scope), true));
+				properties.push(objectProperty(read(translateTermToValue(keyChild, scope, functions, bindingContext), scope), read(translateTermToValue(valueChild, scope, functions, bindingContext), scope), true));
 			}
 			return expr(objectExpression(properties), term);
 		}
 		case "paren_expr": {
 			expectLength(term.children, 1);
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "if_expr": {
 			expectLength(term.children, 3);
 			return conditional(
-				translateTermToValue(term.children[0], scope, bindingContext),
-				translateTermToValue(term.children[1], scope, bindingContext),
-				translateTermToValue(term.children[2], scope, bindingContext),
+				translateTermToValue(term.children[0], scope, functions, bindingContext),
+				translateTermToValue(term.children[1], scope, functions, bindingContext),
+				translateTermToValue(term.children[2], scope, functions, bindingContext),
 				scope,
 				term,
 			);
 		}
 		case "inject_into_optional": {
 			expectLength(term.children, 1);
-			return annotateValue(wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), getTypeValue(term.children[0]), scope), term);
+			return annotateValue(wrapInOptional(translateTermToValue(term.children[0], scope, functions, bindingContext), getTypeValue(term.children[0]), scope), term);
 		}
 		case "function_conversion_expr": {
 			expectLength(term.children, 1);
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "load_expr": {
 			expectLength(term.children, 1);
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "assign_expr": {
 			expectLength(term.children, 2);
 			const destTerm = term.children[0];
 			if (destTerm.name === "discard_assignment_expr") {
-				return translateTermToValue(term.children[1], scope, bindingContext);
+				return translateTermToValue(term.children[1], scope, functions, bindingContext);
 			}
-			const dest = translateTermToValue(destTerm, scope, bindingContext);
-			const source = translateTermToValue(term.children[1], scope, bindingContext);
+			const dest = translateTermToValue(destTerm, scope, functions, bindingContext);
+			const source = translateTermToValue(term.children[1], scope, functions, bindingContext);
 			return set(dest, source, scope, "=", term);
 		}
 		case "discard_assignment_expr": {
@@ -810,12 +796,12 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		}
 		case "inout_expr": {
 			expectLength(term.children, 1);
-			// return boxed(translateTermToValue(term.children[0], scope, bindingContext));
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			// return boxed(translateTermToValue(term.children[0], scope, functions, bindingContext));
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "pattern": {
 			expectLength(term.children, 2);
-			return annotateValue(valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope, bindingContext), scope), scope, term), term);
+			return annotateValue(valueForPattern(translatePattern(term.children[0], translateTermToValue(term.children[1], scope, functions, bindingContext), scope, functions), scope, term), term);
 		}
 		case "closure_expr":
 		case "autoclosure_expr": {
@@ -824,7 +810,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			return callable((innerScope, arg) => {
 				return newScope("anonymous", innerScope, (childScope) => {
 					const paramStatements = applyParameterMappings(0, termsWithName(parameterList.children, "parameter"), arg, innerScope, childScope);
-					const result = translateTermToValue(term.children[1], childScope, bindingContext);
+					const result = translateTermToValue(term.children[1], childScope, functions, bindingContext);
 					if (paramStatements.length) {
 						return statements(concat(paramStatements, [returnStatement(read(result, childScope))]));
 					} else {
@@ -840,7 +826,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			if (type.kind !== "tuple") {
 				throw new Error(`Expected a tuple type, got ${stringifyType(type)}`);
 			}
-			const values = term.children.map((childTerm) => translateTermToValue(childTerm, scope, bindingContext));
+			const values = term.children.map((childTerm) => translateTermToValue(childTerm, scope, functions, bindingContext));
 			const valueTypes = type.types;
 			return tuple(elements.map((source, i) => {
 				const numeric = parseInt(source, 10);
@@ -884,7 +870,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "force_value_expr": {
 			expectLength(term.children, 1);
 			const type = getTypeValue(term);
-			const value = translateTermToValue(term.children[0], scope, bindingContext);
+			const value = translateTermToValue(term.children[0], scope, functions, bindingContext);
 			return reuse(value, scope, "optional", (reusableValue) => {
 				// TODO: Optimize some cases where we can prove it to be a .some
 				return conditional(
@@ -904,20 +890,23 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "force_try_expr": {
 			expectLength(term.children, 1);
 			// Errors are dispatched via the native throw mechanism in JavaScript, so try expressions don't need special handling
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "optional_try_expr": {
 			expectLength(term.children, 1);
-			const type = getTypeValue(term.children[0]);
+			const type = getType(term.children[0]);
+			if (type.kind !== "optional") {
+				throw new Error(`Expected an optional type for optional_type_expr, got a ${type.kind}: ${stringifyType(type)}`);
+			}
 			const temp = uniqueName(scope, ":try");
 			return statements([
-				addVariable(scope, temp, type),
+				addVariable(scope, temp, typeValue(type)),
 				tryStatement(
 					blockStatement(
-						ignore(set(lookup(temp, scope), wrapInOptional(translateTermToValue(term.children[0], scope, bindingContext), type, scope), scope), scope),
+						ignore(set(lookup(temp, scope), translateTermToValue(term.children[0], scope, functions, bindingContext), scope), scope),
 					),
 					catchClause(identifier("e"), blockStatement(
-						ignore(set(lookup(temp, scope), emptyOptional(type, scope), scope), scope),
+						ignore(set(lookup(temp, scope), emptyOptional(typeValue(type.type), scope), scope), scope),
 					)),
 				),
 				annotate(returnStatement(read(lookup(temp, scope), scope)), term),
@@ -926,12 +915,12 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 		case "erasure_expr": {
 			// TODO: Support runtime Any type that can be inspected
 			expectLength(term.children, 1, 2);
-			return annotateValue(translateTermToValue(term.children[term.children.length - 1], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[term.children.length - 1], scope, functions, bindingContext), term);
 		}
 		case "normal_conformance": {
 			// TODO: Wrap with runtime type information
 			expectLength(term.children, 1);
-			return annotateValue(translateTermToValue(term.children[0], scope, bindingContext), term);
+			return annotateValue(translateTermToValue(term.children[0], scope, functions, bindingContext), term);
 		}
 		case "optional_evaluation_expr": {
 			expectLength(term.children, 1);
@@ -941,7 +930,7 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			const innerType = typeValue(type.type);
 			let testValue: Value | undefined;
-			const someCase = translateTermToValue(term.children[0], scope, (value: Value) => {
+			const someCase = translateTermToValue(term.children[0], scope, functions, (value: Value) => {
 				if (typeof testValue !== "undefined") {
 					throw new Error(`Expected only one binding expression to bind to this optional evaluation`);
 				}
@@ -967,19 +956,60 @@ function translateTermToValue(term: Term, scope: Scope, bindingContext?: (value:
 			}
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
-			const wrappedValue = translateTermToValue(expressionTerm, scope);
+			const wrappedValue = translateTermToValue(expressionTerm, scope, functions);
 			return annotateValue(bindingContext(wrappedValue, getTypeValue(expressionTerm)), term);
 		}
 		case "make_temporarily_escapable_expr": {
 			expectLength(term.children, 3);
-			const closure = translateTermToValue(term.children[1], scope, bindingContext);
+			const closure = translateTermToValue(term.children[1], scope, functions, bindingContext);
 			const callTerm = term.children[2];
 			if (callTerm.name !== "call_expr") {
 				throw new TypeError(`Expected a call expression as the child of a temporarily escapable expression, got a ${callTerm.name}`);
 			}
-			const receiver = translateTermToValue(callTerm.children[0], scope, bindingContext);
+			const receiver = translateTermToValue(callTerm.children[0], scope, functions, bindingContext);
 			return call(receiver, [closure], ["Any"], scope, term);
 		}
+		case "tap_expr":
+			expectLength(term.children, 2);
+			const varValue = getProperty(term, "var", isString);
+			const declaration = parseDeclaration(varValue);
+			if (typeof declaration.local !== "string") {
+				throw new TypeError(`Expected a declaration local on ${varValue}`);
+			}
+			const secondChild = term.children[1];
+			checkTermName(secondChild, "brace_stmt", "as second child of a tap");
+			const init = translateTermToValue(term.children[0], scope, functions, bindingContext);
+			const head = annotate(addVariable(scope, declaration.local, typeValue(getType(term)), init, DeclarationFlags.Boxed), term);
+			const body = translateAllStatements(secondChild.children, scope, functions);
+			const expressions: Expression[] = [];
+			for (const statement of body) {
+				if (statement.type !== "ExpressionStatement" || statement.expression.type !== "AssignmentExpression" || statement.expression.operator !== "+=") {
+					const tail = returnStatement(read(lookup(declaration.local, scope), scope));
+					return statements(concat([head], body, [tail]));
+				}
+				expressions.push(statement.expression.right);
+			}
+			if (init.kind === "expression") {
+				const initValue = expressionLiteralValue(init.expression);
+				if (typeof initValue === "string") {
+					const templateElements = [];
+					const templateExpressions = [];
+					let pendingString = initValue;
+					for (const expression of expressions) {
+						const value = expressionLiteralValue(expression);
+						if (value === undefined) {
+							templateElements.push(templateElement({ cooked: pendingString, raw: pendingString }, false));
+							templateExpressions.push(expression);
+							pendingString = "";
+						} else {
+							pendingString += value;
+						}
+					}
+					templateElements.push(templateElement({ cooked: pendingString, raw: pendingString }, true));
+					return expr(templateLiteral(templateElements, templateExpressions), term);
+				}
+			}
+			return annotateValue(expressions.reduce((left, right) => binary("+", left, expr(right), scope), init), term);
 		default: {
 			console.error(term);
 			return variable(identifier("unknown_term_type$" + term.name), term);
@@ -1126,7 +1156,7 @@ function translateFunctionTerm(name: string, term: Term, parameterLists: Term[][
 								if (children[0].name === "member_ref_expr") {
 									if (parseDeclaration(getProperty(children[0], "decl", isString)).member === fieldName) {
 										body.shift();
-										return read(translateTermToValue(children[1], childScope), childScope);
+										return read(translateTermToValue(children[1], childScope, functions), childScope);
 									}
 								}
 							}
@@ -1218,7 +1248,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "return_stmt": {
 			expectLength(term.children, 0, 1);
 			if (term.children.length) {
-				const value = transform(translateTermToValue(term.children[0], scope), scope, (expression) => {
+				const value = transform(translateTermToValue(term.children[0], scope, functions), scope, (expression) => {
 					if (isIdentifier(expression) && Object.hasOwnProperty.call(scope.declarations, expression.name)) {
 						return expr(expression);
 					}
@@ -1268,9 +1298,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			let pattern: PatternOutput;
 			const testTerm = children[0];
 			if (testTerm.name === "pattern") {
-				pattern = translatePattern(testTerm.children[0], translateTermToValue(testTerm.children[1], scope), scope);
+				pattern = translatePattern(testTerm.children[0], translateTermToValue(testTerm.children[1], scope, functions), scope, functions);
 			} else {
-				pattern = convertToPattern(translateTermToValue(testTerm, scope));
+				pattern = convertToPattern(translateTermToValue(testTerm, scope, functions));
 			}
 			const { prefix, test, suffix } = flattenPattern(pattern, scope, term);
 			const consequent = concat(suffix, translateInNewScope(children[1], scope, functions, "consequent"));
@@ -1284,13 +1314,13 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
-			return [annotate(whileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
+			return [annotate(whileStatement(read(translateTermToValue(testTerm, scope, functions), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
 		}
 		case "repeat_while_stmt": {
 			expectLength(term.children, 2);
 			const bodyTerm = term.children[0];
 			const testTerm = term.children[1];
-			return [annotate(doWhileStatement(read(translateTermToValue(testTerm, scope), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
+			return [annotate(doWhileStatement(read(translateTermToValue(testTerm, scope, functions), scope), blockStatement(translateInNewScope(bodyTerm, scope, functions, "body"))), term)];
 		}
 		case "for_each_stmt": {
 			expectLength(term.children, 6);
@@ -1301,22 +1331,51 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			expectLength(patternTerm.args, 1);
 			const targetTerm = term.children[2];
 			const targetType = getType(targetTerm);
-			if (targetType.kind !== "array") {
-				throw new TypeError(`Only array types are supported in for each iterations, got a ${stringifyType(targetType)}`);
-			}
-			const bodyTerm = term.children[5];
-			return [annotate(forOfStatement(
-				addVariable(scope, patternTerm.args[0], typeValue(getType(patternTerm)), undefined, DeclarationFlags.Const),
-				read(translateTermToValue(targetTerm, scope), scope),
-				blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")),
-			), term)];
+			const elementName = patternTerm.args[0];
+			const valueType = typeValue(getType(patternTerm));
+			return ignore(transform(translateTermToValue(targetTerm, scope, functions), scope, (target) => {
+				const bodyTerm = term.children[5];
+				if (targetType.kind === "array") {
+					const targetTypeValue = typeValue(targetType);
+					const sequenceConformance = conformance(targetTypeValue, "Sequence", scope);
+					const makeIterator = call(functionValue("makeIterator()", sequenceConformance, "(T.Type) -> (T) -> T.Iterator"), [targetTypeValue], [typeTypeValue], scope);
+					const iteratorType = call(functionValue("Iterator", sequenceConformance, "(T.Type) -> T.Type"), [targetTypeValue], [typeTypeValue], scope);
+					const iteratorConformance = conformance(iteratorType, "IteratorProtocol", scope);
+					const next = call(functionValue("next()", iteratorConformance, "(T.Type) -> (T) -> T.Element?"), [iteratorType], [typeTypeValue], scope);
+					const iterator = call(makeIterator, [expr(target)], [typeValue(getType(targetTerm))], scope);
+					return transform(iterator, scope, (iteratorValue) => {
+						const iteratorName = uniqueName(scope, "iterator");
+						return statements([
+							addVariable(scope, iteratorName, typeValue(targetType), expr(iteratorValue), DeclarationFlags.Const),
+							annotate(forStatement(
+								addVariable(scope, elementName, typeValue(getType(patternTerm))),
+								// TODO: Call the IteratorProtocol's next() method
+								read(optionalIsSome(expr(
+									assignmentExpression("=", identifier(elementName), read(call(next, [lookup(iteratorName, scope)], [iteratorType], scope), scope)),
+								), valueType, scope), scope),
+								null,
+								blockStatement(concat(
+									ignore(set(lookup(elementName, scope), unwrapOptional(lookup(elementName, scope), valueType, scope), scope), scope),
+									translateInNewScope(bodyTerm, scope, functions, "body"),
+								)),
+							), term),
+						], term);
+					});
+				} else {
+					return statements([annotate(forOfStatement(
+						addVariable(scope, elementName, typeValue(getType(patternTerm)), undefined, DeclarationFlags.Const),
+						target,
+						blockStatement(translateInNewScope(bodyTerm, scope, functions, "body")),
+					), term)], term);
+				}
+			}), scope);
 		}
 		case "switch_stmt": {
 			if (term.children.length < 1) {
 				throw new Error(`Expected at least one term, got ${term.children.length}`);
 			}
 			const discriminantTerm = term.children[0];
-			const declaration = annotate(variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope), scope))]), term);
+			const declaration = annotate(variableDeclaration("var", [variableDeclarator(identifier("$match"), read(translateTermToValue(discriminantTerm, scope, functions), scope))]), term);
 			const cases = term.children.slice(1).reduceRight((previous: Statement | undefined, childTerm: Term): Statement => {
 				checkTermName(childTerm, "case_stmt", "as child of a switch statement");
 				if (childTerm.children.length < 1) {
@@ -1328,7 +1387,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 				const body = newScope("case", scope, (childScope) => {
 					const remainingChildren = childTerm.children.slice(0, childTerm.children.length - 1);
 					for (const child of remainingChildren) {
-						const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope), scope, term);
+						const { prefix, test, suffix } = flattenPattern(translatePattern(child, expr(identifier("$match")), childScope, functions), scope, term);
 						mergedPrefix = concat(mergedPrefix, prefix);
 						if (expressionLiteralValue(mergedTest) === false) {
 							mergedTest = test;
@@ -1355,14 +1414,14 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "throw_stmt": {
 			expectLength(term.children, 1);
 			const expressionTerm = term.children[0];
-			return [annotate(throwStatement(read(translateTermToValue(expressionTerm, scope), scope)), term)];
+			return [annotate(throwStatement(read(translateTermToValue(expressionTerm, scope, functions), scope)), term)];
 		}
 		case "guard_stmt": {
 			expectLength(term.children, 2);
 			const testTerm = term.children[0];
 			const bodyTerm = term.children[1];
 			return [annotate(ifStatement(
-				read(unary("!", translateTermToValue(testTerm, scope), scope), scope),
+				read(unary("!", translateTermToValue(testTerm, scope, functions), scope), scope),
 				blockStatement(translateInNewScope(bodyTerm, scope, functions, "alternate")),
 			), term)];
 		}
@@ -1530,6 +1589,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 							// The built-in rawValue accessors don't have proper pattern matching :(
 							if (typeof baseType !== "undefined" && typeof baseReifiedType !== "undefined") {
 								methods.rawValue = wrapped((innerScope, arg) => copy(arg(0, "value"), typeValue(baseType)), "(Self) -> Int");
+								if (!Object.hasOwnProperty.call(methods, "hashValue")) {
+									methods.hashValue = methods.rawValue;
+								}
 							} else {
 								throw new TypeError(`Unable to synthesize rawValue for ${enumName}`);
 							}
@@ -1680,9 +1742,9 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 		case "pattern_binding_decl": {
 			if (term.children.length === 2) {
 				const valueChild = term.children[1];
-				const value = translateTermToValue(valueChild, scope);
+				const value = translateTermToValue(valueChild, scope, functions);
 				const flags: DeclarationFlags = typeof nextTerm !== "undefined" && nextTerm.name === "var_decl" ? flagsForDeclarationTerm(nextTerm) : DeclarationFlags.None;
-				const pattern = translatePattern(term.children[0], value, scope, flags);
+				const pattern = translatePattern(term.children[0], value, scope, functions, flags);
 				if (typeof pattern.next !== "undefined") {
 					throw new Error(`Chained patterns are not supported on binding declarations`);
 				}
@@ -1843,7 +1905,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			return [flags & DeclarationFlags.Export ? exportNamedDeclaration(declaration, []) : declaration];
 		}
 		default: {
-			const value = translateTermToValue(term, scope);
+			const value = translateTermToValue(term, scope, functions);
 			const pattern = convertToPattern(value);
 			const { prefix, test, suffix } = flattenPattern(pattern, scope, term);
 			let result = prefix;
@@ -1893,18 +1955,20 @@ const swiftPath: string = (() => {
 	try {
 		// Search toolchains
 		let hasLatest: boolean = false;
-		const developmentToolchains: string[] = [];
+		const developmentToolchains: { [date: string]: string } = Object.create(null);
 		for (const subpath of readdirSync("/Library/Developer/Toolchains/")) {
-			if (/^swift-DEVELOPMENT-SNAPSHOT-.*\.xctoolchain$/.test(subpath)) {
-				developmentToolchains.push(`/Library/Developer/Toolchains/${subpath}/usr/bin/swiftc`);
+			const match = subpath.match(/^swift-(5\.0-)?DEVELOPMENT-SNAPSHOT-(.*)\.xctoolchain$/);
+			if (match !== null) {
+				developmentToolchains[match[2]] = `/Library/Developer/Toolchains/${subpath}/usr/bin/swiftc`;
 			} else if (subpath === "swift-latest.xctoolchain") {
 				hasLatest = true;
 			}
 		}
 		// Attempt to use the latest development toolchain
-		if (developmentToolchains.length) {
-			developmentToolchains.sort();
-			return developmentToolchains[developmentToolchains.length - 1];
+		const toolchainKeys = Object.keys(developmentToolchains);
+		if (toolchainKeys.length) {
+			toolchainKeys.sort();
+			return developmentToolchains[toolchainKeys[toolchainKeys.length - 1]];
 		}
 		// Or the latest symlink
 		if (hasLatest) {
@@ -1926,45 +1990,63 @@ export interface CompilerOutput {
 
 export async function compile(path: string): Promise<CompilerOutput> {
 	const process = spawn(swiftPath, ["-dump-ast", "--", path]);
-	const stdout = readAsString(process.stdout);
-	const stderr = readAsString(process.stderr);
-	await new Promise((resolve, reject) => {
+	const processPromise = new Promise((resolve, reject) => {
+		process.on("error", reject);
 		process.on("exit", async (code, signal) => {
-			if (code !== 0) {
-				const lines = (await stderr).split(/\r\n|\r|\n/g);
-				const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
-				const filteredLines = bracketIndex !== -1 ? lines.slice(0, bracketIndex) : lines;
-				reject(new Error(filteredLines.join("\n")));
-			} else {
-				resolve();
+			try {
+				if (code !== 0) {
+					const lines = (await stderr).split(/\r\n|\r|\n/g);
+					const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
+					const filteredLines = bracketIndex !== -1 ? lines.slice(0, bracketIndex) : lines;
+					reject(new Error(filteredLines.join("\n")));
+				} else {
+					resolve();
+				}
+			} catch (e) {
+				reject(e);
 			}
 		});
 	});
-	const file = readFile(path);
-	let ast = (await stderr).trim() + (await stdout).trim();
-	if (ast[0] !== "(") {
-		const lines = ast.split(/\r\n|\r|\n/g);
-		const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
-		console.error(lines.slice(0, bracketIndex).join("\n"));
-		ast = lines.slice(bracketIndex).join("\n");
+	const stdout = readAsString(process.stdout);
+	const stderr = readAsString(process.stderr);
+	try {
+		const file = readFile(path);
+		await processPromise;
+		let ast = (await stderr).trim() + (await stdout).trim();
+		if (ast[0] !== "(") {
+			const lines = ast.split(/\r\n|\r|\n/g);
+			const bracketIndex = lines.findIndex((line) => /^\(/.test(line));
+			console.error(lines.slice(0, bracketIndex).join("\n"));
+			ast = lines.slice(bracketIndex).join("\n");
+		}
+		// console.log(ast);
+		try {
+			const rootTerm = parseAST(ast);
+			const convertedProgram = compileTermToProgram(rootTerm);
+			const result = generate(convertedProgram, {
+				filename: path,
+				sourceFileName: path,
+				compact: false,
+				sourceMaps: true,
+			}, (await file).toString());
+			// console.log(rootTerm.children);
+			// console.log(JSON.stringify(result.ast, null, 2));
+			// console.log(result.map);
+			return {
+				code: result.code,
+				map: result.map!,
+				ast,
+			};
+		} catch (e) {
+			if (typeof e === "object" && e !== null) {
+				e.ast = ast;
+			}
+			throw e;
+		}
+	} finally {
+		await processPromise;
+		process.unref();
 	}
-	// console.log(ast);
-	const rootTerm = parseAST(ast);
-	const convertedProgram = compileTermToProgram(rootTerm);
-	const result = generate(convertedProgram, {
-		filename: path,
-		sourceFileName: path,
-		compact: false,
-		sourceMaps: true,
-	}, (await file).toString());
-	// console.log(rootTerm.children);
-	// console.log(JSON.stringify(result.ast, null, 2));
-	// console.log(result.map);
-	return {
-		code: result.code,
-		map: result.map!,
-		ast,
-	};
 }
 
 if (require.main === module) {

@@ -954,7 +954,7 @@ export function read(value: Value, scope: Scope): Expression {
 	}
 }
 
-function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
+function ignoreExpression(expression: Expression | SpreadElement, scope: Scope): Statement[] {
 	outer:
 	switch (expression.type) {
 		case "Identifier":
@@ -1031,6 +1031,18 @@ function ignoreExpression(expression: Expression, scope: Scope): Statement[] {
 				blockStatement(ignoreExpression(expression.consequent, scope)),
 				blockStatement(ignoreExpression(expression.alternate, scope)),
 			), expression.loc)];
+		}
+		case "ArrayExpression": {
+			return expression.elements.reduce((existing, element) => element === null ? existing : concat(existing, ignoreExpression(element, scope)), [] as Statement[]);
+		}
+		case "SpreadElement": {
+			return ignoreExpression(expression.argument, scope);
+		}
+		case "AssignmentExpression": {
+			if (expression.left.type === "Identifier" && expression.right.type === "Identifier" && expression.left.name === expression.right.name) {
+				return [];
+			}
+			break;
 		}
 		default:
 			if (isLiteral(expression)) {

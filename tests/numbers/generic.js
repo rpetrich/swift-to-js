@@ -1,14 +1,28 @@
 export function add$lhs$rhs$(T, lhs, rhs) {
-  return T.Numeric.$plus$(T, lhs, rhs);
+  return T.AdditiveArithmetic.$plus$(T, lhs, rhs);
 }
 export function subtract$lhs$rhs$(T, lhs, rhs) {
-  return T.Numeric.$minus$(T, lhs, rhs);
+  return T.AdditiveArithmetic.$minus$(T, lhs, rhs);
 }
 export function double$target$(T, target) {
-  target = T.Numeric.$plus$(T, target, target);
+  target = T.AdditiveArithmetic.$plus$(T, target, target);
 }
 const $Int$Type = {
   $rep: 4,
+  AdditiveArithmetic: {
+    $plus$(Self, lhs, rhs) {
+      return lhs + rhs;
+    },
+
+    $minus$(Self, lhs, rhs) {
+      return lhs - rhs;
+    },
+
+    zero(Self) {
+      return 0;
+    }
+
+  },
   BinaryInteger: {
     $mod$(Self, lhs, rhs) {
       return lhs % rhs;
@@ -96,6 +110,10 @@ const $Int$Type = {
 
   },
   Comparable: {
+    $$$(Self, minimum, maximum) {
+      return [minimum, maximum];
+    },
+
     $less$(Self, lhs, rhs) {
       return lhs < rhs;
     },
@@ -278,14 +296,6 @@ const $Int$Type = {
   Numeric: {
     $multiply$(Self, lhs, rhs) {
       return lhs * rhs;
-    },
-
-    $plus$(Self, lhs, rhs) {
-      return lhs + rhs;
-    },
-
-    $minus$(Self, lhs, rhs) {
-      return lhs - rhs;
     },
 
     init$exactly$(Self, T, value) {

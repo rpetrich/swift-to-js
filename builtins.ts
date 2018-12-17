@@ -6,7 +6,7 @@ import { Function, Tuple } from "./types";
 import { concat, lookupForMap } from "./utils";
 import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
 
-import { arrayPattern, blockStatement, breakStatement, expressionStatement, forInStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Identifier, Node, Statement } from "@babel/types";
+import { arrayPattern, blockStatement, breakStatement, expressionStatement, forInStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, objectExpression, objectProperty, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Identifier, Node, Statement } from "@babel/types";
 
 function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
 	return arg(0, "value");
@@ -125,11 +125,17 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 		},
 		requirements: [],
 	};
+	const additiveArithmeticConformance: ProtocolConformance = {
+		functions: {
+			"zero": wrapped(() => literal(0), "() -> Self"),
+			"+": wrapped(binaryBuiltin("+", 0, (value, scope) => integerRangeCheck(scope, value, widerHigh, range)), "(Self, Self) -> Self"),
+			"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range)), "(Self, Self) -> Self"),
+		},
+		requirements: [],
+	};
 	const numericConformance: ProtocolConformance = {
 		functions: {
 			"init(exactly:)": initExactly,
-			"+": wrapped(binaryBuiltin("+", 0, (value, scope) => integerRangeCheck(scope, value, widerHigh, range)), "(Self, Self) -> Self"),
-			"-": wrapped(binaryBuiltin("-", 0, (value, scope) => integerRangeCheck(scope, value, widerLow, range)), "(Self, Self) -> Self"),
 			"*": wrapped(binaryBuiltin("*", 0, (value, scope) => integerRangeCheck(scope, value, widerBoth, range)), "(Self, Self) -> Self"),
 		},
 		requirements: [],
@@ -517,6 +523,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 			Equatable: equatableConformance,
 			Comparable: comparableConformance,
 			BinaryInteger: binaryIntegerConformance,
+			AdditiveArithmetic: additiveArithmeticConformance,
 			Numeric: numericConformance,
 			[integerTypeName]: integerConformance,
 			SignedNumeric: signedNumericConformance,
@@ -823,7 +830,7 @@ function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: S
 	return result;
 }
 
-function reuseArgs<T extends string[]>(arg: ArgGetter, offset: number, scope: Scope, names: T, callback: (...values: { [P in keyof T]: ExpressionValue | MappedNameValue }) => Value): Value {
+function reuseArgs<T extends string[]>(arg: ArgGetter, offset: number, scope: Scope, names: T, callback: (...values: { [P in keyof T]: (ExpressionValue | MappedNameValue) }) => Value): Value {
 	if (names.length === 0) {
 		return (callback as () => Value)();
 	}
@@ -831,7 +838,7 @@ function reuseArgs<T extends string[]>(arg: ArgGetter, offset: number, scope: Sc
 	if (names.length === 1) {
 		return reuse(arg(offset, name), scope, name, callback as unknown as (value: ExpressionValue | MappedNameValue) => Value);
 	}
-	return reuse(arg(offset, name), scope, name, (value) => reuseArgs(arg, offset + 1, scope, remaining, callback.bind(null, value)));
+	return reuse(arg(offset, name), scope, name, (value) => reuseArgs(arg, offset + 1, scope, remaining, (callback as unknown as (identifier: ExpressionValue | MappedNameValue, ...remaining: Array<ExpressionValue | MappedNameValue>) => Value).bind(null, value)));
 }
 
 const dummyType = typeValue({ kind: "name", name: "Dummy" });
@@ -863,6 +870,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		">": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), "(Self.Type) -> (Self, Self) -> Bool"),
 		"<=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(1, "rhs"), arg(0, "lhs")], [type, type], scope), scope), "(Self.Type) -> (Self, Self) -> Bool"),
 		">=": adaptedMethod("<", "Comparable", "(Self, Self) -> Bool", (lessThanMethod, scope, type, arg) => unary("!", call(lessThanMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self.Type) -> (Self, Self) -> Bool"),
+		"...": wrapped((scope, arg) => tuple([arg(0, "minimum"), arg(1, "maximum")]), "(Self, Self) -> Range<Self>"),
 	}, "Equatable");
 	addProtocol("ExpressibleByNilLiteral", {
 		"init(nilLiteral:)": abstractMethod,
@@ -891,15 +899,18 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 	addProtocol("ExpressibleByDictionaryLiteral", {
 		"init(dictionaryLiteral:)": abstractMethod,
 	});
+	addProtocol("AdditiveArithmetic", {
+		"zero": abstractMethod,
+		"+": abstractMethod,
+		"+=": updateMethod("+", "AdditiveArithmetic"),
+		"-": abstractMethod,
+		"-=": updateMethod("-", "AdditiveArithmetic"),
+	}, "Equatable", "ExpressibleByIntegerLiteral");
 	addProtocol("Numeric", {
 		"init(exactly:)": abstractMethod,
-		"+": abstractMethod,
-		"+=": updateMethod("+", "Numeric"),
-		"-": abstractMethod,
-		"-=": updateMethod("-", "Numeric"),
 		"*": abstractMethod,
 		"*=": updateMethod("*", "Numeric"),
-	}, "Equatable", "ExpressibleByIntegerLiteral");
+	}, "Equatable", "ExpressibleByIntegerLiteral", "AdditiveArithmetic");
 	addProtocol("SignedNumeric", {
 		"-": adaptedMethod("-", "Numeric", "(Self, Self) -> Self", (subtractMethod, scope, type, arg) => {
 			// TODO: Call ExpressibleByIntegerLiteral
@@ -1063,6 +1074,9 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"exponentBitCount": abstractMethod,
 		"significandBitCount": abstractMethod,
 	}, "ExpressibleByFloatLiteral", "FloatingPoint");
+	addProtocol("IteratorProtocol", {
+		"next()": abstractMethod,
+	});
 	addProtocol("Sequence", {
 		"makeIterator()": abstractMethod,
 		"contains(_:)": adaptedMethod("contains(where:)", "Sequence", "(Self, (Self.Element) -> Bool) -> Bool", (containsWhere, scope, type, arg) => {
@@ -2081,6 +2095,21 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		}),
 		StaticString: cachedBuilder(() => primitive(PossibleRepresentation.String, literal(""), {
 		})),
+		DefaultStringInterpolation: cachedBuilder((globalScope) => primitive(PossibleRepresentation.String, literal(""), {
+			"init(literalCapacity:interpolationCount:)": wrapped(() => literal(""), `(Int, Int) -> Self`),
+			"appendLiteral": wrapped((scope, arg, type, argTypes, outerArg) => {
+				const interpolationArg = outerArg(0, "interpolation");
+				const literalArg = arg(0, "literal");
+				if (literalArg.kind === "expression" && literalArg.expression.type === "StringLiteral" && literalArg.expression.value === "") {
+					return statements([]);
+				} else {
+					return set(interpolationArg, literalArg, scope, "+=");
+				}
+			}, `(String) -> Void`),
+			"appendInterpolation": wrapped((scope, arg, type, argTypes, outerArg) => {
+				return set(outerArg(1, "interpolation"), arg(0, "value"), scope, "+=");
+			}, `(String) -> Void`),
+		})),
 		Character: cachedBuilder((globalScope) => {
 			return primitive(PossibleRepresentation.String, literal(""), {
 				"init(_:)": wrapped((scope, arg) => {
@@ -2551,6 +2580,22 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						},
 						requirements: [],
 					},
+					Sequence: {
+						functions: {
+							"makeIterator()": wrapped((scope, arg) => {
+								return transform(arg(0, "array"), scope, (arrayValue) => {
+									return expr(objectExpression([
+										objectProperty(identifier("array"), arrayValue),
+										objectProperty(identifier("index"), literal(-1).expression),
+									]));
+								});
+							}, "(Self) -> Self.Iterator"),
+							"Iterator": (scope, arg) => {
+								return typeValue("ArrayIterator");
+							},
+						},
+						requirements: [],
+					},
 				}, globalScope),
 				possibleRepresentations: PossibleRepresentation.Array,
 				defaultValue() {
@@ -2572,6 +2617,42 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						// Simple arrays are sliced
 						return call(member(expr(expression), "slice", scope), [], [], scope);
 					}
+				},
+				innerTypes: {},
+			};
+		},
+		ArrayIterator: (globalScope, typeParameters) => {
+			return {
+				functions: lookupForMap({}),
+				conformances: applyDefaultConformances({
+					IteratorProtocol: {
+						functions: {
+							"next()": wrapped((scope, arg) => {
+								// TODO: Get real type
+								const valueType = typeValue("Bool");
+								return reuse(arg(0, "iterator"), scope, "iterator", (iterator) => {
+									return conditional(
+										binary("<",
+											expr(updateExpression("++", read(member(iterator, "index", scope), scope), true)),
+											member(member(iterator, "array", scope), "length", scope),
+											scope,
+										),
+										wrapInOptional(member(member(iterator, "array", scope), member(iterator, "index", scope), scope), valueType, scope),
+										emptyOptional(valueType, scope),
+										scope,
+									);
+								});
+							}, "(inout Self) -> Self.Element?"),
+						},
+						requirements: [],
+					},
+				}, globalScope),
+				possibleRepresentations: PossibleRepresentation.Object,
+				defaultValue() {
+					return tuple([]);
+				},
+				copy(value, scope) {
+					return call(member(expr(identifier("Object")), "assign", scope), [literal({}), value], ["Self", "Self"], scope);
 				},
 				innerTypes: {},
 			};

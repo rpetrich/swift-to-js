@@ -1,6 +1,7 @@
 import { compile } from "./swift-to-js";
 
 import { readdirSync, readFile as readFile_, statSync, unlink as unlink_, writeFile as writeFile_ } from "fs";
+import { basename } from "path";
 import { promisify } from "util";
 
 const writeOutput = false;
@@ -18,24 +19,42 @@ for (const category of readdirSync("./tests/")) {
 				if (swiftFilePattern.test(file)) {
 					test(file.replace(swiftFilePattern, ""), async () => {
 						const swiftPath = `./tests/${category}/${file}`;
-						const jsPath = `./tests/${category}/${file.replace(swiftFilePattern, ".js")}`;
+						const jsPath = `./tests/${category}/${file.replace(swiftFilePattern, ".mjs")}`;
+						function addSourceMapping(code: string) {
+							return `${code}\n//# sourceMappingURL=${basename(jsPath)}.map`;
+						}
 						const result = compile(swiftPath);
-						if (writeOutput) {
-							try {
-								const { code, ast } = await result;
-								await Promise.all([writeFile(jsPath, code), writeFile(swiftPath + ".ast", ast)]);
-							} catch (e) {
+						try {
+							if (writeOutput) {
 								try {
-									statSync(jsPath);
-									await unlink(jsPath);
+									const { code, ast, map } = await result;
+									await Promise.all([
+										writeFile(jsPath, addSourceMapping(code)),
+										writeFile(`./tests/${category}/${file.replace(swiftFilePattern, ".js")}`, code),
+										writeFile(swiftPath + ".ast", ast),
+										writeFile(jsPath + ".map", JSON.stringify(map)),
+									]);
+									expect((map as { mappings: string }).mappings).not.toEqual("");
 								} catch (e) {
-									// Ignore
+									if (e && e.ast) {
+										await writeFile(swiftPath + ".ast", e.ast);
+									}
+									try {
+										statSync(jsPath);
+										await unlink(jsPath);
+									} catch (e) {
+										// Ignore
+									}
+									throw e;
 								}
-								throw e;
+							} else {
+								const expected = readFile(jsPath);
+								const { code, map } = await result;
+								expect((map as { mappings: string }).mappings).not.toEqual("");
+								expect(addSourceMapping(code)).toEqual((await expected).toString("utf-8"));
 							}
-						} else {
-							const expected = readFile(jsPath);
-							expect((await result).code).toEqual((await expected).toString("utf-8"));
+						} finally {
+							await result;
 						}
 					});
 				}

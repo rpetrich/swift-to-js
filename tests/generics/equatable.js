@@ -6,6 +6,20 @@ export function match$lhs$rhs$(T, lhs, rhs) {
 }
 const $Int$Type = {
   $rep: 4,
+  AdditiveArithmetic: {
+    $plus$(Self, lhs, rhs) {
+      return lhs + rhs;
+    },
+
+    $minus$(Self, lhs, rhs) {
+      return lhs - rhs;
+    },
+
+    zero(Self) {
+      return 0;
+    }
+
+  },
   BinaryInteger: {
     $mod$(Self, lhs, rhs) {
       return lhs % rhs;
@@ -93,6 +107,10 @@ const $Int$Type = {
 
   },
   Comparable: {
+    $$$(Self, minimum, maximum) {
+      return [minimum, maximum];
+    },
+
     $less$(Self, lhs, rhs) {
       return lhs < rhs;
     },
@@ -275,14 +293,6 @@ const $Int$Type = {
   Numeric: {
     $multiply$(Self, lhs, rhs) {
       return lhs * rhs;
-    },
-
-    $plus$(Self, lhs, rhs) {
-      return lhs + rhs;
-    },
-
-    $minus$(Self, lhs, rhs) {
-      return lhs - rhs;
     },
 
     init$exactly$(Self, T, value) {
@@ -478,6 +488,47 @@ const $$String$$Type = {
       return hash[0] | 0;
     }
 
+  },
+  Sequence: {
+    Iterator: $ArrayIterator$Type,
+    allSatisfy: abstract$$String$$allSatisfy,
+
+    contains(Self, sequence) {
+      return abstract$contains$where$(sequence, function () {
+        return true;
+      });
+    },
+
+    contains$where$: abstract$$String$$contains$where$,
+    dropFirst: abstract$$String$$dropFirst,
+    dropLast: abstract$$String$$dropLast,
+    first$where$: abstract$$String$$first$where$,
+
+    makeIterator(Self, array) {
+      return {
+        array: array,
+        index: -1
+      };
+    },
+
+    max: abstract$$String$$max,
+    max$by$: abstract$$String$$max$by$,
+    min: abstract$$String$$min,
+    min$by$: abstract$$String$$min$by$,
+    reduce: abstract$$String$$reduce,
+    reversed: abstract$$String$$reversed,
+    sorted: abstract$$String$$sorted,
+    sorted$by$: abstract$$String$$sorted$by$,
+    underestimatedCount: abstract$$String$$underestimatedCount
+  }
+};
+const $ArrayIterator$Type = {
+  $rep: 32,
+  IteratorProtocol: {
+    next(Self, iterator) {
+      return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+    }
+
   }
 };
 export function stringArrayEqual$lhs$rhs$(lhs, rhs) {
@@ -588,6 +639,38 @@ const $$Point$$Type = {
       return hash[0] | 0;
     }
 
+  },
+  Sequence: {
+    Iterator: $ArrayIterator$Type,
+    allSatisfy: abstract$$Point$$allSatisfy,
+
+    contains(Self, sequence) {
+      return abstract$contains$where$(sequence, function () {
+        return true;
+      });
+    },
+
+    contains$where$: abstract$$Point$$contains$where$,
+    dropFirst: abstract$$Point$$dropFirst,
+    dropLast: abstract$$Point$$dropLast,
+    first$where$: abstract$$Point$$first$where$,
+
+    makeIterator(Self, array) {
+      return {
+        array: array,
+        index: -1
+      };
+    },
+
+    max: abstract$$Point$$max,
+    max$by$: abstract$$Point$$max$by$,
+    min: abstract$$Point$$min,
+    min$by$: abstract$$Point$$min$by$,
+    reduce: abstract$$Point$$reduce,
+    reversed: abstract$$Point$$reversed,
+    sorted: abstract$$Point$$sorted,
+    sorted$by$: abstract$$Point$$sorted$by$,
+    underestimatedCount: abstract$$Point$$underestimatedCount
   }
 };
 export function pointArrayEqual$lhs$rhs$(lhs, rhs) {
@@ -674,6 +757,38 @@ function $$_$$Type(T) {
         return hash[0] | 0;
       }
 
+    },
+    Sequence: {
+      Iterator: $ArrayIterator$Type,
+      allSatisfy: abstract$$_$$allSatisfy,
+
+      contains(Self, sequence) {
+        return abstract$contains$where$(sequence, function () {
+          return true;
+        });
+      },
+
+      contains$where$: abstract$$_$$contains$where$,
+      dropFirst: abstract$$_$$dropFirst,
+      dropLast: abstract$$_$$dropLast,
+      first$where$: abstract$$_$$first$where$,
+
+      makeIterator(Self, array) {
+        return {
+          array: array,
+          index: -1
+        };
+      },
+
+      max: abstract$$_$$max,
+      max$by$: abstract$$_$$max$by$,
+      min: abstract$$_$$min,
+      min$by$: abstract$$_$$min$by$,
+      reduce: abstract$$_$$reduce,
+      reversed: abstract$$_$$reversed,
+      sorted: abstract$$_$$sorted,
+      sorted$by$: abstract$$_$$sorted$by$,
+      underestimatedCount: abstract$$_$$underestimatedCount
     }
   };
 }

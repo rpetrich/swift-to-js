@@ -3,6 +3,20 @@ export function negate$number$(T, number) {
 }
 const $Int$Type = {
   $rep: 4,
+  AdditiveArithmetic: {
+    $plus$(Self, lhs, rhs) {
+      return lhs + rhs;
+    },
+
+    $minus$(Self, lhs, rhs) {
+      return lhs - rhs;
+    },
+
+    zero(Self) {
+      return 0;
+    }
+
+  },
   BinaryInteger: {
     $mod$(Self, lhs, rhs) {
       return lhs % rhs;
@@ -90,6 +104,10 @@ const $Int$Type = {
 
   },
   Comparable: {
+    $$$(Self, minimum, maximum) {
+      return [minimum, maximum];
+    },
+
     $less$(Self, lhs, rhs) {
       return lhs < rhs;
     },
@@ -272,14 +290,6 @@ const $Int$Type = {
   Numeric: {
     $multiply$(Self, lhs, rhs) {
       return lhs * rhs;
-    },
-
-    $plus$(Self, lhs, rhs) {
-      return lhs + rhs;
-    },
-
-    $minus$(Self, lhs, rhs) {
-      return lhs - rhs;
     },
 
     init$exactly$(Self, T, value) {
