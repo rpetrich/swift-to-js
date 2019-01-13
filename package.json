@@ -14,7 +14,7 @@
     "lint": "tslint --project tsconfig.json --fix"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/babel__generator": "^7.0.1",
     "@types/jest": "^23.3.1-",
