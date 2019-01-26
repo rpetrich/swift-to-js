@@ -8,7 +8,6 @@ export function double$target$(T, target) {
   target = T.AdditiveArithmetic.$plus$(T, target, target);
 }
 const $Int$Type = {
-  $rep: 4,
   AdditiveArithmetic: {
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
@@ -300,6 +299,12 @@ const $Int$Type = {
 
     init$exactly$(Self, T, value) {
       return value > T.SignedInteger.min(T) || value < T.SignedInteger.max(T) ? null : value;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 4;
     }
 
   },

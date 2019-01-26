@@ -2,7 +2,6 @@ export function negate$number$(T, number) {
   return T.SignedNumeric.$minus$(T, number);
 }
 const $Int$Type = {
-  $rep: 4,
   AdditiveArithmetic: {
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
@@ -297,6 +296,12 @@ const $Int$Type = {
     }
 
   },
+  Object: {
+    $rep(Self) {
+      return 4;
+    }
+
+  },
   SignedInteger: {
     $and$$plus$(Self, lhs, rhs) {
       return lhs + rhs | 0;
@@ -373,7 +378,6 @@ export function negate$integer$(integer) {
   return negate$number$($Int$Type, integer);
 }
 const $Double$Type = {
-  $rep: 4,
   Equatable: {
     $notequals$(Self, lhs, rhs) {
       return lhs !== rhs;
@@ -452,6 +456,12 @@ const $Double$Type = {
     init(Self, description) {
       const number = Number(description);
       return number === number ? null : number;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 4;
     }
 
   },

@@ -1,10 +1,10 @@
 import { abstractMethod, noinline, returnFunctionType, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
 import { parseFunctionType } from "./parse";
-import { expressionSkipsCopy, inheritLayout, primitive, protocol, reifyType, FunctionMap, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { expressionSkipsCopy, inheritLayout, primitive, protocol, reifyType, withPossibleRepresentations, FunctionMap, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Tuple } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeIsDirectlyComparable, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
 
 import { arrayPattern, blockStatement, breakStatement, expressionStatement, forInStatement, forStatement, functionExpression, identifier, ifStatement, isLiteral, newExpression, objectExpression, objectProperty, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Identifier, Node, Statement } from "@babel/types";
 
@@ -518,7 +518,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 				return literal(max);
 			}, "(Type) -> Self"),
 		} as FunctionMap),
-		conformances: applyDefaultConformances({
+		conformances: withPossibleRepresentations(applyDefaultConformances({
 			Hashable: hashableConformance,
 			Equatable: equatableConformance,
 			Comparable: comparableConformance,
@@ -562,8 +562,7 @@ function buildIntegerType(globalScope: Scope, min: number, max: number, bitWidth
 				},
 				requirements: [],
 			},
-		}, globalScope),
-		possibleRepresentations: PossibleRepresentation.Number,
+		}, globalScope), PossibleRepresentation.Number),
 		defaultValue() {
 			return literal(0);
 		},
@@ -605,7 +604,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 				return binary("|", arg(0, "float"), literal(0), scope);
 			}, "(Self) -> Int"),
 		} as FunctionMap),
-		conformances: applyDefaultConformances({
+		conformances: withPossibleRepresentations(applyDefaultConformances({
 			Equatable: {
 				functions: {
 					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
@@ -660,8 +659,7 @@ function buildFloatingType(globalScope: Scope): ReifiedType {
 				},
 				requirements: [],
 			},
-		}, globalScope),
-		possibleRepresentations: PossibleRepresentation.Number,
+		}, globalScope), PossibleRepresentation.Number),
 		defaultValue() {
 			return literal(0);
 		},
@@ -860,6 +858,9 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		protocolTypes[name] = () => result;
 	}
 
+	addProtocol("Object", {
+		":rep": abstractMethod,
+	});
 	addProtocol("Equatable", {
 		"==": abstractMethod,
 		"!=": adaptedMethod("==", "Equatable", "(Self, Self) -> Bool", (equalsMethod, scope, type, arg) => unary("!", call(equalsMethod, [arg(0, "lhs"), arg(1, "rhs")], [type, type], scope), scope), "(Self.Type) -> (Self, Self) -> Bool"),
@@ -2131,7 +2132,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				throw new TypeError(`Runtime types are not supported as Self in Self?`);
 			}
 			// Assume values that can be represented as boolean, number or string can be value-wise compared
-			const isDirectlyComparable = (reified.possibleRepresentations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None;
+			const isDirectlyComparable = typeIsDirectlyComparable(wrappedType, globalScope);
 			const compareEqual = wrapped(isDirectlyComparable ? binaryBuiltin("===", 0) : (scope: Scope, arg: ArgGetter) => {
 				const equalMethod = call(functionValue("==", conformance(wrappedType, "Equatable", scope), "() -> () -> Bool"), [wrappedType], [typeTypeValue], scope);
 				return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
@@ -2178,6 +2179,15 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					"flatMap": returnTodo,
 				} as FunctionMap),
 				conformances: applyDefaultConformances({
+					Object: {
+						functions: {
+							":rep": wrapped(() => {
+								// TODO: Make possible representations computed at runtime
+								return literal(PossibleRepresentation.All);
+							}, "() -> Int"),
+						},
+						requirements: [],
+					},
 					ExpressibleByNilLiteral: {
 						functions: {
 							"init(nilLiteral:)": wrapped((scope) => emptyOptional(wrappedType, scope), "() -> Self"),
@@ -2192,7 +2202,6 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						requirements: [],
 					},
 				}, globalScope),
-				possibleRepresentations: PossibleRepresentation.All, // TODO: Make possible representations computed at runtime
 				defaultValue(scope) {
 					return emptyOptional(wrappedType, scope);
 				},
@@ -2447,7 +2456,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						});
 					},
 				} as FunctionMap),
-				conformances: applyDefaultConformances({
+				conformances: withPossibleRepresentations(applyDefaultConformances({
 					ExpressibleByArrayLiteral: {
 						functions: {
 							"init(arrayLiteral:)": wrapped((scope, arg) => {
@@ -2591,13 +2600,12 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 								});
 							}, "(Self) -> Self.Iterator"),
 							"Iterator": (scope, arg) => {
-								return typeValue("ArrayIterator");
+								return typeValue({ kind: "generic", base: { kind: "name", name: "ArrayIterator" }, arguments: [valueType.type] });
 							},
 						},
 						requirements: [],
 					},
-				}, globalScope),
-				possibleRepresentations: PossibleRepresentation.Array,
+				}, globalScope), PossibleRepresentation.Array),
 				defaultValue() {
 					return literal([]);
 				},
@@ -2622,14 +2630,13 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 			};
 		},
 		ArrayIterator: (globalScope, typeParameters) => {
+			const [ elementType ] = typeParameters("Element");
 			return {
 				functions: lookupForMap({}),
-				conformances: applyDefaultConformances({
+				conformances: withPossibleRepresentations(applyDefaultConformances({
 					IteratorProtocol: {
 						functions: {
 							"next()": wrapped((scope, arg) => {
-								// TODO: Get real type
-								const valueType = typeValue("Bool");
 								return reuse(arg(0, "iterator"), scope, "iterator", (iterator) => {
 									return conditional(
 										binary("<",
@@ -2637,8 +2644,8 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 											member(member(iterator, "array", scope), "length", scope),
 											scope,
 										),
-										wrapInOptional(member(member(iterator, "array", scope), member(iterator, "index", scope), scope), valueType, scope),
-										emptyOptional(valueType, scope),
+										wrapInOptional(member(member(iterator, "array", scope), member(iterator, "index", scope), scope), elementType, scope),
+										emptyOptional(elementType, scope),
 										scope,
 									);
 								});
@@ -2646,8 +2653,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						},
 						requirements: [],
 					},
-				}, globalScope),
-				possibleRepresentations: PossibleRepresentation.Object,
+				}, globalScope), PossibleRepresentation.Object),
 				defaultValue() {
 					return tuple([]);
 				},
@@ -2668,7 +2674,6 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				throw new TypeError(`Runtime types are not supported as V in [K: V]`);
 			}
 			const keysType = typeValue({ kind: "array", type: keyType.type });
-			const reifiedKeyType = typeFromValue(keyType, globalScope);
 			const reifiedValueType = typeFromValue(valueType, globalScope);
 			function objectDictionaryImplementation(converter?: Value): ReifiedType {
 				const reifiedKeysType = typeFromValue(keysType, globalScope);
@@ -2732,7 +2737,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 							return call(member("Object", "keys", scope), [arg(0, "self")], ["[String]"], scope);
 						}, "(Self) -> Self.Keys"),
 					} as FunctionMap),
-					conformances: applyDefaultConformances({
+					conformances: withPossibleRepresentations(applyDefaultConformances({
 						// TODO: Implement Equatable
 						Equatable: {
 							functions: {
@@ -2806,8 +2811,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 							},
 							requirements: [],
 						},
-					}, globalScope),
-					possibleRepresentations: PossibleRepresentation.Object,
+					}, globalScope), PossibleRepresentation.Object),
 					defaultValue() {
 						return literal({});
 					},
@@ -2853,7 +2857,8 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 					},
 				};
 			}
-			switch (reifiedKeyType.possibleRepresentations) {
+			const representationsValue = expressionLiteralValue(read(representationsForTypeValue(keyType, globalScope), globalScope));
+			switch (representationsValue) {
 				case PossibleRepresentation.String:
 					return objectDictionaryImplementation();
 				case PossibleRepresentation.Boolean:

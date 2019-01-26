@@ -2,11 +2,11 @@ import { Property, Term } from "./ast";
 import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
 import { functionize, insertFunction, noinline, returnType, statementsInValue, wrapped, FunctionBuilder } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
-import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reifyType, store, EnumCase, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reifyType, store, withPossibleRepresentations, EnumCase, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
-import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeTypeValue, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
+import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeTypeValue, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
 
 import generate from "@babel/generator";
 import { assignmentExpression, blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, forStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement } from "@babel/types";
@@ -425,10 +425,10 @@ function translatePattern(term: Term, value: Value, scope: Scope, functions: Fun
 			if (index === -1) {
 				throw new TypeError(`Could not find the ${discriminant} case in ${stringifyValue(type)}, only found ${cases.map((enumCase) => enumCase.name).join(", ")}`);
 			}
-			const isDirectRepresentation = reified.possibleRepresentations !== PossibleRepresentation.Array;
+			const isDirectRepresentation = binary("!==", representationsForTypeValue(type, scope), literal(PossibleRepresentation.Array), scope);
 			let next: PatternOutput | undefined;
 			const test = reuse(annotateValue(value, term), scope, "enum", (reusableValue) => {
-				const discriminantValue = isDirectRepresentation ? reusableValue : member(reusableValue, 0, scope, term);
+				const discriminantValue = conditional(isDirectRepresentation, reusableValue, member(reusableValue, 0, scope, term), scope);
 				const result = binary("===", discriminantValue, literal(index), scope, term);
 				expectLength(term.children, 0, 1);
 				if (term.children.length === 0) {
@@ -1524,8 +1524,7 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			// Reify self
 			const reifiedSelfType: ReifiedType = {
 				functions: lookupForMap(methods),
-				conformances: Object.create(null),
-				possibleRepresentations: baseReifiedType ? baseReifiedType.possibleRepresentations : PossibleRepresentation.Array,
+				conformances: baseReifiedType ? baseReifiedType.conformances : withPossibleRepresentations(Object.create(null), PossibleRepresentation.Array),
 				innerTypes,
 				copy: baseReifiedType ? baseReifiedType.copy : (value, innerScope) => {
 					// Skip the copy if we can—must be done on this side of the inlining boundary
@@ -1634,12 +1633,26 @@ function translateStatement(term: Term, scope: Scope, functions: FunctionMap, ne
 			}
 			const innerTypes: TypeMap = Object.create(null);
 			const storedFields: Array<{ name: string, type: Value }> = [];
+			conformances.Object = {
+				functions: {
+					":rep": wrapped((innerScope) => {
+						switch (storedFields.length) {
+							case 0:
+								return literal(PossibleRepresentation.Undefined);
+							case 1:
+								return representationsForTypeValue(storedFields[0].type, innerScope);
+							default:
+								return literal(PossibleRepresentation.Object);
+						}
+					}, "(Self.Type) -> Int"),
+				},
+				requirements: [],
+			};
 			innerTypes.Type = () => primitive(PossibleRepresentation.Undefined, undefinedValue);
 			scope.types[structName] = (globalScope) => {
 				return {
 					functions: lookupForMap(methods),
 					conformances,
-					possibleRepresentations: storedFields.length === 0 ? PossibleRepresentation.Undefined : storedFields.length === 1 ? typeFromValue(storedFields[0].type, globalScope).possibleRepresentations : PossibleRepresentation.Object,
 					defaultValue(innerScope, consume) {
 						if (storedFields.length === 0) {
 							return undefinedValue;

@@ -1,9 +1,9 @@
-import { FunctionBuilder } from "./functions";
+import { wrapped, FunctionBuilder } from "./functions";
 import { parseType } from "./parse";
 import { lookup, Scope } from "./scope";
 import { Type } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, call, conditional, conformance, expr, extractContentOfBox, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
+import { array, call, conditional, conformance, expr, extractContentOfBox, literal, member, read, reuse, set, stringifyType, stringifyValue, typeFromValue, typeRequiresBox, typeValue, undefinedValue, Value } from "./values";
 
 import { isLiteral, Expression } from "@babel/types";
 
@@ -25,7 +25,6 @@ export interface ReifiedType {
 	functions: (name: string) => FunctionBuilder | undefined;
 	conformances: ProtocolConformanceMap;
 	innerTypes: Readonly<TypeMap>;
-	possibleRepresentations: PossibleRepresentation;
 	cases?: ReadonlyArray<EnumCase>;
 	defaultValue?(scope: Scope, consume: (fieldName: string) => Expression | undefined): Value;
 	copy?(value: Value, scope: Scope): Value;
@@ -60,11 +59,22 @@ const emptyConformances: ProtocolConformanceMap = Object.create(null);
 const noFunctions: Readonly<FunctionMap> = Object.create(null);
 const noInnerTypes: Readonly<TypeMap> = Object.create(null);
 
+export function withPossibleRepresentations(conformances: ProtocolConformanceMap, possibleRepresentations: PossibleRepresentation): ProtocolConformanceMap {
+	return {
+		...conformances,
+		Object: {
+			functions: {
+				":rep": wrapped(() => literal(possibleRepresentations), "() -> Int"),
+			},
+			requirements: [],
+		},
+	};
+}
+
 export function primitive(possibleRepresentations: PossibleRepresentation, defaultValue: Value, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes): ReifiedType {
 	return {
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-		conformances,
-		possibleRepresentations,
+		conformances: withPossibleRepresentations(conformances, possibleRepresentations),
 		defaultValue() {
 			return defaultValue;
 		},
@@ -84,8 +94,7 @@ export function protocol(protocolName: string, conformances: ProtocolConformance
 				return fn(scope, arg, name, argTypes);
 			};
 		},
-		conformances,
-		possibleRepresentations: PossibleRepresentation.All,
+		conformances: withPossibleRepresentations(conformances, PossibleRepresentation.Object),
 		innerTypes: noInnerTypes,
 	};
 }
@@ -93,8 +102,11 @@ export function protocol(protocolName: string, conformances: ProtocolConformance
 export function inheritLayout(type: ReifiedType, functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes) {
 	return {
 		functions: functions !== noFunctions ? lookupForMap(functions) : alwaysUndefined,
-		conformances,
-		possibleRepresentations: type.possibleRepresentations,
+		conformances: {
+			...conformances,
+			// TODO: Call through with proper types
+			Object: type.conformances.Object,
+		},
 		defaultValue: type.defaultValue,
 		copy: type.copy,
 		store: type.store,
@@ -109,8 +121,7 @@ function cannotDefaultInstantiateClass(): never {
 export function newClass(functions: FunctionMap = noFunctions, conformances: ProtocolConformanceMap = emptyConformances, innerTypes: Readonly<TypeMap> = noInnerTypes, defaultValue: (scope: Scope, consume: (fieldName: string) => Expression | undefined) => Value = cannotDefaultInstantiateClass): ReifiedType {
 	return {
 		functions: lookupForMap(functions),
-		conformances,
-		possibleRepresentations: PossibleRepresentation.Object,
+		conformances: withPossibleRepresentations(conformances, PossibleRepresentation.Object),
 		defaultValue,
 		innerTypes,
 	};
@@ -209,8 +220,7 @@ export function reifyType(typeOrTypeName: Type | string, scope: Scope, typeArgum
 				default:
 					return {
 						functions: lookupForMap(noFunctions),
-						conformances: {},
-						possibleRepresentations: PossibleRepresentation.Array,
+						conformances: withPossibleRepresentations({}, PossibleRepresentation.Array),
 						defaultValue(innerScope) {
 							return array(reifiedTypes.map((inner, i) => {
 								const defaultValue = inner.defaultValue;

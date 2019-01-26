@@ -5,7 +5,6 @@ export function match$lhs$rhs$(T, lhs, rhs) {
   return T.Equatable.$equals$(T, lhs, rhs);
 }
 const $Int$Type = {
-  $rep: 4,
   AdditiveArithmetic: {
     $plus$(Self, lhs, rhs) {
       return lhs + rhs;
@@ -300,6 +299,12 @@ const $Int$Type = {
     }
 
   },
+  Object: {
+    $rep(Self) {
+      return 4;
+    }
+
+  },
   SignedInteger: {
     $and$$plus$(Self, lhs, rhs) {
       return lhs + rhs | 0;
@@ -376,7 +381,6 @@ export function integerEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($Int$Type, lhs, rhs);
 }
 const $Double$question$$Type = {
-  $rep: -1,
   Equatable: {
     $notequals$(Self, lhs, rhs) {
       return lhs !== rhs;
@@ -392,13 +396,18 @@ const $Double$question$$Type = {
       return null;
     }
 
+  },
+  Object: {
+    $rep(Self) {
+      return -1;
+    }
+
   }
 };
 export function optionalDoubleEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($Double$question$$Type, lhs, rhs);
 }
 const $$String$$Type = {
-  $rep: 256,
   BidirectionalCollection: {
     formIndex$before$(Self, collection, index) {
       index = index - 1;
@@ -489,8 +498,14 @@ const $$String$$Type = {
     }
 
   },
+  Object: {
+    $rep(Self) {
+      return 256;
+    }
+
+  },
   Sequence: {
-    Iterator: $ArrayIterator$Type,
+    Iterator: $ArrayIterator$less$String$greater$$Type,
     allSatisfy: abstract$$String$$allSatisfy,
 
     contains(Self, sequence) {
@@ -522,11 +537,16 @@ const $$String$$Type = {
     underestimatedCount: abstract$$String$$underestimatedCount
   }
 };
-const $ArrayIterator$Type = {
-  $rep: 32,
+const $ArrayIterator$less$String$greater$$Type = {
   IteratorProtocol: {
     next(Self, iterator) {
       return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 32;
     }
 
   }
@@ -535,7 +555,6 @@ export function stringArrayEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($$String$$Type, lhs, rhs);
 }
 const $Point$Type = {
-  $rep: 32,
   Equatable: {
     $notequals$(Self, lhs, rhs) {
       return lhs.x !== rhs.x || lhs.y !== rhs.y;
@@ -543,6 +562,12 @@ const $Point$Type = {
 
     $equals$(Self, lhs, rhs) {
       return lhs.x === rhs.x && lhs.y === rhs.y;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 32;
     }
 
   }
@@ -557,7 +582,6 @@ export function pointNotEqualDirect$lhs$rhs$(lhs, rhs) {
   return lhs.x !== rhs.x || lhs.y !== rhs.y;
 }
 const $$Point$$Type = {
-  $rep: 256,
   BidirectionalCollection: {
     formIndex$before$(Self, collection, index) {
       index = index - 1;
@@ -640,8 +664,14 @@ const $$Point$$Type = {
     }
 
   },
+  Object: {
+    $rep(Self) {
+      return 256;
+    }
+
+  },
   Sequence: {
-    Iterator: $ArrayIterator$Type,
+    Iterator: $ArrayIterator$less$Point$greater$$Type,
     allSatisfy: abstract$$Point$$allSatisfy,
 
     contains(Self, sequence) {
@@ -673,13 +703,26 @@ const $$Point$$Type = {
     underestimatedCount: abstract$$Point$$underestimatedCount
   }
 };
+const $ArrayIterator$less$Point$greater$$Type = {
+  IteratorProtocol: {
+    next(Self, iterator) {
+      return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 32;
+    }
+
+  }
+};
 export function pointArrayEqual$lhs$rhs$(lhs, rhs) {
   return equal$lhs$rhs$($$Point$$Type, lhs, rhs);
 }
 
 function $$_$$Type(T) {
   return {
-    $rep: 256,
     BidirectionalCollection: {
       formIndex$before$(Self, collection, index) {
         index = index - 1;
@@ -758,8 +801,14 @@ function $$_$$Type(T) {
       }
 
     },
+    Object: {
+      $rep(Self) {
+        return 256;
+      }
+
+    },
     Sequence: {
-      Iterator: $ArrayIterator$Type,
+      Iterator: $ArrayIterator$less$_$greater$$Type(T),
       allSatisfy: abstract$$_$$allSatisfy,
 
       contains(Self, sequence) {
@@ -789,6 +838,23 @@ function $$_$$Type(T) {
       sorted: abstract$$_$$sorted,
       sorted$by$: abstract$$_$$sorted$by$,
       underestimatedCount: abstract$$_$$underestimatedCount
+    }
+  };
+}
+
+function $ArrayIterator$less$_$greater$$Type(T) {
+  return {
+    IteratorProtocol: {
+      next(Self, iterator) {
+        return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+      }
+
+    },
+    Object: {
+      $rep(Self) {
+        return 32;
+      }
+
     }
   };
 }

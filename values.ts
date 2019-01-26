@@ -4,7 +4,7 @@ import { arrayExpression, assignmentExpression, binaryExpression, blockStatement
 import { Term } from "./ast";
 import { functionize, insertFunction, FunctionBuilder } from "./functions";
 import { parseFunctionType, parseType } from "./parse";
-import { reifyType, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
+import { reifyType, withPossibleRepresentations, PossibleRepresentation, ProtocolConformance, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
 import { addVariable, lookup, mangleName, mappedValueForName, rootScope, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
 import { Function, Type } from "./types";
 import { concat, expectLength, lookupForMap } from "./utils";
@@ -300,13 +300,12 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 				}
 				return {
 					functions: lookupForMap<FunctionBuilder | undefined>(reified.conformances[conformanceName].functions),
-					conformances: conformanceMap,
+					conformances: withPossibleRepresentations(conformanceMap, PossibleRepresentation.All),
 					innerTypes: {},
-					possibleRepresentations: PossibleRepresentation.All,
 				};
 			} else {
 				return {
-					conformances: {},
+					conformances: withPossibleRepresentations({}, PossibleRepresentation.Object),
 					functions(functionName) {
 						return (innerScope, arg, name, types) => {
 							const targetConformance = reifyType(conformanceName, scope).conformances[conformanceName];
@@ -340,27 +339,24 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 						};
 					},
 					innerTypes: {},
-					possibleRepresentations: PossibleRepresentation.Object,
 				};
 			}
 		}
 		default: {
 			// TODO: Support metatypes here
 			const metaType: ReifiedType = {
-				conformances: {},
+				conformances: withPossibleRepresentations({}, PossibleRepresentation.Object),
 				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
 				innerTypes: {
 					Type: () => metaType,
 				},
-				possibleRepresentations: PossibleRepresentation.Object,
 			};
 			return {
-				conformances: {},
+				conformances: withPossibleRepresentations({}, PossibleRepresentation.Object),
 				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
 				innerTypes: {
 					Type: () => metaType,
 				},
-				possibleRepresentations: PossibleRepresentation.Object,
 			};
 		}
 	}
@@ -380,8 +376,7 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 const unboxedRepresentations = PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array;
 
 export function typeRequiresBox(type: Value, scope: Scope): Value {
-	const possibleRepresentations = typeFromValue(type, scope).possibleRepresentations;
-	return literal((possibleRepresentations & unboxedRepresentations) !== possibleRepresentations);
+	return hasRepresentation(type, ~unboxedRepresentations, scope);
 }
 
 export function extractContentOfBox(target: BoxedValue, scope: Scope) {
@@ -685,8 +680,6 @@ function validWitnessTableKeysForConformance(target: ProtocolConformance) {
 	return Object.keys(target.functions).filter((key) => alternateMethodForKeyInConformance(key, target) === undefined).sort();
 }
 
-const possibleRepresentationKey = "$rep";
-
 function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
 	// Deep-remap types, replacing with a placeholder so that similar type patterns are specialized and a standardized name is generated
 	const substitutionNames: string[] = [];
@@ -730,9 +723,7 @@ function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
 			}
 			desiredConformances.sort();
 			// Create a property for each conformance
-			const properties: Array<ObjectMethod | ObjectProperty | SpreadElement> = [
-				objectProperty(identifier(possibleRepresentationKey), literal(reified.possibleRepresentations as number).expression),
-			];
+			const properties: Array<ObjectMethod | ObjectProperty | SpreadElement> = [];
 			for (const conformanceName of desiredConformances) {
 				const current = reified.conformances[conformanceName];
 				properties.push(objectProperty(mangleName(conformanceName), objectExpression(validWitnessTableKeysForConformance(current).map((key) => {
@@ -1736,12 +1727,9 @@ export function stringifyValue(value: Value): string {
 	}
 }
 
-function representationsForTypeValue(type: Value, scope: Scope): Value {
-	if (type.kind === "type") {
-		return literal(typeFromValue(type, scope).possibleRepresentations);
-	} else {
-		return member(type, possibleRepresentationKey, scope);
-	}
+export function representationsForTypeValue(type: Value, scope: Scope): Value {
+	const repFunction = call(functionValue(":rep", conformance(type, "Object", scope), "(Type) -> Int"), [type], ["Type"], scope);
+	return call(repFunction, [], [], scope);
 }
 
 export function hasRepresentation(type: Value, representation: PossibleRepresentation | Value, scope: Scope): Value {
@@ -1754,4 +1742,9 @@ export function hasRepresentation(type: Value, representation: PossibleRepresent
 		literal(0),
 		scope,
 	);
+}
+
+export function typeIsDirectlyComparable(type: Value, scope: Scope): boolean {
+	const representations = expressionLiteralValue(read(representationsForTypeValue(type, scope), scope));
+	return typeof representations === "number" ? (representations & ~(PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String)) === PossibleRepresentation.None : false;
 }
