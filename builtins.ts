@@ -7,6 +7,7 @@ import { concat, lookupForMap } from "./utils";
 import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
+import { Bool as BoolBuiltin } from "./builtins/Bool";
 import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
 import { String as StringBuiltin } from "./builtins/String";
 
@@ -1423,55 +1424,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"init(_:)": abstractMethod,
 	}, "CustomStringConvertible");
 
-	const BoolType = cachedBuilder((globalScope: Scope) => primitive(PossibleRepresentation.Boolean, literal(false), {
-		"init(_builtinBooleanLiteral:)": wrapped(returnOnlyArgument, "(Bool) -> Bool"),
-		"init(_:)": wrapped((scope, arg) => {
-			// Optional init from string
-			return reuseArgs(arg, 0, scope, ["string"], (stringValue) => {
-				return logical("||",
-					binary("===",
-						stringValue,
-						literal("True"),
-						scope,
-					),
-					logical("&&",
-						binary("!==",
-							stringValue,
-							literal("False"),
-							scope,
-						),
-						literal(null),
-						scope,
-					),
-					scope,
-				);
-			});
-		}, "(String) -> Self?"),
-		"_getBuiltinLogicValue()": (scope, arg, type) => callable(() => arg(0, "literal"), "() -> Int1"),
-		"&&": wrapped((scope, arg) => logical("&&", arg(0, "lhs"), call(arg(1, "rhs"), [], [], scope), scope), "(Bool, () -> Bool) -> Bool"),
-		"||": wrapped((scope, arg) => logical("||", arg(0, "lhs"), call(arg(1, "rhs"), [], [], scope), scope), "(Bool, () -> Bool) -> Bool"),
-		"!": wrapped((scope, arg) => unary("!", arg(0, "value"), scope), "(Self) -> Bool"),
-		"random": wrapped((scope, arg) => binary("<", call(member("Math", "random", scope), [], [], scope), literal(0.5), scope), "() -> Bool"),
-		"description": wrapped((scope, arg) => {
-			return conditional(arg(0, "self"), literal("True"), literal("False"), scope);
-		}, "(Bool) -> String"),
-	}, applyDefaultConformances({
-		Equatable: {
-			functions: {
-				"==": wrapped(binaryBuiltin("===", 0), "(Bool, Bool) -> Bool"),
-				"!=": wrapped(binaryBuiltin("!==", 0), "(Bool, Bool) -> Bool"),
-			},
-			requirements: [],
-		},
-		ExpressibleByBooleanLiteral: {
-			functions: {
-				"init(booleanLiteral:)": wrapped(returnOnlyArgument, "(Bool) -> Bool"),
-			},
-			requirements: [],
-		},
-	}, globalScope), {
-		Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
-	}));
+	const BoolType = cachedBuilder(BoolBuiltin);
 
 	return {
 		...protocolTypes,
