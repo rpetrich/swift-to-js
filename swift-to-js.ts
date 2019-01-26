@@ -1,5 +1,6 @@
 import { Property, Term } from "./ast";
-import { forceUnwrapFailed, newScopeWithBuiltins } from "./builtins";
+import { newScopeWithBuiltins } from "./builtins";
+import { forceUnwrapFailed } from "./builtins/common";
 import { functionize, insertFunction, noinline, returnType, statementsInValue, wrapped, FunctionBuilder } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
 import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reifyType, store, withPossibleRepresentations, EnumCase, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";

@@ -1,8 +1,8 @@
-import { applyDefaultConformances, binaryBuiltin, cachedBuilder, reuseArgs } from "../builtins";
 import { wrapped } from "../functions";
 import { primitive, PossibleRepresentation } from "../reified";
 import { Scope } from "../scope";
 import { binary, call, callable, conditional, literal, logical, member, unary, undefinedValue } from "../values";
+import { applyDefaultConformances, binaryBuiltin, cachedBuilder, reuseArgs } from "./common";
 
 export function Bool(globalScope: Scope) {
 	return primitive(PossibleRepresentation.Boolean, literal(false), {

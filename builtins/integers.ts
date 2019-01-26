@@ -1,10 +1,10 @@
-import { applyDefaultConformances, binaryBuiltin, resolveMethod, reuseArgs, updateBuiltin, voidType } from "../builtins";
 import { wrapped } from "../functions";
 import { withPossibleRepresentations, FunctionMap, PossibleRepresentation, ProtocolConformance, ReifiedType } from "../reified";
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "../scope";
 import { Function } from "../types";
 import { concat, lookupForMap } from "../utils";
 import { binary, call, callable, conditional, conformance, expr, expressionLiteralValue, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, unary, ArgGetter, Value } from "../values";
+import { applyDefaultConformances, binaryBuiltin, resolveMethod, reuseArgs, updateBuiltin, voidType } from "./common";
 
 import { blockStatement, identifier, returnStatement, updateExpression, whileStatement } from "@babel/types";
 

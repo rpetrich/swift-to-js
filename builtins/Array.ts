@@ -1,9 +1,9 @@
-import { applyDefaultConformances, isEmptyFromLength, readLengthField, reuseArgs, startIndexOfZero, voidType } from "../builtins";
 import { wrapped } from "../functions";
 import { expressionSkipsCopy, withPossibleRepresentations, FunctionMap, PossibleRepresentation, ReifiedType, TypeParameterHost } from "../reified";
 import { addVariable, lookup, uniqueName, Scope } from "../scope";
 import { concat, lookupForMap } from "../utils";
 import { array, binary, call, callable, conditional, conformance, copy, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, transform, typeFromValue, typeTypeValue, typeValue, undefinedValue, ArgGetter, Value } from "../values";
+import { applyDefaultConformances, isEmptyFromLength, readLengthField, reuseArgs, startIndexOfZero, voidType } from "./common";
 
 import { emptyOptional, wrapInOptional } from "./Optional";
 

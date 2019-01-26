@@ -1,188 +1,23 @@
 import { abstractMethod, noinline, returnFunctionType, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
 import { parseFunctionType } from "./parse";
-import { expressionSkipsCopy, inheritLayout, primitive, protocol, reifyType, withPossibleRepresentations, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
-import { addVariable, lookup, mangleName, uniqueName, DeclarationFlags, MappedNameValue, Scope } from "./scope";
-import { Function, Tuple } from "./types";
+import { expressionSkipsCopy, inheritLayout, primitive, protocol, withPossibleRepresentations, FunctionMap, PossibleRepresentation, ReifiedType, TypeMap } from "./reified";
+import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
+import { Function } from "./types";
 import { concat, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, update, updateOperatorForBinaryOperator, ArgGetter, BinaryOperator, ExpressionValue, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, isPure, literal, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyValue, transform, tuple, typeFromValue, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
+import { applyDefaultConformances, binaryBuiltin, cachedBuilder, isEmptyFromLength, readLengthField, resolveMethod, reuseArgs, startIndexOfZero } from "./builtins/common";
+import { buildFloatingType } from "./builtins/floats";
 import { buildIntegerType } from "./builtins/integers";
 import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
 import { String as StringBuiltin } from "./builtins/String";
 
 import { arrayPattern, blockStatement, breakStatement, expressionStatement, forInStatement, forStatement, identifier, ifStatement, isLiteral, newExpression, objectExpression, objectProperty, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Identifier, Node, Statement } from "@babel/types";
 
-function returnOnlyArgument(scope: Scope, arg: ArgGetter): Value {
-	return arg(0, "value");
-}
-
-export function returnTodo(scope: Scope, arg: ArgGetter, name: string): Value {
-	console.error(name);
-	return call(expr(mangleName("todo_missing_builtin$" + name)), [], [], scope);
-}
-
 function unavailableFunction(scope: Scope, arg: ArgGetter, name: string): Value {
 	throw new Error(`${name} is not available`);
-}
-
-export function binaryBuiltin(operator: BinaryOperator, typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
-	return (scope: Scope, arg: ArgGetter) => {
-		const unchecked = binary(operator,
-			arg(typeArgumentCount, "lhs"),
-			arg(typeArgumentCount + 1, "rhs"),
-			scope,
-		);
-		return typeof valueChecker !== "undefined" ? valueChecker(unchecked, scope) : unchecked;
-	};
-}
-
-export function updateBuiltin(operator: keyof typeof updateOperatorForBinaryOperator, typeArgumentCount: number, valueChecker?: (value: Value, scope: Scope) => Value) {
-	if (typeof valueChecker !== "undefined") {
-		return (scope: Scope, arg: ArgGetter) => update(arg(typeArgumentCount, "target"), scope, (value) => valueChecker(binary(operator, value, arg(typeArgumentCount + 1, "value"), scope), scope));
-	}
-	return (scope: Scope, arg: ArgGetter) => set(arg(typeArgumentCount, "target"), arg(typeArgumentCount + 1, "value"), scope, updateOperatorForBinaryOperator[operator]);
-}
-
-export const readLengthField = wrapped((scope: Scope, arg: ArgGetter) => {
-	return member(arg(0, "self"), "length", scope);
-}, "(Any) -> Int");
-
-export const isEmptyFromLength = wrapped((scope: Scope, arg: ArgGetter) => {
-	return binary("!==", member(arg(0, "self"), "length", scope), literal(0), scope);
-}, "(Any) -> Bool");
-
-export const startIndexOfZero = wrapped((scope: Scope, arg: ArgGetter) => {
-	return literal(0);
-}, "(Any) -> Int");
-
-export const voidType: Tuple = { kind: "tuple", types: [] };
-
-export const forceUnwrapFailed: Value = functionValue("Swift.(swift-to-js).forceUnwrapFailed()", undefined, { kind: "function", arguments: voidType, return: voidType, throws: true, rethrows: false, attributes: [] });
-
-export function cachedBuilder(fn: (scope: Scope) => ReifiedType): (scope: Scope) => ReifiedType {
-	let value: ReifiedType | undefined;
-	return (scope: Scope) => {
-		if (typeof value === "undefined") {
-			return value = fn(scope);
-		}
-		return value;
-	};
-}
-
-function buildFloatingType(globalScope: Scope): ReifiedType {
-	const reifiedType: ReifiedType = {
-		functions: lookupForMap({
-			"init(_:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
-			"init(_builtinIntegerLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
-			"init(_builtinFloatLiteral:)": wrapped(returnOnlyArgument, "(Self) -> Self"),
-			"+": wrapped((scope, arg, type) => binary("+", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
-			"-": wrapped((scope, arg, type, argTypes) => {
-				if (argTypes.length === 1) {
-					return unary("-", arg(0, "value"), scope);
-				}
-				return binary("-", arg(0, "lhs"), arg(1, "rhs"), scope);
-			}, "(Self, Self) -> Self"),
-			"*": wrapped((scope, arg, type) => binary("*", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
-			"/": wrapped((scope, arg, type) => binary("/", arg(0, "lhs"), arg(1, "rhs"), scope), "(Self, Self) -> Self"),
-			"%": wrapped(binaryBuiltin("%", 0), "(Self, Self) -> Self"),
-			"<": wrapped(binaryBuiltin("<", 0), "(Self, Self) -> Bool"),
-			">": wrapped(binaryBuiltin(">", 0), "(Self, Self) -> Bool"),
-			"<=": wrapped(binaryBuiltin("<=", 0), "(Self, Self) -> Bool"),
-			">=": wrapped(binaryBuiltin(">=", 0), "(Self, Self) -> Bool"),
-			"&": wrapped(binaryBuiltin("&", 0), "(Self, Self) -> Self"),
-			"|": wrapped(binaryBuiltin("|", 0), "(Self, Self) -> Self"),
-			"^": wrapped(binaryBuiltin("^", 0), "(Self, Self) -> Self"),
-			"+=": wrapped(updateBuiltin("+", 0), "(inout Self, Self) -> Void"),
-			"-=": wrapped(updateBuiltin("-", 0), "(inout Self, Self) -> Void"),
-			"*=": wrapped(updateBuiltin("*", 0), "(inout Self, Self) -> Void"),
-			"/=": wrapped(updateBuiltin("/", 0), "(inout Self, Self) -> Void"),
-			"hashValue": wrapped((scope, arg) => {
-				// TODO: Find a good hash strategy for floating point types
-				return binary("|", arg(0, "float"), literal(0), scope);
-			}, "(Self) -> Int"),
-		} as FunctionMap),
-		conformances: withPossibleRepresentations(applyDefaultConformances({
-			Equatable: {
-				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
-				},
-				requirements: [],
-			},
-			SignedNumeric: {
-				functions: {
-					"-": wrapped((scope, arg) => unary("-", arg(0, "value"), scope), "(Self) -> Self"),
-				},
-				requirements: [],
-			},
-			FloatingPoint: {
-				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
-					"!=": wrapped(binaryBuiltin("!==", 0), "(Self, Self) -> Bool"),
-					"squareRoot()": (scope, arg, type) => {
-						return callable(() => call(member("Math", "sqrt", scope), [arg(1, "value")], ["Double"], scope), "() -> Self");
-					},
-				},
-				requirements: [],
-			},
-			LosslessStringConvertible: {
-				functions: {
-					"init(_:)": wrapped((scope, arg) => {
-						const input = read(arg(0, "description"), scope);
-						const value = expressionLiteralValue(input);
-						if (typeof value === "string") {
-							const convertedValue = Number(value);
-							return literal(isNaN(convertedValue) ? null : convertedValue);
-						}
-						const result = uniqueName(scope, "number");
-						return statements([
-							addVariable(scope, result, "Int", call(expr(identifier("Number")), [
-								expr(input),
-							], ["String"], scope), DeclarationFlags.Const),
-							returnStatement(
-								read(conditional(
-									binary("===",
-										lookup(result, scope),
-										lookup(result, scope),
-										scope,
-									),
-									literal(null),
-									lookup(result, scope),
-									scope,
-								), scope),
-							),
-						]);
-					}, "(String) -> Self?"),
-				},
-				requirements: [],
-			},
-		}, globalScope), PossibleRepresentation.Number),
-		defaultValue() {
-			return literal(0);
-		},
-		innerTypes: {
-			Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
-		},
-	};
-	return reifiedType;
-}
-
-export function resolveMethod(type: Value, name: string, scope: Scope, additionalArgs: Value[] = [], additionalTypes: Value[] = []) {
-	const functionBuilder = typeFromValue(type, scope).functions(name);
-	if (typeof functionBuilder !== "function") {
-		throw new TypeError(`Could not find ${name} in ${stringifyValue(type)}`);
-	}
-	return functionBuilder(scope, (i) => {
-		if (i === 0) {
-			return type;
-		}
-		if (i > additionalArgs.length) {
-			throw new RangeError(`Asked for argument ${i}, but only ${additionalArgs.length} are available (shifted for hidden protocol self value)`);
-		}
-		return additionalArgs[i - 1];
-	}, name, concat([typeValue("Type")], additionalTypes));
 }
 
 function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {
@@ -248,33 +83,6 @@ function updateMethod(otherMethodName: string, conformanceName: string | undefin
 		const rhs = arg(1, "rhs");
 		return set(lhs, call(targetMethod, [lhs, rhs], [type, type], scope), scope);
 	}, "(Self.Type) -> (inout Self, Self) -> Void");
-}
-
-export function applyDefaultConformances(conformances: ProtocolConformanceMap, scope: Scope): ProtocolConformanceMap {
-	const result: ProtocolConformanceMap = Object.create(null);
-	for (const key of Object.keys(conformances)) {
-		const reified = reifyType(key, scope);
-		if (!Object.hasOwnProperty.call(reified.conformances, key)) {
-			throw new TypeError(`${key} is not a protocol`);
-		}
-		const base = conformances[key];
-		result[key] = {
-			functions: {...reified.conformances[key].functions, ...base.functions},
-			requirements: base.requirements,
-		};
-	}
-	return result;
-}
-
-export function reuseArgs<T extends string[]>(arg: ArgGetter, offset: number, scope: Scope, names: T, callback: (...values: { [P in keyof T]: (ExpressionValue | MappedNameValue) }) => Value): Value {
-	if (names.length === 0) {
-		return (callback as () => Value)();
-	}
-	const [name, ...remaining] = names;
-	if (names.length === 1) {
-		return reuse(arg(offset, name), scope, name, callback as unknown as (value: ExpressionValue | MappedNameValue) => Value);
-	}
-	return reuse(arg(offset, name), scope, name, (value) => reuseArgs(arg, offset + 1, scope, remaining, (callback as unknown as (identifier: ExpressionValue | MappedNameValue, ...remaining: Array<ExpressionValue | MappedNameValue>) => Value).bind(null, value)));
 }
 
 const dummyType = typeValue({ kind: "name", name: "Dummy" });

@@ -1,9 +1,9 @@
-import { applyDefaultConformances, binaryBuiltin, returnTodo, reuseArgs } from "../builtins";
 import { wrapped } from "../functions";
 import { expressionSkipsCopy, FunctionMap, PossibleRepresentation, ReifiedType, TypeParameterHost } from "../reified";
 import { Scope } from "../scope";
 import { lookupForMap } from "../utils";
 import { array, binary, call, conditional, conformance, expr, functionValue, hasRepresentation, literal, logical, member, read, representationsForTypeValue, reuse, typeFromValue, typeIsDirectlyComparable, typeTypeValue, ArgGetter, Value } from "../values";
+import { applyDefaultConformances, binaryBuiltin, returnTodo, reuseArgs } from "./common";
 
 function optionalOperation(innerType: Value, normalOperation: Value, nestedOperation: Value, scope: Scope) {
 	// Should be peephole optimized when types are fully known, and deferred until runtime if not
