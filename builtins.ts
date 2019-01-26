@@ -1,21 +1,22 @@
 import { abstractMethod, noinline, returnFunctionType, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
 import { parseFunctionType } from "./parse";
-import { primitive, protocol, withPossibleRepresentations, FunctionMap, PossibleRepresentation, TypeMap } from "./reified";
+import { primitive, protocol, FunctionMap, PossibleRepresentation, TypeMap } from "./reified";
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function } from "./types";
-import { concat, lookupForMap } from "./utils";
-import { array, binary, call, callable, conditional, conformance, expr, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, transform, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
+import { concat } from "./utils";
+import { array, binary, call, callable, conditional, conformance, expr, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
 import { applyDefaultConformances, binaryBuiltin, cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
 import { Dictionary as DictionaryBuiltin } from "./builtins/Dictionary";
 import { buildFloatingType } from "./builtins/floats";
+import { IndexingIterator as IndexingIteratorBuiltin } from "./builtins/IndexingIterator";
 import { buildIntegerType } from "./builtins/integers";
 import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
 import { String as StringBuiltin } from "./builtins/String";
 
-import { arrayPattern, blockStatement, expressionStatement, forStatement, identifier, ifStatement, newExpression, objectExpression, objectProperty, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
+import { arrayPattern, blockStatement, expressionStatement, forStatement, identifier, ifStatement, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
 
 function unavailableFunction(scope: Scope, arg: ArgGetter, name: string): Value {
 	throw new Error(`${name} is not available`);
@@ -723,65 +724,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 			Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
 		})),
 		Array: ArrayBuiltin,
-		IndexingIterator: (globalScope, typeParameters) => {
-			const [ elementsType ] = typeParameters("Elements");
-			return {
-				functions: lookupForMap({
-					"init(_elements:)": wrapped((scope, arg) => {
-						const collectionConformance = conformance(elementsType, "Collection", scope);
-						const startIndexFunction = call(functionValue("startIndex", collectionConformance, "(Type) -> (Self) -> Self.Index"), [elementsType], ["Type"], scope);
-						return transform(arg(0, "elements"), scope, (elementsValue) => {
-							return expr(objectExpression([
-								objectProperty(identifier("elements"), elementsValue),
-								objectProperty(identifier("position"), read(call(startIndexFunction, [expr(elementsValue)], [elementsType], scope), scope)),
-							]));
-						});
-					}, "(Self.Elements) -> Self"),
-					"init(_elements:_position:)": wrapped((scope, arg) => {
-						return transform(arg(0, "elements"), scope, (elementsValue) => {
-							return transform(arg(1, "position"), scope, (positionValue) => {
-								return expr(objectExpression([
-									objectProperty(identifier("elements"), elementsValue),
-									objectProperty(identifier("position"), positionValue),
-								]));
-							});
-						});
-					}, "(Self.Elements, Self.Elements.Index) -> Self"),
-				}),
-				conformances: withPossibleRepresentations(applyDefaultConformances({
-					IteratorProtocol: {
-						functions: {
-							"next()": wrapped((scope, arg) => {
-								return reuse(arg(0, "iterator"), scope, "iterator", (iterator) => {
-									const collectionConformance = conformance(elementsType, "Collection", scope);
-									const elementTypeFunction = call(functionValue("Element", collectionConformance, "(Type) -> () -> Type"), [elementsType], ["Type"], scope);
-									const elementType = call(elementTypeFunction, [], [], scope);
-									const endIndexFunction = call(functionValue("endIndex", collectionConformance, "(Type) -> (Self) -> Self.Index"), [elementsType], ["Type"], scope);
-									return conditional(
-										binary("===",
-											member(iterator, "position", scope),
-											call(endIndexFunction, [member(iterator, "elements", scope)], [elementsType], scope),
-											scope,
-										),
-										emptyOptional(elementType, scope),
-										wrapInOptional(member(member(iterator, "elements", scope), expr(updateExpression("++", read(member(iterator, "position", scope), scope))), scope), elementType, scope),
-										scope,
-									);
-								});
-							}, "(inout Self) -> Self.Element?"),
-						},
-						requirements: [],
-					},
-				}, globalScope), PossibleRepresentation.Object),
-				defaultValue() {
-					return tuple([]);
-				},
-				copy(value, scope) {
-					return call(member(expr(identifier("Object")), "assign", scope), [literal({}), value], ["Self", "Self"], scope);
-				},
-				innerTypes: {},
-			};
-		},
+		IndexingIterator: IndexingIteratorBuiltin,
 		Dictionary: DictionaryBuiltin,
 		Error: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Number, literal(0), {
 			hashValue(scope, arg) {
