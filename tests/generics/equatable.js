@@ -422,6 +422,113 @@ const $$String$$Type = {
     }
 
   },
+  Collection: {
+    Element(Self) {
+      return $String$Type;
+    },
+
+    count(Self, collection) {
+      let current = 0;
+      let count = 0;
+
+      while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, collection.length)) {
+        count++;
+        current = current + 1;
+      }
+
+      return count;
+    },
+
+    distance$from$to$(Self, self, start, end) {
+      let current = start;
+      let count = 0;
+
+      while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, end)) {
+        count++;
+        current = current + 1;
+      }
+
+      return count;
+    },
+
+    endIndex(Self, array) {
+      return array.length;
+    },
+
+    first(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+    },
+
+    formIndex$offsetBy$(Self, collection, index, distance) {
+      let current = index;
+
+      for (let i = 0; i < distance; i++, undefined) {
+        current = current + 1;
+      }
+
+      index = current;
+    },
+
+    formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      let current = index;
+
+      for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+        current = current + 1;
+      }
+
+      index = current;
+    },
+
+    formIndex$after$(Self, collection, index) {
+      index = index + 1;
+    },
+
+    index$offsetBy$(Self, self, index, distance) {
+      let current = index;
+
+      for (let i = 0; i < distance; i++, undefined) {
+        current = current + 1;
+      }
+
+      return current;
+    },
+
+    index$offsetBy$limitedBy$(Self, self, index, distance, limit) {
+      let current = index;
+
+      for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+        current = current + 1;
+      }
+
+      return current;
+    },
+
+    index$after$(Self, index) {
+      return index + 1;
+    },
+
+    isEmpty(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0);
+    },
+
+    lazy: abstract$$String$$lazy,
+    makeIterator: abstract$$String$$makeIterator,
+
+    prefix$through$(Self, self, position) {
+      return abstract$prefix$upTo$(position + 1);
+    },
+
+    prefix$upTo$: abstract$$String$$prefix$upTo$,
+
+    startIndex(Self) {
+      return 0;
+    },
+
+    subscript(Self, array, index) {
+      return array[index];
+    }
+
+  },
   Equatable: {
     $notequals$(Self, lhs, rhs) {
       let unequal;
@@ -505,7 +612,7 @@ const $$String$$Type = {
 
   },
   Sequence: {
-    Iterator: $ArrayIterator$less$String$greater$$Type,
+    Iterator: $IndexingIterator$less$Array$less$String$rightshift$$Type,
     allSatisfy: abstract$$String$$allSatisfy,
 
     contains(Self, sequence) {
@@ -521,8 +628,8 @@ const $$String$$Type = {
 
     makeIterator(Self, array) {
       return {
-        array: array,
-        index: -1
+        elements: array,
+        position: 0
       };
     },
 
@@ -537,10 +644,130 @@ const $$String$$Type = {
     underestimatedCount: abstract$$String$$underestimatedCount
   }
 };
-const $ArrayIterator$less$String$greater$$Type = {
+const $String$Type = {
+  Collection: {
+    Element: abstract$String$Element,
+
+    count(Self, string) {
+      return string.length;
+    },
+
+    distance$from$to$(Self, self, start, end) {
+      return end - start;
+    },
+
+    endIndex(Self, string) {
+      return string.length;
+    },
+
+    first(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[collection.length > 0 ? 0 : $$stringBoundsFailed()] : null;
+    },
+
+    formIndex$offsetBy$(Self, collection, index, distance) {
+      const result = index + distance;
+      index = result > collection.length ? $$stringBoundsFailed() : result;
+    },
+
+    formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      const result = index + distance;
+      index = result > limit ? limit : result > collection.length ? $$stringBoundsFailed() : result;
+    },
+
+    formIndex$after$(Self, collection, index) {
+      index = collection.length > index ? index + 1 : $$stringBoundsFailed();
+    },
+
+    index$offsetBy$(Self, self, index, distance) {
+      const result = index + distance;
+      return result > self.length ? $$stringBoundsFailed() : result;
+    },
+
+    index$offsetBy$limitedBy$(Self, self, index, distance, limit) {
+      const result = index + distance;
+      return result > limit ? limit : result > self.length ? $$stringBoundsFailed() : result;
+    },
+
+    index$after$(Self, string, index) {
+      return string.length > index ? index + 1 : $$stringBoundsFailed();
+    },
+
+    isEmpty(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0);
+    },
+
+    lazy: abstract$String$lazy,
+    makeIterator: abstract$String$makeIterator,
+
+    prefix$through$(Self, self, position) {
+      return self.substring(0, self.length > position ? position + 1 : $$stringBoundsFailed());
+    },
+
+    prefix$upTo$(Self, self, end) {
+      return self.substring(0, end);
+    },
+
+    startIndex(Self) {
+      return 0;
+    },
+
+    subscript(Self, str, i) {
+      return str[str.length > i ? i : $$stringBoundsFailed()];
+    }
+
+  },
+  Equatable: {
+    $notequals$(Self, lhs, rhs) {
+      return lhs !== rhs;
+    },
+
+    $equals$(Self, lhs, rhs) {
+      return lhs === rhs;
+    }
+
+  },
+  Hashable: {
+    hash$into$(Self, string, hasher) {
+      for (let i = 0; i < string.length; i++) {
+        hasher[0] = (hasher[0] << 5) + string.charCodeAt(i) - hasher[0];
+      }
+    },
+
+    hashValue(Self, string) {
+      let hash = 0;
+
+      for (let i = 0; i < string.length; i++) {
+        hash = (hash << 5) + string.charCodeAt(i) - hash;
+      }
+
+      return hash | 0;
+    }
+
+  },
+  Object: {
+    $rep(Self) {
+      return 8;
+    }
+
+  }
+};
+const $Self$Index$Type = {
+  Object: {
+    $rep(Self) {
+      return 32;
+    }
+
+  }
+};
+
+function $$stringBoundsFailed() {
+  throw new RangeError("String index out of range");
+}
+
+const $IndexingIterator$less$Array$less$String$rightshift$$Type = {
   IteratorProtocol: {
     next(Self, iterator) {
-      return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+      return iterator.position === iterator.elements.length ? null : iterator.elements[iterator.position++];
     }
 
   },
@@ -593,6 +820,113 @@ const $$Point$$Type = {
 
     joined$separator$(Self, collection, separator) {
       return collection.join(separator);
+    }
+
+  },
+  Collection: {
+    Element(Self) {
+      return $Point$Type;
+    },
+
+    count(Self, collection) {
+      let current = 0;
+      let count = 0;
+
+      while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, collection.length)) {
+        count++;
+        current = current + 1;
+      }
+
+      return count;
+    },
+
+    distance$from$to$(Self, self, start, end) {
+      let current = start;
+      let count = 0;
+
+      while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, end)) {
+        count++;
+        current = current + 1;
+      }
+
+      return count;
+    },
+
+    endIndex(Self, array) {
+      return array.length;
+    },
+
+    first(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+    },
+
+    formIndex$offsetBy$(Self, collection, index, distance) {
+      let current = index;
+
+      for (let i = 0; i < distance; i++, undefined) {
+        current = current + 1;
+      }
+
+      index = current;
+    },
+
+    formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      let current = index;
+
+      for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+        current = current + 1;
+      }
+
+      index = current;
+    },
+
+    formIndex$after$(Self, collection, index) {
+      index = index + 1;
+    },
+
+    index$offsetBy$(Self, self, index, distance) {
+      let current = index;
+
+      for (let i = 0; i < distance; i++, undefined) {
+        current = current + 1;
+      }
+
+      return current;
+    },
+
+    index$offsetBy$limitedBy$(Self, self, index, distance, limit) {
+      let current = index;
+
+      for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+        current = current + 1;
+      }
+
+      return current;
+    },
+
+    index$after$(Self, index) {
+      return index + 1;
+    },
+
+    isEmpty(Self, collection) {
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0);
+    },
+
+    lazy: abstract$$Point$$lazy,
+    makeIterator: abstract$$Point$$makeIterator,
+
+    prefix$through$(Self, self, position) {
+      return abstract$prefix$upTo$(position + 1);
+    },
+
+    prefix$upTo$: abstract$$Point$$prefix$upTo$,
+
+    startIndex(Self) {
+      return 0;
+    },
+
+    subscript(Self, array, index) {
+      return array[index];
     }
 
   },
@@ -671,7 +1005,7 @@ const $$Point$$Type = {
 
   },
   Sequence: {
-    Iterator: $ArrayIterator$less$Point$greater$$Type,
+    Iterator: $IndexingIterator$less$Array$less$Point$rightshift$$Type,
     allSatisfy: abstract$$Point$$allSatisfy,
 
     contains(Self, sequence) {
@@ -687,8 +1021,8 @@ const $$Point$$Type = {
 
     makeIterator(Self, array) {
       return {
-        array: array,
-        index: -1
+        elements: array,
+        position: 0
       };
     },
 
@@ -703,10 +1037,10 @@ const $$Point$$Type = {
     underestimatedCount: abstract$$Point$$underestimatedCount
   }
 };
-const $ArrayIterator$less$Point$greater$$Type = {
+const $IndexingIterator$less$Array$less$Point$rightshift$$Type = {
   IteratorProtocol: {
     next(Self, iterator) {
-      return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+      return iterator.position === iterator.elements.length ? null : iterator.elements[iterator.position++];
     }
 
   },
@@ -734,6 +1068,113 @@ function $$_$$Type(T) {
 
       joined$separator$(Self, collection, separator) {
         return collection.join(separator);
+      }
+
+    },
+    Collection: {
+      Element(Self) {
+        return T;
+      },
+
+      count(Self, collection) {
+        let current = 0;
+        let count = 0;
+
+        while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, collection.length)) {
+          count++;
+          current = current + 1;
+        }
+
+        return count;
+      },
+
+      distance$from$to$(Self, self, start, end) {
+        let current = start;
+        let count = 0;
+
+        while ($Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, end)) {
+          count++;
+          current = current + 1;
+        }
+
+        return count;
+      },
+
+      endIndex(Self, array) {
+        return array.length;
+      },
+
+      first(Self, collection) {
+        return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+      },
+
+      formIndex$offsetBy$(Self, collection, index, distance) {
+        let current = index;
+
+        for (let i = 0; i < distance; i++, undefined) {
+          current = current + 1;
+        }
+
+        index = current;
+      },
+
+      formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+        let current = index;
+
+        for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+          current = current + 1;
+        }
+
+        index = current;
+      },
+
+      formIndex$after$(Self, collection, index) {
+        index = index + 1;
+      },
+
+      index$offsetBy$(Self, self, index, distance) {
+        let current = index;
+
+        for (let i = 0; i < distance; i++, undefined) {
+          current = current + 1;
+        }
+
+        return current;
+      },
+
+      index$offsetBy$limitedBy$(Self, self, index, distance, limit) {
+        let current = index;
+
+        for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
+          current = current + 1;
+        }
+
+        return current;
+      },
+
+      index$after$(Self, index) {
+        return index + 1;
+      },
+
+      isEmpty(Self, collection) {
+        return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0);
+      },
+
+      lazy: abstract$$_$$lazy,
+      makeIterator: abstract$$_$$makeIterator,
+
+      prefix$through$(Self, self, position) {
+        return abstract$prefix$upTo$(position + 1);
+      },
+
+      prefix$upTo$: abstract$$_$$prefix$upTo$,
+
+      startIndex(Self) {
+        return 0;
+      },
+
+      subscript(Self, array, index) {
+        return array[index];
       }
 
     },
@@ -808,7 +1249,7 @@ function $$_$$Type(T) {
 
     },
     Sequence: {
-      Iterator: $ArrayIterator$less$_$greater$$Type(T),
+      Iterator: $IndexingIterator$less$Array$less$_$rightshift$$Type(T),
       allSatisfy: abstract$$_$$allSatisfy,
 
       contains(Self, sequence) {
@@ -824,8 +1265,8 @@ function $$_$$Type(T) {
 
       makeIterator(Self, array) {
         return {
-          array: array,
-          index: -1
+          elements: array,
+          position: 0
         };
       },
 
@@ -842,11 +1283,11 @@ function $$_$$Type(T) {
   };
 }
 
-function $ArrayIterator$less$_$greater$$Type(T) {
+function $IndexingIterator$less$Array$less$_$rightshift$$Type(T) {
   return {
     IteratorProtocol: {
       next(Self, iterator) {
-        return ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null;
+        return iterator.position === iterator.elements.length ? null : iterator.elements[iterator.position++];
       }
 
     },

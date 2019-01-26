@@ -712,7 +712,7 @@ function buildRuntimeTypeReference(type: Type, value: Value, scope: Scope) {
 				const key = desiredConformances[i];
 				if (Object.hasOwnProperty.call(reified.conformances, key)) {
 					const current = reified.conformances[key];
-					for (const requirement of Object.keys(current.requirements)) {
+					for (const requirement of current.requirements) {
 						if (desiredConformances.indexOf(requirement) === -1) {
 							desiredConformances.push(requirement);
 						}

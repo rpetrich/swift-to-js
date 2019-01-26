@@ -1113,6 +1113,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		"reduce": abstractMethod,
 	});
 	addProtocol("Collection", {
+		"Element": abstractMethod,
 		"subscript(_:)": abstractMethod,
 		"startIndex": abstractMethod,
 		"endIndex": abstractMethod,
@@ -2582,6 +2583,16 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 						},
 						requirements: [],
 					},
+					Collection: {
+						functions: {
+							"Element": wrapped(() => valueType, "() -> Type"),
+							"subscript(_:)": wrapped((scope, arg) => member(arg(0, "array"), arg(1, "index"), scope), "(Self, Self.Index) -> Self.Element"),
+							"startIndex": wrapped(() => literal(0), "(Self) -> Self.Index"),
+							"endIndex": wrapped((scope, arg) => member(arg(0, "array"), "length", scope), "(Self) -> Self.Index"),
+							"index(after:)": wrapped((scope, arg) => binary("+", arg(0, "index"), literal(1), scope), "(Self, Self.Index) -> Self.Index"),
+						},
+						requirements: ["Sequence"],
+					},
 					BidirectionalCollection: {
 						functions: {
 							"index(before:)": wrapped((scope, arg) => {
@@ -2599,20 +2610,17 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 								}, "(String) -> String");
 							},
 						},
-						requirements: [],
+						requirements: ["Collection"],
 					},
 					Sequence: {
 						functions: {
 							"makeIterator()": wrapped((scope, arg) => {
-								return transform(arg(0, "array"), scope, (arrayValue) => {
-									return expr(objectExpression([
-										objectProperty(identifier("array"), arrayValue),
-										objectProperty(identifier("index"), literal(-1).expression),
-									]));
-								});
+								const iteratorType = typeValue({ kind: "generic", base: { kind: "name", name: "IndexingIterator" }, arguments: [{ kind: "generic", base: { kind: "name", name: "Array" }, arguments: [valueType.type] }] });
+								const iteratorInit = functionValue("init(_elements:)", iteratorType, "(Type) -> (Self.Elements) -> Self");
+								return call(call(iteratorInit, [iteratorType], ["Type"], scope), [arg(0, "array")], ["Self.Elements"], scope);
 							}, "(Self) -> Self.Iterator"),
 							"Iterator": (scope, arg) => {
-								return typeValue({ kind: "generic", base: { kind: "name", name: "ArrayIterator" }, arguments: [valueType.type] });
+								return typeValue({ kind: "generic", base: { kind: "name", name: "IndexingIterator" }, arguments: [{ kind: "generic", base: { kind: "name", name: "Array" }, arguments: [valueType.type] }] });
 							},
 						},
 						requirements: [],
@@ -2641,23 +2649,48 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				innerTypes: {},
 			};
 		},
-		ArrayIterator: (globalScope, typeParameters) => {
-			const [ elementType ] = typeParameters("Element");
+		IndexingIterator: (globalScope, typeParameters) => {
+			const [ elementsType ] = typeParameters("Elements");
 			return {
-				functions: lookupForMap({}),
+				functions: lookupForMap({
+					"init(_elements:)": wrapped((scope, arg) => {
+						const collectionConformance = conformance(elementsType, "Collection", scope);
+						const startIndexFunction = call(functionValue("startIndex", collectionConformance, "(Type) -> (Self) -> Self.Index"), [elementsType], ["Type"], scope);
+						return transform(arg(0, "elements"), scope, (elementsValue) => {
+							return expr(objectExpression([
+								objectProperty(identifier("elements"), elementsValue),
+								objectProperty(identifier("position"), read(call(startIndexFunction, [expr(elementsValue)], [elementsType], scope), scope)),
+							]));
+						});
+					}, "(Self.Elements) -> Self"),
+					"init(_elements:_position:)": wrapped((scope, arg) => {
+						return transform(arg(0, "elements"), scope, (elementsValue) => {
+							return transform(arg(1, "position"), scope, (positionValue) => {
+								return expr(objectExpression([
+									objectProperty(identifier("elements"), elementsValue),
+									objectProperty(identifier("position"), positionValue),
+								]));
+							});
+						});
+					}, "(Self.Elements, Self.Elements.Index) -> Self"),
+				}),
 				conformances: withPossibleRepresentations(applyDefaultConformances({
 					IteratorProtocol: {
 						functions: {
 							"next()": wrapped((scope, arg) => {
 								return reuse(arg(0, "iterator"), scope, "iterator", (iterator) => {
+									const collectionConformance = conformance(elementsType, "Collection", scope);
+									const elementTypeFunction = call(functionValue("Element", collectionConformance, "(Type) -> () -> Type"), [elementsType], ["Type"], scope);
+									const elementType = call(elementTypeFunction, [], [], scope);
+									const endIndexFunction = call(functionValue("endIndex", collectionConformance, "(Type) -> (Self) -> Self.Index"), [elementsType], ["Type"], scope);
 									return conditional(
-										binary("<",
-											expr(updateExpression("++", read(member(iterator, "index", scope), scope), true)),
-											member(member(iterator, "array", scope), "length", scope),
+										binary("===",
+											member(iterator, "position", scope),
+											call(endIndexFunction, [member(iterator, "elements", scope)], [elementsType], scope),
 											scope,
 										),
-										wrapInOptional(member(member(iterator, "array", scope), member(iterator, "index", scope), scope), elementType, scope),
 										emptyOptional(elementType, scope),
+										wrapInOptional(member(member(iterator, "elements", scope), expr(updateExpression("++", read(member(iterator, "position", scope), scope))), scope), elementType, scope),
 										scope,
 									);
 								});

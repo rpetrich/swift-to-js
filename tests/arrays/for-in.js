@@ -1,11 +1,11 @@
 export function sum$array$(array) {
   const result = [0];
   const iterator = {
-    array: array,
-    index: -1
+    elements: array,
+    position: 0
   };
 
-  for (let element; (element = ++iterator.index < iterator.array.length ? iterator.array[iterator.index] : null) !== null;) {
+  for (let element; (element = iterator.position === iterator.elements.length ? null : iterator.elements[iterator.position++]) !== null;) {
     result[0] += element;
   }
 

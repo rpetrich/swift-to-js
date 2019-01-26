@@ -30,7 +30,7 @@ export function functionize(scope: Scope, name: string, expression: (scope: Scop
 				throw new RangeError(`Asked for a negative argument index`);
 			}
 			if (i >= type.arguments.types.length) {
-				throw new RangeError(`Asked for argument ${i + 1}, but only ${type.arguments.types.length} arguments provided in ${stringifyType(type)}`);
+				throw new RangeError(`Asked for argument ${i + 1} of ${name}, but only ${type.arguments.types.length} arguments provided in ${stringifyType(type)}`);
 			}
 			let result: Identifier;
 			if (Object.hasOwnProperty.call(identifiers, i)) {
