@@ -399,7 +399,7 @@ const $Double$question$$Type = {
   },
   Object: {
     $rep(Self) {
-      return -1;
+      return 132;
     }
 
   }

@@ -2181,9 +2181,21 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				conformances: applyDefaultConformances({
 					Object: {
 						functions: {
-							":rep": wrapped(() => {
-								// TODO: Make possible representations computed at runtime
-								return literal(PossibleRepresentation.All);
+							":rep": wrapped((innerScope) => {
+								return conditional(
+									binary("&",
+										representationsForTypeValue(wrappedType, innerScope),
+										literal(PossibleRepresentation.Null),
+										innerScope,
+									),
+									literal(PossibleRepresentation.Array),
+									binary("|",
+										representationsForTypeValue(wrappedType, innerScope),
+										literal(PossibleRepresentation.Null),
+										innerScope,
+									),
+									innerScope,
+								);
 							}, "() -> Int"),
 						},
 						requirements: [],
