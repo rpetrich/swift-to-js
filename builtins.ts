@@ -4,7 +4,7 @@ import { primitive, protocol, FunctionMap, PossibleRepresentation, TypeMap } fro
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function } from "./types";
 import { concat } from "./utils";
-import { array, binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
+import { binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
@@ -14,6 +14,7 @@ import { cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
 import { DefaultStringInterpolation as DefaultStringInterpolationBuiltin } from "./builtins/DefaultStringInterpolation";
 import { Dictionary as DictionaryBuiltin } from "./builtins/Dictionary";
 import { buildFloatingType } from "./builtins/floats";
+import { Hasher as HasherBuiltin } from "./builtins/Hasher";
 import { IndexingIterator as IndexingIteratorBuiltin } from "./builtins/IndexingIterator";
 import { buildIntegerType } from "./builtins/integers";
 import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
@@ -667,32 +668,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 			},
 		})),
 		ClosedRange: ClosedRangeBuiltin,
-		Hasher: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, array([literal(0)], globalScope), {
-			"combine()": wrapped((scope, arg) => {
-				return reuseArgs(arg, 0, scope, ["hasher"], (hasher) => {
-					return set(
-						member(hasher, 0, scope),
-						binary("-",
-							binary("+",
-								binary("<<",
-									member(hasher, 0, scope),
-									literal(5),
-									scope,
-								),
-								arg(1, "value"), // TODO: Call hashValue
-								scope,
-							),
-							member(hasher, 0, scope),
-							scope,
-						),
-						scope,
-					);
-				});
-			}, "(inout Hasher, Int) -> Void"),
-			"finalize()": wrapped((scope, arg) => {
-				return binary("|", member(arg(0, "hasher"), 0, scope), literal(0), scope);
-			}, "(Hasher) -> Int"),
-		})),
+		Hasher: HasherBuiltin,
 	};
 }
 
