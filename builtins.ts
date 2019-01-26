@@ -4,11 +4,12 @@ import { primitive, protocol, FunctionMap, PossibleRepresentation, TypeMap } fro
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function } from "./types";
 import { concat } from "./utils";
-import { array, binary, call, callable, conditional, conformance, expr, functionValue, ignore, isPure, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
+import { array, binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
-import { applyDefaultConformances, binaryBuiltin, cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
+import { ClosedRange as ClosedRangeBuiltin } from "./builtins/ClosedRange";
+import { binaryBuiltin, cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
 import { Dictionary as DictionaryBuiltin } from "./builtins/Dictionary";
 import { buildFloatingType } from "./builtins/floats";
 import { IndexingIterator as IndexingIteratorBuiltin } from "./builtins/IndexingIterator";
@@ -16,52 +17,10 @@ import { buildIntegerType } from "./builtins/integers";
 import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
 import { String as StringBuiltin } from "./builtins/String";
 
-import { arrayPattern, blockStatement, expressionStatement, forStatement, identifier, ifStatement, newExpression, returnStatement, throwStatement, updateExpression, variableDeclaration, variableDeclarator, whileStatement, Statement } from "@babel/types";
+import { blockStatement, expressionStatement, forStatement, identifier, ifStatement, newExpression, returnStatement, throwStatement, whileStatement } from "@babel/types";
 
 function unavailableFunction(scope: Scope, arg: ArgGetter, name: string): Value {
 	throw new Error(`${name} is not available`);
-}
-
-function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {
-	let end;
-	const contents = [];
-	const i = uniqueName(scope, "i");
-	if (range.kind === "tuple" && range.values.length === 2) {
-		contents.push(addVariable(scope, i, "Int", range.values[0]));
-		const endExpression = read(range.values[1], scope);
-		if (isPure(endExpression)) {
-			end = expr(endExpression);
-		} else {
-			const endIdentifier = uniqueName(scope, "end");
-			contents.push(addVariable(scope, endIdentifier, "Int", expr(endExpression)));
-			end = lookup(endIdentifier, scope);
-		}
-	} else {
-		addVariable(scope, i, "Int");
-		const iExpression = read(lookup(i, scope), scope);
-		if (iExpression.type !== "Identifier") {
-			throw new TypeError(`Expected i to be an identifier, got a ${iExpression.type}`);
-		}
-		const endIdentifier = uniqueName(scope, "end");
-		addVariable(scope, endIdentifier, "Int");
-		const endIdentifierExpression = read(lookup(endIdentifier, scope), scope);
-		if (endIdentifierExpression.type !== "Identifier") {
-			throw new TypeError(`Expected end to be an identifier, got a ${endIdentifierExpression.type}`);
-		}
-		contents.push(variableDeclaration("const", [variableDeclarator(arrayPattern([iExpression, endIdentifierExpression]), read(range, scope))]));
-		end = lookup(endIdentifier, scope);
-	}
-	const result = forStatement(
-		contents.length === 1 ? contents[0] : undefined,
-		read(binary("<=", lookup(i, scope), end, scope), scope),
-		updateExpression("++", read(lookup(i, scope), scope)),
-		body(lookup(i, scope)),
-	);
-	if (contents.length === 1) {
-		return [result];
-	} else {
-		return concat(contents as Statement[], [result]);
-	}
 }
 
 function toTypeTypeValue() {
@@ -731,60 +690,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 				return arg(0, "self");
 			},
 		})),
-		ClosedRange: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, tuple([literal(0), literal(0)]), {
-		}, applyDefaultConformances({
-			// TODO: Implement Equatable
-			Equatable: {
-				functions: {
-					"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
-				},
-				requirements: [],
-			},
-			Sequence: {
-				functions: {
-					reduce: (scope, arg, type) => {
-						const range = arg(2, "range");
-						return callable((innerScope, innerArg) => {
-							const result = uniqueName(innerScope, "result");
-							const initialResult = innerArg(0, "initialResult");
-							const next = innerArg(1, "next");
-							return statements(concat(
-								[addVariable(innerScope, result, dummyType, initialResult)],
-								closedRangeIterate(range, innerScope, (i) => blockStatement(
-									ignore(set(lookup(result, scope), call(next, [lookup(result, scope), i], [dummyType, dummyType], scope), scope), scope),
-								)),
-								[returnStatement(read(lookup(result, scope), scope))],
-							));
-						}, "(Result, (Result, Self.Element) -> Result) -> Result");
-					},
-				},
-				requirements: [],
-			},
-			Collection: {
-				functions: {
-					map: (scope, arg, type) => {
-						const range = arg(2, "range");
-						return callable((innerScope, innerArg) => {
-							const mapped = uniqueName(innerScope, "mapped");
-							const callback = innerArg(0, "callback");
-							return statements(concat(
-								[addVariable(innerScope, mapped, dummyType, literal([]), DeclarationFlags.Const)],
-								closedRangeIterate(range, innerScope, (i) => blockStatement(
-									ignore(call(
-										member(lookup(mapped, scope), "push", scope),
-										[call(callback, [i], [dummyType], scope)],
-										[dummyType],
-										scope,
-									), scope),
-								)),
-								[returnStatement(read(lookup(mapped, scope), scope))],
-							));
-						}, "((Self) -> V) -> [V]");
-					},
-				},
-				requirements: [],
-			},
-		}, globalScope))),
+		ClosedRange: ClosedRangeBuiltin,
 		Hasher: cachedBuilder((globalScope) => primitive(PossibleRepresentation.Array, array([literal(0)], globalScope), {
 			"combine()": wrapped((scope, arg) => {
 				return reuseArgs(arg, 0, scope, ["hasher"], (hasher) => {
