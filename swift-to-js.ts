@@ -1,5 +1,5 @@
 import { Property, Term } from "./ast";
-import { emptyOptional, forceUnwrapFailed, newScopeWithBuiltins, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins";
+import { forceUnwrapFailed, newScopeWithBuiltins } from "./builtins";
 import { functionize, insertFunction, noinline, returnType, statementsInValue, wrapped, FunctionBuilder } from "./functions";
 import { parseAST, parseDeclaration, parseType } from "./parse";
 import { defaultInstantiateType, expressionSkipsCopy, newClass, primitive, reifyType, store, withPossibleRepresentations, EnumCase, FunctionMap, PossibleRepresentation, ProtocolConformanceMap, ReifiedType, TypeMap } from "./reified";
@@ -7,6 +7,8 @@ import { addVariable, emitScope, lookup, mangleName, newScope, uniqueName, Decla
 import { Function, Type } from "./types";
 import { camelCase, concat, expectLength, lookupForMap } from "./utils";
 import { annotate, annotateValue, array, binary, boxed, call, callable, conditional, conformance, copy, expr, expressionLiteralValue, functionValue, ignore, isPure, literal, locationForTerm, logical, member, read, representationsForTypeValue, reuse, set, statements, stringifyType, stringifyValue, subscript, transform, tuple, typeFromValue, typeType, typeTypeValue, typeValue, unary, undefinedValue, variable, ArgGetter, Value } from "./values";
+
+import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional } from "./builtins/Optional";
 
 import generate from "@babel/generator";
 import { assignmentExpression, blockStatement, catchClause, classBody, classDeclaration, classMethod, doWhileStatement, exportNamedDeclaration, forOfStatement, forStatement, identifier, ifStatement, isIdentifier, logicalExpression, newExpression, objectExpression, objectProperty, program, returnStatement, templateElement, templateLiteral, thisExpression, throwStatement, tryStatement, variableDeclaration, variableDeclarator, whileStatement, ClassMethod, ClassProperty, Expression, ObjectProperty, Program, ReturnStatement, Statement } from "@babel/types";

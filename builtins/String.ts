@@ -1,9 +1,10 @@
-import { applyDefaultConformances, binaryBuiltin, cachedBuilder, emptyOptional, reuseArgs, voidType, wrapInOptional } from "../builtins";
+import { applyDefaultConformances, binaryBuiltin, cachedBuilder, reuseArgs, voidType } from "../builtins";
 import { wrapped, wrappedSelf } from "../functions";
 import { primitive, FunctionMap, PossibleRepresentation } from "../reified";
 import { addVariable, lookup, mangleName, uniqueName, Scope } from "../scope";
 import { concat } from "../utils";
 import { binary, call, callable, conditional, expr, expressionLiteralValue, functionValue, ignore, literal, member, read, reuse, set, statements, typeTypeValue, typeValue, undefinedValue, Value } from "../values";
+import { emptyOptional, wrapInOptional } from "./Optional";
 
 import { blockStatement, forStatement, identifier, newExpression, returnStatement, updateExpression, Statement } from "@babel/types";
 
