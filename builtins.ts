@@ -8,8 +8,9 @@ import { array, binary, call, callable, conditional, conformance, expr, function
 
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
+import { Character as CharacterBuiltin } from "./builtins/Character";
 import { ClosedRange as ClosedRangeBuiltin } from "./builtins/ClosedRange";
-import { binaryBuiltin, cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
+import { cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
 import { DefaultStringInterpolation as DefaultStringInterpolationBuiltin } from "./builtins/DefaultStringInterpolation";
 import { Dictionary as DictionaryBuiltin } from "./builtins/Dictionary";
 import { buildFloatingType } from "./builtins/floats";
@@ -649,19 +650,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		StaticString: cachedBuilder(() => primitive(PossibleRepresentation.String, literal(""), {
 		})),
 		DefaultStringInterpolation: DefaultStringInterpolationBuiltin,
-		Character: cachedBuilder((globalScope) => {
-			return primitive(PossibleRepresentation.String, literal(""), {
-				"init(_:)": wrapped((scope, arg) => {
-					return arg(0, "character");
-				}, "(String) -> Character"),
-				"==": wrapped(binaryBuiltin("===", 0), "(Character, Character) -> Bool"),
-				"!=": wrapped(binaryBuiltin("!==", 0), "(Character, Character) -> Bool"),
-				"<": wrapped(binaryBuiltin("<", 0), "(Character, Character) -> Bool"),
-				"<=": wrapped(binaryBuiltin("<=", 0), "(Character, Character) -> Bool"),
-				">": wrapped(binaryBuiltin(">", 0), "(Character, Character) -> Bool"),
-				">=": wrapped(binaryBuiltin(">=", 0), "(Character, Character) -> Bool"),
-			});
-		}),
+		Character: CharacterBuiltin,
 		Optional: OptionalBuiltin,
 		// Should be represented as an empty struct, but we currently
 		_OptionalNilComparisonType: cachedBuilder(() => primitive(PossibleRepresentation.Null, literal(null), {
