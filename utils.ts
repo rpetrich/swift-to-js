@@ -20,18 +20,6 @@ export function concat<T>(first: ReadonlyArray<T>, ...rest: Array<ReadonlyArray<
 	return result;
 }
 
-export function cached<T>(fn: () => T): () => T {
-	let populated = false;
-	let value: T | undefined;
-	return () => {
-		if (!populated) {
-			value = fn();
-			populated = true;
-		}
-		return value as T;
-	};
-}
-
 export function lookupForMap<V>(map: { readonly [key: string]: V }): (key: string) => V | undefined {
 	return (key: string) => Object.hasOwnProperty.call(map, key) ? map[key] : undefined;
 }
