@@ -13,6 +13,17 @@ export function makeStaticCall$onBar$(bar) {
 export function isBar$foo$(foo) {
   return foo instanceof Bar;
 }
+export function makeCastAndCall$onFoo$(foo) {
+  if (function () {
+    const optional = foo instanceof Bar ? foo : null;
+    return optional !== null;
+  }()) {
+    const bar = optional;
+    return "New method called on Bar";
+  } else {
+    return "Not a Bar";
+  }
+}
 export class Foo {
   virtualCall$passthrough$(passthrough) {
     return "Foo";

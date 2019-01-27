@@ -23,6 +23,11 @@ export interface Location {
 	end: Position;
 }
 
+interface ValueKind<T extends string> {
+	kind: T;
+	location?: Location;
+}
+
 const locationRangeRegex = /^(.*):(\d+):(\d+)$/;
 
 function parseLineAndColumn(position: string): Position {
@@ -60,10 +65,8 @@ function readLocation(source?: LocationSource): Location | undefined {
 }
 
 
-export interface ExpressionValue {
-	kind: "expression";
+export interface ExpressionValue extends ValueKind<"expression"> {
 	expression: Expression;
-	location?: Location;
 }
 
 export function expr(expression: Identifier | ThisExpression, location?: LocationSource): VariableValue;
@@ -76,8 +79,7 @@ export function expr(expression: Expression, location?: LocationSource): Express
 }
 
 
-export interface StatementsValue {
-	kind: "statements";
+export interface StatementsValue extends ValueKind<"statements"> {
 	statements: Statement[];
 	location?: Location;
 }
@@ -99,11 +101,9 @@ export function statements(body: Statement[], location?: LocationSource): Statem
 	};
 }
 
-export interface CallableValue {
-	kind: "callable";
+export interface CallableValue extends ValueKind<"callable"> {
 	call: (scope: Scope, arg: ArgGetter, argTypes: Value[]) => Value;
 	type: Function;
-	location?: Location;
 }
 
 export function callable(callback: (scope: Scope, arg: ArgGetter, argTypes: Value[]) => Value, functionType: Function | string, location?: LocationSource): CallableValue {
@@ -112,10 +112,8 @@ export function callable(callback: (scope: Scope, arg: ArgGetter, argTypes: Valu
 }
 
 
-export interface VariableValue {
-	kind: "direct";
+export interface VariableValue extends ValueKind<"direct"> {
 	expression: Identifier | MemberExpression | ThisExpression;
-	location?: Location;
 }
 
 export function variable(expression: Identifier | MemberExpression | ThisExpression, location?: LocationSource): VariableValue {
@@ -123,11 +121,9 @@ export function variable(expression: Identifier | MemberExpression | ThisExpress
 }
 
 
-export interface BoxedValue {
-	kind: "boxed";
+export interface BoxedValue extends ValueKind<"boxed"> {
 	contents: VariableValue | SubscriptValue;
 	type: Value;
-	location?: Location;
 }
 
 export function boxed(contents: Value, type: Value, location?: LocationSource): BoxedValue {
@@ -138,13 +134,11 @@ export function boxed(contents: Value, type: Value, location?: LocationSource): 
 }
 
 
-export interface FunctionValue {
-	kind: "function";
+export interface FunctionValue extends ValueKind<"function"> {
 	name: string;
 	parentType: Value | undefined;
 	type: Function;
 	substitutions: Value[];
-	location?: Location;
 }
 
 export function functionValue(name: string, parentType: Value | undefined, functionType: Function | string, substitutions: Value[] = [], location?: LocationSource): FunctionValue {
@@ -153,10 +147,8 @@ export function functionValue(name: string, parentType: Value | undefined, funct
 }
 
 
-export interface TupleValue {
-	kind: "tuple";
+export interface TupleValue extends ValueKind<"tuple"> {
 	values: Value[];
-	location?: Location;
 }
 
 export function tuple(values: Value[], location?: LocationSource): TupleValue {
@@ -164,13 +156,11 @@ export function tuple(values: Value[], location?: LocationSource): TupleValue {
 }
 
 
-export interface SubscriptValue {
-	kind: "subscript";
+export interface SubscriptValue extends ValueKind<"subscript"> {
 	getter: Value;
 	setter: Value;
 	args: Value[];
 	types: Value[];
-	location?: Location;
 }
 
 export function subscript(getter: Value, setter: Value, args: Value[], types: Value[], location?: LocationSource): SubscriptValue {
@@ -241,11 +231,9 @@ export function member(object: Value | string, property: string | number | Value
 	});
 }
 
-export interface CopiedValue {
-	kind: "copied";
+export interface CopiedValue extends ValueKind<"copied"> {
 	value: Value;
 	type: Value;
-	location?: Location;
 }
 
 export function copy(value: Value, type: Value): CopiedValue {
@@ -257,22 +245,18 @@ export function copy(value: Value, type: Value): CopiedValue {
 }
 
 
-export interface TypeValue {
-	kind: "type";
+export interface TypeValue extends ValueKind<"type"> {
 	type: Type;
 	runtimeValue?: Value;
-	location?: Location;
 }
 
 export function typeValue(typeOrString: Type | string, location?: LocationSource, runtimeValue?: Value): TypeValue {
 	return { kind: "type", type: typeof typeOrString === "string" ? parseType(typeOrString) : typeOrString, runtimeValue, location: readLocation(location) };
 }
 
-export interface ConformanceValue {
-	kind: "conformance";
+export interface ConformanceValue extends ValueKind<"conformance"> {
 	type: Value;
 	conformance: string;
-	location?: Location;
 }
 
 export function conformance(type: Value, name: string, scope: Scope, location?: LocationSource): ConformanceValue {
@@ -281,6 +265,16 @@ export function conformance(type: Value, name: string, scope: Scope, location?: 
 	}
 	return { kind: "conformance", type, conformance: name, location: readLocation(location) };
 }
+
+export interface OptionalValue extends ValueKind<"optional"> {
+	type: Value;
+	value: Value | undefined;
+}
+
+export function optional(type: Value, value: Value | undefined, location?: LocationSource): OptionalValue {
+	return { kind: "optional", type, value, location: readLocation(location) };
+}
+
 
 export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	switch (value.kind) {
@@ -362,8 +356,7 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	}
 }
 
-
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue;
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue | OptionalValue;
 
 
 export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
@@ -937,6 +930,11 @@ export function read(value: Value, scope: Scope): Expression {
 			}
 			return annotate(buildRuntimeTypeReference(type, value, scope), value.location);
 		}
+		case "optional": {
+			const hasNull = hasRepresentation(value.type, PossibleRepresentation.Null, scope);
+			const newValue = value.value === undefined ? conditional(hasNull, literal([]), literal(null), scope) : conditional(hasNull, expr(arrayExpression([read(value.value, scope)])), value.value, scope);
+			return read(newValue, scope);
+		}
 		default: {
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
 		}
@@ -1058,6 +1056,11 @@ export function ignore(value: Value, scope: Scope): Statement[] {
 			break;
 		case "expression":
 			return ignoreExpression(annotate(transformed.expression, value.location), scope);
+		case "optional":
+			if (transformed.value === undefined) {
+				return [];
+			}
+			return ignore(transformed.value, scope);
 		case "direct":
 			return [];
 		default:
@@ -1081,6 +1084,10 @@ export function transform(value: Value, scope: Scope, callback: (expression: Exp
 		} else {
 			break;
 		}
+	}
+	if (value.kind === "optional" && value.value !== undefined) {
+		const type = value.type;
+		return transform(value.value, scope, (expression) => callback(read(optional(type, expr(expression), value.location), scope)));
 	}
 	if (value.kind === "statements") {
 		// TODO: Disallow return statements nested inside other statements
@@ -1716,6 +1723,12 @@ export function stringifyValue(value: Value): string {
 		}
 		case "conformance": {
 			return `${value.conformance} conformance of ${stringifyValue(value.type)}`;
+		}
+		case "optional": {
+			if (value.value === undefined) {
+				return `empty ${stringifyValue(value.type)}`;
+			}
+			return `wrapped ${stringifyValue(value.value)} (as ${stringifyValue(value.type)})`;
 		}
 		case "boxed":
 		case "subscript":

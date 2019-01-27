@@ -2,7 +2,7 @@ import { wrapped } from "../functions";
 import { expressionSkipsCopy, FunctionMap, PossibleRepresentation, ReifiedType, TypeParameterHost } from "../reified";
 import { Scope } from "../scope";
 import { lookupForMap } from "../utils";
-import { array, binary, call, conditional, conformance, expr, functionValue, hasRepresentation, literal, logical, member, read, representationsForTypeValue, reuse, typeFromValue, typeIsDirectlyComparable, typeTypeValue, ArgGetter, Value } from "../values";
+import { binary, call, conditional, conformance, expr, functionValue, hasRepresentation, literal, logical, member, optional, read, representationsForTypeValue, reuse, stringifyValue, typeFromValue, typeIsDirectlyComparable, typeTypeValue, ArgGetter, Value } from "../values";
 import { applyDefaultConformances, binaryBuiltin, returnTodo, reuseArgs } from "./common";
 
 function optionalOperation(innerType: Value, normalOperation: Value, nestedOperation: Value, scope: Scope) {
@@ -16,24 +16,20 @@ function optionalOperation(innerType: Value, normalOperation: Value, nestedOpera
 }
 
 export function emptyOptional(type: Value, scope: Scope) {
-	return optionalOperation(
-		type,
-		literal(null),
-		literal([]),
-		scope,
-	);
+	return optional(type, undefined);
 }
 
 export function wrapInOptional(value: Value, type: Value, scope: Scope): Value {
-	return optionalOperation(
-		type,
-		value,
-		array([value], scope),
-		scope,
-	);
+	return optional(type, value);
 }
 
 export function unwrapOptional(value: Value, type: Value, scope: Scope): Value {
+	if (value.kind === "optional") {
+		if (value.value === undefined) {
+			throw new TypeError(`Attempted to unwrap value that is provably empty at compile-time: ${stringifyValue(value)}`);
+		}
+		return value.value;
+	}
 	return optionalOperation(
 		type,
 		value,
@@ -43,6 +39,9 @@ export function unwrapOptional(value: Value, type: Value, scope: Scope): Value {
 }
 
 export function optionalIsNone(value: Value, type: Value, scope: Scope): Value {
+	if (value.kind === "optional") {
+		return literal(value.value === undefined);
+	}
 	return optionalOperation(
 		type,
 		binary("===",
@@ -60,6 +59,9 @@ export function optionalIsNone(value: Value, type: Value, scope: Scope): Value {
 }
 
 export function optionalIsSome(value: Value, type: Value, scope: Scope): Value {
+	if (value.kind === "optional") {
+		return literal(value.value !== undefined);
+	}
 	return optionalOperation(
 		type,
 		binary("!==",

@@ -15,6 +15,9 @@ public class Bar: Foo  {
 			return "Bar"
 		}
 	}
+	public final func newMethod() -> String {
+		return "New method called on Bar"
+	}
 }
 
 public func makeVirtualCall(onFoo foo: Foo, passthrough: Bool) -> String {
@@ -35,4 +38,12 @@ public func makeStaticCall(onBar bar: Bar) -> String {
 
 public func isBar(foo: Foo) -> Bool {
 	return foo is Bar
+}
+
+public func makeCastAndCall(onFoo foo: Foo) -> String {
+	if let bar = foo as? Bar {
+		return bar.newMethod()
+	} else {
+		return "Not a Bar"
+	}
 }

@@ -1019,6 +1019,20 @@ function translateTermToValue(term: Term, scope: Scope, functions: FunctionMap, 
 			const value = translateTermToValue(term.children[0], scope, functions, bindingContext);
 			return binary("instanceof", value, expr(writtenType), scope, term);
 		}
+		case "conditional_checked_cast_expr": {
+			expectLength(term.children, 1);
+			const writtenType = getProperty(term, "writtenType", isString);
+			const type = typeValue(parseType(writtenType));
+			const value = translateTermToValue(term.children[0], scope, functions, bindingContext);
+			return reuse(value, scope, writtenType, (reusableValue) => {
+				return conditional(
+					binary("instanceof", reusableValue, expr(mangleName(writtenType)), scope, term),
+					wrapInOptional(reusableValue, type, scope),
+					emptyOptional(type, scope),
+					scope,
+				);
+			});
+		}
 		default: {
 			console.error(term);
 			return variable(identifier("unknown_term_type$" + term.name), term);
