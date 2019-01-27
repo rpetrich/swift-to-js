@@ -4,8 +4,9 @@ import { primitive, protocol, FunctionMap, PossibleRepresentation, TypeMap } fro
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
 import { Function } from "./types";
 import { concat } from "./utils";
-import { binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, undefinedValue, ArgGetter, Value } from "./values";
+import { binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, ArgGetter, Value } from "./values";
 
+import { OptionalNilComparisonType as OptionalNilComparisonTypeBuiltin } from "./builtins/_OptionalNilComparisonType";
 import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
 import { Character as CharacterBuiltin } from "./builtins/Character";
@@ -653,12 +654,7 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		DefaultStringInterpolation: DefaultStringInterpolationBuiltin,
 		Character: CharacterBuiltin,
 		Optional: OptionalBuiltin,
-		// Should be represented as an empty struct, but we currently
-		_OptionalNilComparisonType: cachedBuilder(() => primitive(PossibleRepresentation.Null, literal(null), {
-			"init(nilLiteral:)": wrapped((scope, arg, type) => literal(null), "() -> _OptionalNilComparisonType"),
-		}, Object.create(null), {
-			Type: cachedBuilder(() => primitive(PossibleRepresentation.Undefined, undefinedValue)),
-		})),
+		_OptionalNilComparisonType: OptionalNilComparisonTypeBuiltin,
 		Array: ArrayBuiltin,
 		IndexingIterator: IndexingIteratorBuiltin,
 		Dictionary: DictionaryBuiltin,
