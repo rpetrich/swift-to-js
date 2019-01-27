@@ -2,14 +2,14 @@ import { wrapped } from "../functions";
 import { primitive, PossibleRepresentation, ReifiedType, TypeParameterHost } from "../reified";
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "../scope";
 import { concat } from "../utils";
-import { binary, call, callable, expr, ignore, isPure, literal, member, read, set, statements, tuple, typeValue, Value } from "../values";
-import { applyDefaultConformances, binaryBuiltin } from "./common";
+import { binary, call, callable, conformance, expr, functionValue, ignore, isPure, literal, logical, member, read, set, statements, tuple, typeValue, Value } from "../values";
+import { applyDefaultConformances, reuseArgs } from "./common";
 
 import { arrayPattern, blockStatement, forStatement, returnStatement, updateExpression, variableDeclaration, variableDeclarator, Statement } from "@babel/types";
 
 const dummyType = typeValue({ kind: "name", name: "Dummy" });
 
-function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {
+function closedRangeIterate(type: Value, range: Value, scope: Scope, body: (value: Value) => Statement): Statement[] {
 	let end;
 	const contents = [];
 	const i = uniqueName(scope, "i");
@@ -52,12 +52,23 @@ function closedRangeIterate(range: Value, scope: Scope, body: (value: Value) => 
 }
 
 export function ClosedRange(globalScope: Scope, typeParameters: TypeParameterHost): ReifiedType {
+	const [ valueType ] = typeParameters("Value");
 	return primitive(PossibleRepresentation.Array, tuple([literal(0), literal(0)]), {
 	}, applyDefaultConformances({
 		// TODO: Implement Equatable
 		Equatable: {
 			functions: {
-				"==": wrapped(binaryBuiltin("===", 0), "(Self, Self) -> Bool"),
+				"==": wrapped((scope, arg) => {
+					const collectionConformance = conformance(valueType, "Equatable", scope);
+					const equalsMethod = call(functionValue("==", collectionConformance, "(Type) -> (Self, Self) -> Bool"), [valueType], ["Type"], scope);
+					return reuseArgs(arg, 0, scope, ["lhs", "rhs"], (lhs, rhs) => {
+						return logical("&&",
+							call(equalsMethod, [member(lhs, literal(0), scope), member(rhs, literal(0), scope)], ["Self", "Self"], scope),
+							call(equalsMethod, [member(lhs, literal(1), scope), member(rhs, literal(1), scope)], ["Self", "Self"], scope),
+							scope,
+						);
+					});
+				}, "(Self, Self) -> Bool"),
 			},
 			requirements: [],
 		},
@@ -71,7 +82,7 @@ export function ClosedRange(globalScope: Scope, typeParameters: TypeParameterHos
 						const next = innerArg(1, "next");
 						return statements(concat(
 							[addVariable(innerScope, result, dummyType, initialResult)],
-							closedRangeIterate(range, innerScope, (i) => blockStatement(
+							closedRangeIterate(valueType, range, innerScope, (i) => blockStatement(
 								ignore(set(lookup(result, scope), call(next, [lookup(result, scope), i], [dummyType, dummyType], scope), scope), scope),
 							)),
 							[returnStatement(read(lookup(result, scope), scope))],
@@ -90,7 +101,7 @@ export function ClosedRange(globalScope: Scope, typeParameters: TypeParameterHos
 						const callback = innerArg(0, "callback");
 						return statements(concat(
 							[addVariable(innerScope, mapped, dummyType, literal([]), DeclarationFlags.Const)],
-							closedRangeIterate(range, innerScope, (i) => blockStatement(
+							closedRangeIterate(valueType, range, innerScope, (i) => blockStatement(
 								ignore(call(
 									member(lookup(mapped, scope), "push", scope),
 									[call(callback, [i], [dummyType], scope)],
