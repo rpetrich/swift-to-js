@@ -1,13 +1,13 @@
-import { abstractMethod, noinline, returnFunctionType, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
+import { abstractMethod, returnFunctionType, wrapped, wrappedSelf, FunctionBuilder } from "./functions";
 import { parseFunctionType } from "./parse";
-import { primitive, protocol, FunctionMap, PossibleRepresentation, TypeMap } from "./reified";
-import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "./scope";
+import { primitive, protocol, PossibleRepresentation, TypeMap } from "./reified";
+import { addVariable, lookup, uniqueName, Scope } from "./scope";
 import { Function } from "./types";
 import { concat } from "./utils";
-import { binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, ArgGetter, Value } from "./values";
+import { binary, call, callable, conditional, conformance, functionValue, ignore, literal, logical, read, reuse, set, statements, tuple, typeTypeValue, typeValue, unary, ArgGetter, Value } from "./values";
 
 import { OptionalNilComparisonType as OptionalNilComparisonTypeBuiltin } from "./builtins/_OptionalNilComparisonType";
-import { arrayBoundsFailed, Array as ArrayBuiltin } from "./builtins/Array";
+import { Array as ArrayBuiltin } from "./builtins/Array";
 import { Bool as BoolBuiltin } from "./builtins/Bool";
 import { Character as CharacterBuiltin } from "./builtins/Character";
 import { ClosedRange as ClosedRangeBuiltin } from "./builtins/ClosedRange";
@@ -15,17 +15,14 @@ import { cachedBuilder, resolveMethod, reuseArgs } from "./builtins/common";
 import { DefaultStringInterpolation as DefaultStringInterpolationBuiltin } from "./builtins/DefaultStringInterpolation";
 import { Dictionary as DictionaryBuiltin } from "./builtins/Dictionary";
 import { buildFloatingType } from "./builtins/floats";
+import { functions } from "./builtins/functions";
 import { Hasher as HasherBuiltin } from "./builtins/Hasher";
 import { IndexingIterator as IndexingIteratorBuiltin } from "./builtins/IndexingIterator";
 import { buildIntegerType } from "./builtins/integers";
-import { emptyOptional, optionalIsSome, unwrapOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
+import { emptyOptional, wrapInOptional, Optional as OptionalBuiltin } from "./builtins/Optional";
 import { String as StringBuiltin } from "./builtins/String";
 
-import { blockStatement, expressionStatement, forStatement, identifier, ifStatement, newExpression, returnStatement, throwStatement, whileStatement } from "@babel/types";
-
-function unavailableFunction(scope: Scope, arg: ArgGetter, name: string): Value {
-	throw new Error(`${name} is not available`);
-}
+import { blockStatement, forStatement, returnStatement, whileStatement } from "@babel/types";
 
 function toTypeTypeValue() {
 	return typeTypeValue;
@@ -49,8 +46,6 @@ function updateMethod(otherMethodName: string, conformanceName: string | undefin
 		return set(lhs, call(targetMethod, [lhs, rhs], [type, type], scope), scope);
 	}, "(Self.Type) -> (inout Self, Self) -> Void");
 }
-
-const dummyType = typeValue({ kind: "name", name: "Dummy" });
 
 export interface BuiltinConfiguration {
 	checkedIntegers: boolean;
@@ -667,173 +662,6 @@ function defaultTypes({ checkedIntegers, simpleStrings }: BuiltinConfiguration):
 		Hasher: HasherBuiltin,
 	};
 }
-
-function throwHelper(type: "Error" | "TypeError" | "RangeError", text: string) {
-	return noinline((scope, arg) => statements([throwStatement(newExpression(identifier(type), [literal(text).expression]))]), "() throws -> Void");
-}
-
-export const functions: FunctionMap = {
-	"Swift.(swift-to-js).numericRangeFailed()": throwHelper("RangeError", "Not enough bits to represent the given value"),
-	"Swift.(swift-to-js).forceUnwrapFailed()": throwHelper("TypeError", "Unexpectedly found nil while unwrapping an Optional value"),
-	"Swift.(swift-to-js).arrayBoundsFailed()": throwHelper("RangeError", "Array index out of range"),
-	"Swift.(swift-to-js).stringBoundsFailed()": throwHelper("RangeError", "String index out of range"),
-	"Swift.(swift-to-js).notImplemented()": throwHelper("Error", "Not implemented!"),
-	"Swift.(swift-to-js).arrayInsertAt()": noinline((scope, arg) => {
-		return statements([
-			ifStatement(
-				read(logical("||",
-					binary(">",
-						arg(2, "i"),
-						member(arg(0, "array"), "length", scope),
-						scope,
-					),
-					binary("<",
-						arg(2, "i"),
-						literal(0),
-						scope,
-					),
-					scope,
-				), scope),
-				blockStatement(
-					ignore(arrayBoundsFailed(scope), scope),
-				),
-				blockStatement(
-					ignore(call(
-						// TODO: Remove use of splice, since it's slow
-						member(arg(0, "array"), "splice", scope),
-						[
-							arg(2, "i"),
-							literal(0),
-							arg(1, "newElement"),
-						],
-						[
-							"Int",
-							"Int",
-							"Any",
-						],
-						scope,
-					), scope),
-				),
-			),
-		]);
-	}, "(inout Self, Self.Element, Int) -> Void"),
-	"Swift.(swift-to-js).arrayRemoveAt()": noinline((scope, arg) => {
-		return statements([
-			ifStatement(
-				read(logical("||",
-					binary(">=",
-						arg(1, "i"),
-						member(arg(0, "array"), "length", scope),
-						scope,
-					),
-					binary("<",
-						arg(1, "i"),
-						literal(0),
-						scope,
-					),
-					scope,
-				), scope),
-				blockStatement(
-					ignore(arrayBoundsFailed(scope), scope),
-				),
-			),
-			// TODO: Remove use of splice, since it's slow
-			returnStatement(
-				read(member(
-					call(
-						member(arg(0, "array"), "splice", scope),
-						[
-							arg(1, "i"),
-							literal(1),
-						],
-						[
-							"Int",
-							"Int",
-						],
-						scope,
-					),
-					literal(0),
-					scope,
-				), scope),
-			),
-		]);
-	}, "(inout Self, Int) -> Self.Element"),
-	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
-		return call(expr(identifier("Sequence$reduce")), [arg(0), arg(1)], [dummyType, dummyType], scope);
-	}, "(Result, (Result, Self.Element) -> Result) -> Result"),
-	"??": (scope, arg, type) => {
-		const typeArg = arg(0, "type");
-		if (typeArg.kind !== "type") {
-			throw new TypeError(`Expected a type, got a ${typeArg.kind}`);
-		}
-		return reuseArgs(arg, 1, scope, ["lhs"], (lhs) => {
-			return conditional(
-				optionalIsSome(lhs, typeArg, scope),
-				unwrapOptional(lhs, typeArg, scope),
-				call(arg(2, "rhs"), [], [], scope),
-				scope,
-			);
-		});
-	},
-	"~=": (scope, arg) => {
-		const T = arg(0, "T");
-		const result = call(functionValue("~=", conformance(T, "Equatable", scope), "(T.Type) -> (T, T) -> Bool"), [T], [dummyType], scope);
-		return call(result, [arg(1, "pattern"), arg(2, "value")], [T, T], scope);
-	},
-	"print(_:separator:terminator:)": (scope, arg, type) => call(member("console", "log", scope), [arg(0, "items")], [dummyType], scope),
-	"precondition(_:_:file:line:)": (scope, arg, type) => statements([
-		ifStatement(
-			read(unary("!", call(arg(0, "condition"), [], [], scope), scope), scope),
-			blockStatement([
-				expressionStatement(identifier("debugger")),
-				throwStatement(newExpression(identifier("Error"), [
-					read(call(arg(1, "message"), [], [], scope), scope),
-					read(arg(2, "file"), scope),
-					read(arg(3, "line"), scope),
-				])),
-			]),
-		),
-	]),
-	"preconditionFailed(_:file:line:)": (scope, arg, type) => statements([
-		expressionStatement(identifier("debugger")),
-		throwStatement(newExpression(identifier("Error"), [
-			read(call(arg(0, "message"), [], [], scope), scope),
-			read(arg(1, "file"), scope),
-			read(arg(2, "line"), scope),
-		])),
-	]),
-	"fatalError(_:file:line:)": (scope, arg, type) => statements([
-		expressionStatement(identifier("debugger")),
-		throwStatement(newExpression(identifier("Error"), [
-			read(call(arg(0, "message"), [], [], scope), scope),
-			read(arg(1, "file"), scope),
-			read(arg(2, "line"), scope),
-		])),
-	]),
-	"isKnownUniquelyReferenced": () => literal(false),
-	"withExtendedLifetime": (scope, arg) => call(arg(3, "body"), [
-		arg(2, "preserve"),
-	], ["Any"], scope),
-	"withUnsafePointer": unavailableFunction,
-	"withUnsafeMutablePointer": unavailableFunction,
-	"withUnsafeBytes": unavailableFunction,
-	"withUnsafeMutableBytes": unavailableFunction,
-	"unsafeDowncast(to:)": unavailableFunction,
-	"unsafeBitCast(to:)": unavailableFunction,
-	"withVaList": unavailableFunction,
-	"getVaList": unavailableFunction,
-	"swap": (scope, arg) => {
-		const type = arg(0, "type");
-		const a = arg(1, "a");
-		const b = arg(2, "b");
-		const temp = uniqueName(scope, "temp");
-		return statements(concat(
-			[addVariable(scope, temp, type, a, DeclarationFlags.Const)],
-			ignore(set(a, b, scope), scope),
-			ignore(set(b, lookup(temp, scope), scope), scope),
-		));
-	},
-};
 
 export function newScopeWithBuiltins(): Scope {
 	return {

@@ -1,7 +1,6 @@
 import { exportNamedDeclaration, identifier, returnStatement, variableDeclaration, variableDeclarator, Declaration, Identifier, Statement } from "@babel/types";
-import { functions as builtinFunctions } from "./builtins";
 import { parseType } from "./parse";
-import { TypeMap } from "./reified";
+import { FunctionMap, TypeMap } from "./reified";
 import { concat } from "./utils";
 import { array, boxed, conditional, expr, expressionLiteralValue, read, statements, typeRequiresBox, typeValue, undefinedValue, BoxedValue, ConformanceValue, ExpressionValue, SubscriptValue, TypeValue, Value, VariableValue } from "./values";
 
@@ -18,7 +17,7 @@ export interface Scope {
 	name: string;
 	declarations: { [name: string]: { flags: DeclarationFlags; declaration?: Declaration; } };
 	types: TypeMap;
-	functions: typeof builtinFunctions;
+	functions: FunctionMap;
 	functionUsage: { [name: string]: true };
 	mapping: { [name: string]: MappedNameValue };
 	parent: Scope | undefined;
