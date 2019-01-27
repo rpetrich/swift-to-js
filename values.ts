@@ -373,10 +373,8 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 	throw new Error(`Unable to unbox from ${value.kind} value`);
 }
 
-const unboxedRepresentations = PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array;
-
 export function typeRequiresBox(type: Value, scope: Scope): Value {
-	return hasRepresentation(type, ~unboxedRepresentations, scope);
+	return hasRepresentation(type, ~(PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array), scope);
 }
 
 export function extractContentOfBox(target: BoxedValue, scope: Scope) {
