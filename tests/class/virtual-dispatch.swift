@@ -32,3 +32,7 @@ public func makeStaticCall(onFoo foo: Foo) -> String {
 public func makeStaticCall(onBar bar: Bar) -> String {
 	return "Result: " + bar.staticCall()
 }
+
+public func isBar(foo: Foo) -> Bool {
+	return foo is Bar
+}

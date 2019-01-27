@@ -200,7 +200,7 @@ export function unary(operator: "!" | "-" | "~" | "delete" | "void", operand: Va
 	), location));
 }
 
-export type BinaryOperator = "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==" | "<<" | ">>" | ">>>";
+export type BinaryOperator = "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "&" | "|" | "^" | "==" | "===" | "!=" | "!==" | "<<" | ">>" | ">>>" | "**" | "in" | "instanceof";
 
 export function binary(operator: BinaryOperator, left: Value, right: Value, scope: Scope, location?: LocationSource): Value {
 	return transform(left, scope, (leftExpression) => expr(binaryExpression(

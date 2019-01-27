@@ -10,6 +10,9 @@ export function makeStaticCall$onFoo$(foo) {
 export function makeStaticCall$onBar$(bar) {
   return "Result: Static";
 }
+export function isBar$foo$(foo) {
+  return foo instanceof Bar;
+}
 export class Foo {
   virtualCall$passthrough$(passthrough) {
     return "Foo";

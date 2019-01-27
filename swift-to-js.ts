@@ -1013,6 +1013,12 @@ function translateTermToValue(term: Term, scope: Scope, functions: FunctionMap, 
 				}
 			}
 			return annotateValue(expressions.reduce((left, right) => binary("+", left, expr(right), scope), init), term);
+		case "is_subtype_expr": {
+			expectLength(term.children, 1);
+			const writtenType = mangleName(getProperty(term, "writtenType", isString));
+			const value = translateTermToValue(term.children[0], scope, functions, bindingContext);
+			return binary("instanceof", value, expr(writtenType), scope, term);
+		}
 		default: {
 			console.error(term);
 			return variable(identifier("unknown_term_type$" + term.name), term);
