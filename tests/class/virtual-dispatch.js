@@ -14,11 +14,8 @@ export function isBar$foo$(foo) {
   return foo instanceof Bar;
 }
 export function makeCastAndCall$onFoo$(foo) {
-  if (function () {
-    const optional = foo instanceof Bar ? foo : null;
-    return optional !== null;
-  }()) {
-    const bar = optional;
+  if (foo instanceof Bar) {
+    const bar = foo;
     return "New method called on Bar";
   } else {
     return "Not a Bar";

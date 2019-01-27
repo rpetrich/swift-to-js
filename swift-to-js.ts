@@ -318,6 +318,23 @@ function translatePattern(term: Term, value: Value, scope: Scope, functions: Fun
 	switch (term.name) {
 		case "pattern_optional_some": {
 			expectLength(term.children, 1);
+			if (value.kind === "conditional" && value.consequent.kind === "optional" && value.alternate.kind === "optional") {
+				// Avoid creating and unwrapping an optional when value is a conditional expression that creates an optional in only one path
+				if (value.consequent.value !== undefined && value.alternate.value === undefined) {
+					return {
+						prefix: emptyStatements,
+						test: value.predicate,
+						next: translatePattern(term.children[0], value.consequent, scope, functions, declarationFlags),
+					};
+				}
+				if (value.consequent.value === undefined && value.alternate.value !== undefined) {
+					return {
+						prefix: emptyStatements,
+						test: unary("!", value.predicate, scope),
+						next: translatePattern(term.children[0], value.alternate, scope, functions, declarationFlags),
+					};
+				}
+			}
 			const type = getTypeValue(term.children[0]);
 			let next: PatternOutput | undefined;
 			const test = annotateValue(reuse(annotateValue(value, term), scope, "optional", (reusableValue) => {

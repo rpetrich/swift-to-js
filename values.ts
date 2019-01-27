@@ -167,20 +167,17 @@ export function subscript(getter: Value, setter: Value, args: Value[], types: Va
 	return { kind: "subscript", getter, setter, args, types, location: readLocation(location) };
 }
 
+export interface ConditionalValue extends ValueKind<"conditional"> {
+	predicate: Value;
+	consequent: Value;
+	alternate: Value;
+}
 
 export function conditional(predicate: Value, consequent: Value, alternate: Value, scope: Scope, location?: LocationSource): Value {
-	return transform(predicate, scope, (predicateExpression) => {
-		const predicateValue = expressionLiteralValue(predicateExpression);
-		if (typeof predicateValue !== "undefined") {
-			return predicateValue ? consequent : alternate;
-		} else {
-			return expr(conditionalExpression(
-				predicateExpression,
-				read(consequent, scope),
-				read(alternate, scope),
-			), location);
-		}
-	});
+	if (predicate.kind === "expression" && predicate.expression.type === "BooleanLiteral") {
+		return annotateValue(predicate.expression.value ? consequent : alternate, location);
+	}
+	return { kind: "conditional", predicate, consequent, alternate, location: readLocation(location) };
 }
 
 export function unary(operator: "!" | "-" | "~" | "delete" | "void", operand: Value, scope: Scope, location?: LocationSource): Value {
@@ -356,7 +353,7 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 	}
 }
 
-export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue | OptionalValue;
+export type Value = ExpressionValue | CallableValue | VariableValue | FunctionValue | TupleValue | BoxedValue | StatementsValue | SubscriptValue | CopiedValue | TypeValue | ConformanceValue | OptionalValue | ConditionalValue;
 
 
 export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValue {
@@ -932,8 +929,22 @@ export function read(value: Value, scope: Scope): Expression {
 		}
 		case "optional": {
 			const hasNull = hasRepresentation(value.type, PossibleRepresentation.Null, scope);
-			const newValue = value.value === undefined ? conditional(hasNull, literal([]), literal(null), scope) : conditional(hasNull, expr(arrayExpression([read(value.value, scope)])), value.value, scope);
+			const newValue = value.value === undefined ?
+				conditional(hasNull, literal([]), literal(null), scope) :
+				conditional(hasNull, expr(arrayExpression([read(value.value, scope)])), value.value, scope);
 			return read(newValue, scope);
+		}
+		case "conditional": {
+			const predicateExpression = read(value.predicate, scope);
+			const predicateValue = expressionLiteralValue(predicateExpression);
+			if (predicateValue !== undefined) {
+				return annotate(read(predicateValue ? value.consequent : value.alternate, scope), value.location);
+			}
+			return annotate(conditionalExpression(
+				predicateExpression,
+				read(value.consequent, scope),
+				read(value.alternate, scope),
+			), value.location);
 		}
 		default: {
 			throw new TypeError(`Received an unexpected value of type ${(value as Value).kind}`);
