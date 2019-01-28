@@ -18,7 +18,7 @@ export enum PossibleRepresentation {
 	Symbol = 1 << 6, // Not used currently, possibly ever
 	Null = 1 << 7, // Not referenced by typeof, but modeled in our system
 	Array = 1 << 8, // Supported via Array.isArray
-	All = ~0,
+	All = PossibleRepresentation.Undefined | PossibleRepresentation.Boolean | PossibleRepresentation.Number | PossibleRepresentation.String | PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Null | PossibleRepresentation.Array,
 }
 
 export interface ReifiedType {

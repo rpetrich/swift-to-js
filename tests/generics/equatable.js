@@ -410,6 +410,7 @@ export function optionalDoubleEqual$lhs$rhs$(lhs, rhs) {
 const $$String$$Type = {
   BidirectionalCollection: {
     formIndex$before$(Self, collection, index) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       index = index - 1;
     },
 
@@ -456,10 +457,11 @@ const $$String$$Type = {
     },
 
     first(Self, collection) {
-      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? $$someOptional($Self$Element$Type, collection[0]) : $$emptyOptional($Self$Element$Type);
     },
 
     formIndex$offsetBy$(Self, collection, index, distance) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       let current = index;
 
       for (let i = 0; i < distance; i++, undefined) {
@@ -470,6 +472,7 @@ const $$String$$Type = {
     },
 
     formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       let current = index;
 
       for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
@@ -480,6 +483,7 @@ const $$String$$Type = {
     },
 
     formIndex$after$(Self, collection, index) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       index = index + 1;
     },
 
@@ -644,6 +648,7 @@ const $$String$$Type = {
     underestimatedCount: abstract$$String$$underestimatedCount
   }
 };
+const $Self$Index$Type = {};
 const $String$Type = {
   Collection: {
     Element: abstract$String$Element,
@@ -661,20 +666,23 @@ const $String$Type = {
     },
 
     first(Self, collection) {
-      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[collection.length > 0 ? 0 : $$stringBoundsFailed()] : null;
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? $$someOptional($Self$Element$Type, collection[collection.length > 0 ? 0 : $$stringBoundsFailed()]) : $$emptyOptional($Self$Element$Type);
     },
 
     formIndex$offsetBy$(Self, collection, index, distance) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       const result = index + distance;
       index = result > collection.length ? $$stringBoundsFailed() : result;
     },
 
     formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       const result = index + distance;
       index = result > limit ? limit : result > collection.length ? $$stringBoundsFailed() : result;
     },
 
     formIndex$after$(Self, collection, index) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       index = collection.length > index ? index + 1 : $$stringBoundsFailed();
     },
 
@@ -751,17 +759,19 @@ const $String$Type = {
 
   }
 };
-const $Self$Index$Type = {
-  Object: {
-    $rep(Self) {
-      return 32;
-    }
-
-  }
-};
 
 function $$stringBoundsFailed() {
   throw new RangeError("String index out of range");
+}
+
+const $Self$Element$Type = {};
+
+function $$someOptional(T, value) {
+  return (T.Object.$rep(T) & 128) !== 0 ? [value] : value;
+}
+
+function $$emptyOptional(T) {
+  return (T.Object.$rep(T) & 128) !== 0 ? [] : null;
 }
 
 const $IndexingIterator$less$Array$less$String$rightshift$$Type = {
@@ -811,6 +821,7 @@ export function pointNotEqualDirect$lhs$rhs$(lhs, rhs) {
 const $$Point$$Type = {
   BidirectionalCollection: {
     formIndex$before$(Self, collection, index) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       index = index - 1;
     },
 
@@ -857,10 +868,11 @@ const $$Point$$Type = {
     },
 
     first(Self, collection) {
-      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+      return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? $$someOptional($Self$Element$Type, collection[0]) : $$emptyOptional($Self$Element$Type);
     },
 
     formIndex$offsetBy$(Self, collection, index, distance) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       let current = index;
 
       for (let i = 0; i < distance; i++, undefined) {
@@ -871,6 +883,7 @@ const $$Point$$Type = {
     },
 
     formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       let current = index;
 
       for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
@@ -881,6 +894,7 @@ const $$Point$$Type = {
     },
 
     formIndex$after$(Self, collection, index) {
+      const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
       index = index + 1;
     },
 
@@ -1059,6 +1073,7 @@ function $$_$$Type(T) {
   return {
     BidirectionalCollection: {
       formIndex$before$(Self, collection, index) {
+        const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
         index = index - 1;
       },
 
@@ -1105,10 +1120,11 @@ function $$_$$Type(T) {
       },
 
       first(Self, collection) {
-        return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? collection[0] : null;
+        return $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, collection.length, 0) ? $$someOptional($Self$Element$Type, collection[0]) : $$emptyOptional($Self$Element$Type);
       },
 
       formIndex$offsetBy$(Self, collection, index, distance) {
+        const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
         let current = index;
 
         for (let i = 0; i < distance; i++, undefined) {
@@ -1119,6 +1135,7 @@ function $$_$$Type(T) {
       },
 
       formIndex$offsetBy$limitedBy$(Self, collection, index, distance, limit) {
+        const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
         let current = index;
 
         for (let i = 0; i < distance && $Self$Index$Type.Equatable.$notequals$($Self$Index$Type, current, limit); i++, undefined) {
@@ -1129,6 +1146,7 @@ function $$_$$Type(T) {
       },
 
       formIndex$after$(Self, collection, index) {
+        const index = ($Self$Index$Type.Object.$rep($Self$Index$Type) & 143) !== 0 ? index[0] : index;
         index = index + 1;
       },
 
@@ -1287,7 +1305,7 @@ function $IndexingIterator$less$Array$less$_$rightshift$$Type(T) {
   return {
     IteratorProtocol: {
       next(Self, iterator) {
-        return iterator.position === iterator.elements.length ? null : iterator.elements[iterator.position++];
+        return iterator.position === iterator.elements.length ? $$emptyOptional(T) : $$someOptional(T, iterator.elements[iterator.position++]);
       }
 
     },

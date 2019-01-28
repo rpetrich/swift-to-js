@@ -336,14 +336,14 @@ export function typeFromValue(value: Value, scope: Scope): ReifiedType {
 		default: {
 			// TODO: Support metatypes here
 			const metaType: ReifiedType = {
-				conformances: withPossibleRepresentations({}, PossibleRepresentation.Object),
+				conformances: {},
 				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
 				innerTypes: {
 					Type: () => metaType,
 				},
 			};
 			return {
-				conformances: withPossibleRepresentations({}, PossibleRepresentation.Object),
+				conformances: {},
 				functions: (functionName) => (innerScope) => member(value, mangleName(functionName).name, innerScope),
 				innerTypes: {
 					Type: () => metaType,
@@ -364,7 +364,7 @@ export function unbox(value: Value, scope: Scope): VariableValue | SubscriptValu
 }
 
 export function typeRequiresBox(type: Value, scope: Scope): Value {
-	return hasRepresentation(type, ~(PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array), scope);
+	return hasRepresentation(type, PossibleRepresentation.All & ~(PossibleRepresentation.Function | PossibleRepresentation.Object | PossibleRepresentation.Symbol | PossibleRepresentation.Array), scope);
 }
 
 export function extractContentOfBox(target: BoxedValue, scope: Scope) {
@@ -928,10 +928,9 @@ export function read(value: Value, scope: Scope): Expression {
 			return annotate(buildRuntimeTypeReference(type, value, scope), value.location);
 		}
 		case "optional": {
-			const hasNull = hasRepresentation(value.type, PossibleRepresentation.Null, scope);
 			const newValue = value.value === undefined ?
-				conditional(hasNull, literal([]), literal(null), scope) :
-				conditional(hasNull, expr(arrayExpression([read(value.value, scope)])), value.value, scope);
+				call(functionValue("Swift.(swift-to-js).emptyOptional()", undefined, "(T.Type) -> T?"), [value.type], [value.type], scope) :
+				call(functionValue("Swift.(swift-to-js).someOptional()", undefined, "(T.Type, T) -> T?"), [value.type, value.value], [value.type, value.type], scope);
 			return read(newValue, scope);
 		}
 		case "conditional": {

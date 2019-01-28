@@ -1,8 +1,8 @@
-import { noinline } from "../functions";
-import { FunctionMap } from "../reified";
+import { customInlined, noinline } from "../functions";
+import { FunctionMap, PossibleRepresentation } from "../reified";
 import { addVariable, lookup, uniqueName, DeclarationFlags, Scope } from "../scope";
 import { concat } from "../utils";
-import { binary, call, callable, conditional, conformance, expr, functionValue, ignore, literal, logical, member, read, set, statements, typeValue, unary, ArgGetter, Value } from "../values";
+import { array, binary, call, callable, conditional, conformance, expr, expressionLiteralValue, functionValue, hasRepresentation, ignore, literal, logical, member, read, representationsForTypeValue, set, statements, stringifyValue, typeValue, unary, ArgGetter, Value } from "../values";
 
 import { arrayBoundsFailed } from "./Array";
 import { reuseArgs } from "./common";
@@ -19,6 +19,12 @@ function throwHelper(type: "Error" | "TypeError" | "RangeError", text: string) {
 }
 
 const dummyType = typeValue({ kind: "name", name: "Dummy" });
+
+function hasStaticRepresentation(scope: Scope, arg: ArgGetter): boolean {
+	const representations = read(representationsForTypeValue(arg(0, "T"), scope), scope);
+	const value = expressionLiteralValue(representations);
+	return value !== undefined;
+}
 
 export const functions: FunctionMap = {
 	"Swift.(swift-to-js).numericRangeFailed()": throwHelper("RangeError", "Not enough bits to represent the given value"),
@@ -106,6 +112,76 @@ export const functions: FunctionMap = {
 			),
 		]);
 	}, "(inout Self, Int) -> Self.Element"),
+	"Swift.(swift-to-js).unwrapOptional()": customInlined((scope, arg) => {
+		const value = arg(1, "value");
+		if (value.kind === "optional") {
+			if (value.value === undefined) {
+				throw new TypeError(`Attempted to unwrap optional value that is provably empty at compile-time: ${stringifyValue(value)}`);
+			}
+			return value.value;
+		}
+		const type = arg(0, "T");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(
+			hasNull,
+			member(value, 0, scope),
+			value,
+			scope,
+		);
+	}, "(T.Type, T?) -> T", hasStaticRepresentation),
+	"Swift.(swift-to-js).optionalIsNone()": customInlined((scope, arg) => {
+		const value = arg(1, "value");
+		if (value.kind === "optional") {
+			return literal(value.value === undefined);
+		}
+		const type = arg(0, "T");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(
+			hasNull,
+			binary("===", member(value, "length", scope), literal(0), scope),
+			binary("===", value, literal(null), scope),
+			scope,
+		);
+	}, "(T.Type, T?) -> Bool", hasStaticRepresentation),
+	"Swift.(swift-to-js).optionalIsSome()": customInlined((scope, arg) => {
+		const value = arg(1, "value");
+		if (value.kind === "optional") {
+			return literal(value.value !== undefined);
+		}
+		const type = arg(0, "T");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(
+			hasNull,
+			binary("!==", member(value, "length", scope), literal(0), scope),
+			binary("!==", value, literal(null), scope),
+			scope,
+		);
+	}, "(T.Type, T?) -> Bool", hasStaticRepresentation),
+	"Swift.(swift-to-js).copyOptional()": customInlined((scope, arg) => {
+		const value = arg(1, "value");
+		if (value.kind === "optional") {
+			return value;
+		}
+		const type = arg(0, "T");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(
+			hasNull,
+			call(member(value, "slice", scope), [], [], scope),
+			value,
+			scope,
+		);
+	}, "(T.Type, T?) -> Bool", hasStaticRepresentation),
+	"Swift.(swift-to-js).emptyOptional()": customInlined((scope, arg) => {
+		const type = arg(0, "T");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(hasNull, literal([]), literal(null), scope);
+	}, "(T.Type) -> T?", hasStaticRepresentation),
+	"Swift.(swift-to-js).someOptional()": customInlined((scope, arg) => {
+		const type = arg(0, "T");
+		const value = arg(1, "value");
+		const hasNull = hasRepresentation(type, PossibleRepresentation.Null, scope);
+		return conditional(hasNull, array([value], scope), value, scope);
+	}, "(T.Type, T) -> T?", hasStaticRepresentation),
 	"Sequence.reduce": (scope, arg, type) => callable((innerScope, innerArg) => {
 		return call(expr(identifier("Sequence$reduce")), [arg(0), arg(1)], [dummyType, dummyType], scope);
 	}, "(Result, (Result, Self.Element) -> Result) -> Result"),

@@ -5,7 +5,11 @@ export function subtract$lhs$rhs$(T, lhs, rhs) {
   return T.AdditiveArithmetic.$minus$(T, lhs, rhs);
 }
 export function double$target$(T, target) {
-  target = T.AdditiveArithmetic.$plus$(T, target, target);
+  if ((T.Object.$rep(T) & 143) !== 0) {
+    target[0] = T.AdditiveArithmetic.$plus$(T, target, (T.Object.$rep(T) & 143) !== 0 ? target[0] : target);
+  } else {
+    target = T.AdditiveArithmetic.$plus$(T, target, (T.Object.$rep(T) & 143) !== 0 ? target[0] : target);
+  }
 }
 const $Int$Type = {
   AdditiveArithmetic: {

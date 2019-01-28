@@ -63,14 +63,25 @@ export function insertFunction(name: string, scope: Scope, builder: FunctionBuil
 	return addDeclaration(globalScope, name, (id) => functionDeclaration(id, args, blockStatement(statements)), shouldExport ? DeclarationFlags.Export : DeclarationFlags.None);
 }
 
-export function noinline(builder: FunctionBuilder, functionType: string | Function): FunctionBuilder {
+export function customInlined(builder: FunctionBuilder, functionType: string | Function, shouldInline: (scope: Scope, arg: ArgGetter) => boolean): FunctionBuilder {
 	const type = parseFunctionType(functionType);
-	return (scope: Scope, arg: ArgGetter, name: string) => {
+	return (scope, arg, name, argumentTypes) => {
 		if (type.kind !== "function") {
 			throw new Error(`Expected function, got ${stringifyType(type)}`);
 		}
+		if (shouldInline(scope, arg)) {
+			return builder(scope, arg, name, argumentTypes);
+		}
 		return call(insertFunction(name, scope, builder, type), type.arguments.types.map((_, i) => arg(i)), type.arguments.types.map((innerType) => typeValue(innerType)), scope);
 	};
+}
+
+function never() {
+	return false;
+}
+
+export function noinline(builder: FunctionBuilder, functionType: string | Function) {
+	return customInlined(builder, functionType, never);
 }
 
 export function wrapped(fn: (scope: Scope, arg: ArgGetter, typeArgument: Value, argTypes: Value[], outerArg: ArgGetter) => Value, functionType: string | Function): FunctionBuilder {

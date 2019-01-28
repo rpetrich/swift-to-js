@@ -2,17 +2,23 @@ import { wrapped } from "../functions";
 import { expressionSkipsCopy, FunctionMap, PossibleRepresentation, ReifiedType, TypeParameterHost } from "../reified";
 import { Scope } from "../scope";
 import { lookupForMap } from "../utils";
-import { binary, call, conditional, conformance, expr, functionValue, hasRepresentation, literal, logical, member, optional, read, representationsForTypeValue, reuse, stringifyValue, typeFromValue, typeIsDirectlyComparable, typeTypeValue, ArgGetter, Value } from "../values";
+import { binary, call, conditional, conformance, expr, functionValue, literal, logical, optional, read, representationsForTypeValue, reuse, typeFromValue, typeIsDirectlyComparable, typeTypeValue, ArgGetter, Value } from "../values";
 import { applyDefaultConformances, binaryBuiltin, returnTodo, reuseArgs } from "./common";
 
-function optionalOperation(innerType: Value, normalOperation: Value, nestedOperation: Value, scope: Scope) {
-	// Should be peephole optimized when types are fully known, and deferred until runtime if not
-	return conditional(
-		hasRepresentation(innerType, PossibleRepresentation.Null, scope),
-		nestedOperation,
-		normalOperation,
-		scope,
-	);
+export function unwrapOptional(value: Value, type: Value, scope: Scope): Value {
+	return call(functionValue("Swift.(swift-to-js).unwrapOptional()", undefined, "(T.Type, T?) -> T"), [type, value], [type, type], scope);
+}
+
+export function optionalIsNone(value: Value, type: Value, scope: Scope): Value {
+	return call(functionValue("Swift.(swift-to-js).optionalIsNone()", undefined, "(T.Type, T?) -> Bool"), [type, value], [type, type], scope);
+}
+
+export function optionalIsSome(value: Value, type: Value, scope: Scope): Value {
+	return call(functionValue("Swift.(swift-to-js).optionalIsSome()", undefined, "(T.Type, T?) -> Bool"), [type, value], [type, type], scope);
+}
+
+function copyOptional(value: Value, type: Value, scope: Scope): Value {
+	return call(functionValue("Swift.(swift-to-js).copyOptional()", undefined, "(T.Type, T?) -> T?"), [type, value], [type, type], scope);
 }
 
 export function emptyOptional(type: Value, scope: Scope) {
@@ -21,61 +27,6 @@ export function emptyOptional(type: Value, scope: Scope) {
 
 export function wrapInOptional(value: Value, type: Value, scope: Scope): Value {
 	return optional(type, value);
-}
-
-export function unwrapOptional(value: Value, type: Value, scope: Scope): Value {
-	if (value.kind === "optional") {
-		if (value.value === undefined) {
-			throw new TypeError(`Attempted to unwrap value that is provably empty at compile-time: ${stringifyValue(value)}`);
-		}
-		return value.value;
-	}
-	return optionalOperation(
-		type,
-		value,
-		member(value, 0, scope),
-		scope,
-	);
-}
-
-export function optionalIsNone(value: Value, type: Value, scope: Scope): Value {
-	if (value.kind === "optional") {
-		return literal(value.value === undefined);
-	}
-	return optionalOperation(
-		type,
-		binary("===",
-			value,
-			literal(null),
-			scope,
-		),
-		binary("===",
-			member(value, "length", scope),
-			literal(0),
-			scope,
-		),
-		scope,
-	);
-}
-
-export function optionalIsSome(value: Value, type: Value, scope: Scope): Value {
-	if (value.kind === "optional") {
-		return literal(value.value !== undefined);
-	}
-	return optionalOperation(
-		type,
-		binary("!==",
-			value,
-			literal(null),
-			scope,
-		),
-		binary("!==",
-			member(value, "length", scope),
-			literal(0),
-			scope,
-		),
-		scope,
-	);
 }
 
 export function Optional(globalScope: Scope, typeParameters: TypeParameterHost): ReifiedType {
@@ -187,12 +138,7 @@ export function Optional(globalScope: Scope, typeParameters: TypeParameterHost):
 					);
 				});
 			} else {
-				return optionalOperation(
-					wrappedType,
-					value,
-					call(member(expr(expression), "slice", scope), [], [], scope),
-					scope,
-				);
+				return copyOptional(value, wrappedType, scope);
 			}
 		} : undefined,
 		innerTypes: {},
