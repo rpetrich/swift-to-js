@@ -16,7 +16,7 @@ coverage: all
 dist/:
 	mkdir -p dist/
 
-dist/swift-to-js.js: dist/ package.json tsconfig.json *.ts
+dist/swift-to-js.js: dist/ package.json tsconfig.json *.ts builtins/*.ts
 	npm run build:ts
 
 dist/ast.js: dist/ ast.pegjs
