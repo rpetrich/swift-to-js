@@ -1052,7 +1052,7 @@ function translateTermToValue(term: Term, scope: Scope, functions: FunctionMap, 
 		}
 		default: {
 			console.error(term);
-			return variable(identifier("unknown_term_type$" + term.name), term);
+			throw new TypeError(`Unknown term type ${JSON.stringify(term.name)}`);
 		}
 	}
 }
